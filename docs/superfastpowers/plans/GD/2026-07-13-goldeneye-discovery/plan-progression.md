@@ -41,9 +41,9 @@ Last updated: 2026-07-13 06:03
 ## Task 5: Freeze Upstream Discovery Parity and Legal Evidence
 
 - Path: `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-5/`
-- Task status: spec-checking
+- Task status: complete
 - Implementer: checked
-- Spec review: unchecked
-- Code quality: unchecked
-- Next action: Run spec review.
+- Spec review: checked
+- Code quality: checked
+- Next action: Task complete; continue to next task.
 

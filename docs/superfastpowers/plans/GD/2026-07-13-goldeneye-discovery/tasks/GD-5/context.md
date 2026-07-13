@@ -17,8 +17,8 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Final task commit: pending review evidence commit
-- Reviewed commit range: GD-5 implementation commit through final evidence commit
+- Final task commit: `2e9f379`
+- Reviewed commit range: `2e9f379^..2e9f379`
 - Files created:
   - `crates/goldeneye-discovery/tests/upstream_parity.rs`
   - `crates/goldeneye-discovery/tests/fixtures/discovery/manifest.tsv`
@@ -47,4 +47,6 @@ Files above are starting points only. Inspect any additional files needed to com
 - Implementation notes:
   - Normalization changes only path separators and filters platform permission warnings.
   - Upstream's Windows symlink test is platform-skipped; fixture attempts the symlink and omits only that cited row when Windows denies privilege.
+  - Spec review: checked.
+  - Code quality review: checked.
 
