@@ -4,75 +4,108 @@
 .env.local	full	file	dotenv		4	src/discover/language.c:869-928@2469ecc3
 Dockerfile	full	file	dockerfile		13	src/discover/language.c:869-928@2469ecc3
 app.bundle.js	full	file	javascript		10	src/discover/discover.c:394-406@2469ecc3
+client.generated.rs	full	file	rust		2	src/discover/discover.c:571-587@2469ecc3
 docs/guide.md	full	file	markdown		8	tests/test_discover.c:790-809@2469ecc3
-nested/rescued-local.rs	full	file	rust		16	tests/test_discover.c:918-943@2469ecc3
+nested/custom.rs	full	file	rust		2	tests/test_discover.c:918-943@2469ecc3
 obj/kept.go	full	file	go		13	tests/test_discover.c:889-914@2469ecc3
 rescued.go	full	file	go		16	tests/test_discover.c:520-557@2469ecc3
 src/main.rs	full	file	rust		13	tests/test_discover.c:299-328@2469ecc3
 src/naïve file.py	full	file	python		12	src/discover/discover.c:614-629@2469ecc3
 views/home.blade.php	full	file	blade		12	tests/test_language.c:519-524@2469ecc3
-.cbmignore	full	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+.cbmignore	full	ignored		oversized		src/discover/discover.c:607-608@2469ecc3
+.claude-worktrees	full	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+.git	full	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 .gitignore	full	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+.worktrees	full	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+Cargo.lock	full	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
 LICENSE	full	ignored		unsupported_language		src/discover/discover.c:380-392@2469ecc3
-archive.zip	full	ignored		unsupported_language		src/discover/discover.c:358-378@2469ecc3
-compiled.pyc	full	ignored		suffix_policy		src/discover/discover.c:358-378@2469ecc3
+archive.zip	full	ignored		unsupported_language		src/discover/discover.c:571-587@2469ecc3
+compiled.pyc	full	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
 global-ignored.go	full	ignored		ignore_rule		tests/test_discover.c:374-411@2469ecc3
+image.png	full	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
+info-conflict.rs	full	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 large.rs	full	ignored		oversized		tests/test_discover.c:589-616@2469ecc3
-link.rs	full	ignored		symlink		tests/test_discover.c:725-762@2469ecc3
+link.rs	full	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 nested/.cbmignore	full	ignored		unsupported_language		tests/test_discover.c:918-943@2469ecc3
 nested/.gitignore	full	ignored		unsupported_language		tests/test_discover.c:1170-1200@2469ecc3
 nested/local-ignored.rs	full	ignored		ignore_rule		tests/test_discover.c:1202-1242@2469ecc3
-node_modules	full	excluded_directory		directory_policy		src/discover/discover.c:528-564@2469ecc3
+nested/rescued-local.rs	full	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
+node_modules	full	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 notes.unknown	full	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+outside-directory	full	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
+outside-file.rs	full	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 root-cbmignored.py	full	ignored		ignore_rule		tests/test_discover.c:671-723@2469ecc3
+root-conflict.rs	full	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 root-ignored.py	full	ignored		ignore_rule		tests/test_discover.c:351-372@2469ecc3
 .env.local	moderate	file	dotenv		4	src/discover/language.c:869-928@2469ecc3
 Dockerfile	moderate	file	dockerfile		13	src/discover/language.c:869-928@2469ecc3
-nested/rescued-local.rs	moderate	file	rust		16	tests/test_discover.c:918-943@2469ecc3
+nested/custom.rs	moderate	file	rust		2	tests/test_discover.c:918-943@2469ecc3
 obj/kept.go	moderate	file	go		13	tests/test_discover.c:889-914@2469ecc3
 rescued.go	moderate	file	go		16	tests/test_discover.c:520-557@2469ecc3
 src/main.rs	moderate	file	rust		13	tests/test_discover.c:299-328@2469ecc3
 src/naïve file.py	moderate	file	python		12	src/discover/discover.c:614-629@2469ecc3
 views/home.blade.php	moderate	file	blade		12	tests/test_language.c:519-524@2469ecc3
-.cbmignore	moderate	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+.cbmignore	moderate	ignored		oversized		src/discover/discover.c:607-608@2469ecc3
+.claude-worktrees	moderate	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+.git	moderate	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 .gitignore	moderate	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
-LICENSE	moderate	ignored		filename_policy		src/discover/discover.c:380-392@2469ecc3
-app.bundle.js	moderate	ignored		pattern_policy		src/discover/discover.c:394-406@2469ecc3
-archive.zip	moderate	ignored		suffix_policy		src/discover/discover.c:358-378@2469ecc3
-compiled.pyc	moderate	ignored		suffix_policy		src/discover/discover.c:358-378@2469ecc3
+.worktrees	moderate	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+Cargo.lock	moderate	ignored		filename_policy		src/discover/discover.c:582-583@2469ecc3
+LICENSE	moderate	ignored		filename_policy		src/discover/discover.c:582-583@2469ecc3
+app.bundle.js	moderate	ignored		pattern_policy		src/discover/discover.c:585-586@2469ecc3
+archive.zip	moderate	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
+client.generated.rs	moderate	ignored		pattern_policy		src/discover/discover.c:585-586@2469ecc3
+compiled.pyc	moderate	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
 docs	moderate	excluded_directory		directory_policy		tests/test_discover.c:811-830@2469ecc3
 global-ignored.go	moderate	ignored		ignore_rule		tests/test_discover.c:374-411@2469ecc3
+image.png	moderate	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
+info-conflict.rs	moderate	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 large.rs	moderate	ignored		oversized		tests/test_discover.c:589-616@2469ecc3
-link.rs	moderate	ignored		symlink		tests/test_discover.c:725-762@2469ecc3
+link.rs	moderate	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 nested/.cbmignore	moderate	ignored		unsupported_language		tests/test_discover.c:918-943@2469ecc3
 nested/.gitignore	moderate	ignored		unsupported_language		tests/test_discover.c:1170-1200@2469ecc3
 nested/local-ignored.rs	moderate	ignored		ignore_rule		tests/test_discover.c:1202-1242@2469ecc3
-node_modules	moderate	excluded_directory		directory_policy		src/discover/discover.c:528-564@2469ecc3
+nested/rescued-local.rs	moderate	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
+node_modules	moderate	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 notes.unknown	moderate	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+outside-directory	moderate	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
+outside-file.rs	moderate	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 root-cbmignored.py	moderate	ignored		ignore_rule		tests/test_discover.c:671-723@2469ecc3
+root-conflict.rs	moderate	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 root-ignored.py	moderate	ignored		ignore_rule		tests/test_discover.c:351-372@2469ecc3
 .env.local	fast	file	dotenv		4	src/discover/language.c:869-928@2469ecc3
 Dockerfile	fast	file	dockerfile		13	src/discover/language.c:869-928@2469ecc3
-nested/rescued-local.rs	fast	file	rust		16	tests/test_discover.c:918-943@2469ecc3
+nested/custom.rs	fast	file	rust		2	tests/test_discover.c:918-943@2469ecc3
 obj/kept.go	fast	file	go		13	tests/test_discover.c:889-914@2469ecc3
 rescued.go	fast	file	go		16	tests/test_discover.c:520-557@2469ecc3
 src/main.rs	fast	file	rust		13	tests/test_discover.c:299-328@2469ecc3
 src/naïve file.py	fast	file	python		12	src/discover/discover.c:614-629@2469ecc3
 views/home.blade.php	fast	file	blade		12	tests/test_language.c:519-524@2469ecc3
-.cbmignore	fast	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+.cbmignore	fast	ignored		oversized		src/discover/discover.c:607-608@2469ecc3
+.claude-worktrees	fast	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+.git	fast	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 .gitignore	fast	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
-LICENSE	fast	ignored		filename_policy		src/discover/discover.c:380-392@2469ecc3
-app.bundle.js	fast	ignored		pattern_policy		src/discover/discover.c:394-406@2469ecc3
-archive.zip	fast	ignored		suffix_policy		src/discover/discover.c:358-378@2469ecc3
-compiled.pyc	fast	ignored		suffix_policy		src/discover/discover.c:358-378@2469ecc3
+.worktrees	fast	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
+Cargo.lock	fast	ignored		filename_policy		src/discover/discover.c:582-583@2469ecc3
+LICENSE	fast	ignored		filename_policy		src/discover/discover.c:582-583@2469ecc3
+app.bundle.js	fast	ignored		pattern_policy		src/discover/discover.c:585-586@2469ecc3
+archive.zip	fast	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
+client.generated.rs	fast	ignored		pattern_policy		src/discover/discover.c:585-586@2469ecc3
+compiled.pyc	fast	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
 docs	fast	excluded_directory		directory_policy		tests/test_discover.c:811-830@2469ecc3
 global-ignored.go	fast	ignored		ignore_rule		tests/test_discover.c:374-411@2469ecc3
+image.png	fast	ignored		suffix_policy		src/discover/discover.c:579-580@2469ecc3
+info-conflict.rs	fast	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 large.rs	fast	ignored		oversized		tests/test_discover.c:589-616@2469ecc3
-link.rs	fast	ignored		symlink		tests/test_discover.c:725-762@2469ecc3
+link.rs	fast	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 nested/.cbmignore	fast	ignored		unsupported_language		tests/test_discover.c:918-943@2469ecc3
 nested/.gitignore	fast	ignored		unsupported_language		tests/test_discover.c:1170-1200@2469ecc3
 nested/local-ignored.rs	fast	ignored		ignore_rule		tests/test_discover.c:1202-1242@2469ecc3
-node_modules	fast	excluded_directory		directory_policy		src/discover/discover.c:528-564@2469ecc3
+nested/rescued-local.rs	fast	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
+node_modules	fast	excluded_directory		directory_policy		src/discover/discover.c:514-543@2469ecc3
 notes.unknown	fast	ignored		unsupported_language		src/discover/discover.c:614-629@2469ecc3
+outside-directory	fast	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
+outside-file.rs	fast	ignored		symlink		src/discover/discover.c:653-675@2469ecc3
 root-cbmignored.py	fast	ignored		ignore_rule		tests/test_discover.c:671-723@2469ecc3
+root-conflict.rs	fast	ignored		ignore_rule		src/discover/discover.c:588-605@2469ecc3
 root-ignored.py	fast	ignored		ignore_rule		tests/test_discover.c:351-372@2469ecc3

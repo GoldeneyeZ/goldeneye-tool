@@ -51,7 +51,6 @@ impl LanguageId {
 pub struct DiscoveryOptions {
     pub mode: IndexMode,
     pub max_file_bytes: u64,
-    pub follow_symlinks: bool,
     pub collect_ignored: bool,
     pub global_ignore_path: Option<PathBuf>,
     pub extension_overrides: HashMap<OsString, LanguageId>,
@@ -62,7 +61,6 @@ impl Default for DiscoveryOptions {
         Self {
             mode: IndexMode::Full,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
-            follow_symlinks: false,
             collect_ignored: true,
             global_ignore_path: None,
             extension_overrides: HashMap::new(),
@@ -157,7 +155,6 @@ mod tests {
         let options = DiscoveryOptions::default();
         assert_eq!(options.mode, IndexMode::Full);
         assert_eq!(options.max_file_bytes, 512 * 1024 * 1024);
-        assert!(!options.follow_symlinks);
         assert!(options.collect_ignored);
     }
 

@@ -38,6 +38,65 @@ fn nested_gitignore_stacks_with_root() {
 }
 
 #[test]
+fn cbmignore_cannot_negate_root_gitignore() {
+    let repo = fixture(&[
+        (".gitignore", "secret.rs\n"),
+        (".cbmignore", "!secret.rs\n"),
+        ("secret.rs", "fn secret() {}"),
+    ]);
+
+    let rules = IgnoreRules::build(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+    assert!(rules.is_ignored(Path::new("secret.rs"), false));
+}
+
+#[test]
+fn cbmignore_cannot_negate_nested_gitignore() {
+    let repo = fixture(&[
+        ("src/.gitignore", "secret.rs\n"),
+        ("src/.cbmignore", "!secret.rs\n"),
+        ("src/secret.rs", "fn secret() {}"),
+    ]);
+
+    let rules = IgnoreRules::build(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+    assert!(rules.is_ignored(Path::new("src/secret.rs"), false));
+}
+
+#[test]
+fn cbmignore_cannot_negate_git_info_exclude() {
+    let repo = fixture(&[
+        (".git/info/exclude", "secret.rs\n"),
+        (".cbmignore", "!secret.rs\n"),
+        ("secret.rs", "fn secret() {}"),
+    ]);
+
+    let rules = IgnoreRules::build(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+    assert!(rules.is_ignored(Path::new("secret.rs"), false));
+}
+
+#[test]
+fn cbmignore_negation_clears_only_global_ignore() {
+    let repo = fixture(&[
+        (".cbmignore", "!global.rs\n"),
+        ("global.rs", "fn global() {}"),
+    ]);
+    let mut global = NamedTempFile::new().expect("create external ignore");
+    global
+        .write_all(b"global.rs\n")
+        .expect("write external ignore");
+    let options = DiscoveryOptions {
+        global_ignore_path: Some(global.path().to_path_buf()),
+        ..DiscoveryOptions::default()
+    };
+
+    let rules = IgnoreRules::build(repo.path(), &options).unwrap();
+
+    assert!(!rules.is_ignored(Path::new("global.rs"), false));
+}
+
+#[test]
 fn cbmignore_negates_global_and_builtin_skips() {
     let repo = fixture(&[
         (".cbmignore", "!vendor/\n!vendor/keep.rs\n"),

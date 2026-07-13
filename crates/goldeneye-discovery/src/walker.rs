@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::policy::is_safety_core_directory;
 use crate::{
     DiscoveredFile, DiscoveryError, DiscoveryOptions, DiscoveryReport, IgnoreReason, IgnoreRules,
     IgnoredPath, LanguageRegistry, directory_policy, file_policy,
@@ -43,7 +43,6 @@ struct RepositoryWalker<'a> {
     rules: &'a IgnoreRules,
     languages: &'a LanguageRegistry,
     directories: Vec<(PathBuf, PathBuf)>,
-    visited_directories: HashSet<PathBuf>,
     files: Vec<DiscoveredFile>,
     excluded_directories: Vec<PathBuf>,
     ignored: Vec<IgnoredPath>,
@@ -64,7 +63,6 @@ impl<'a> RepositoryWalker<'a> {
             options,
             rules,
             languages,
-            visited_directories: HashSet::new(),
             files: Vec::new(),
             excluded_directories: Vec::new(),
             ignored: Vec::new(),
@@ -75,19 +73,8 @@ impl<'a> RepositoryWalker<'a> {
 
     fn walk(&mut self) {
         while let Some((absolute, relative)) = self.directories.pop() {
-            if self.options.follow_symlinks {
-                match fs::canonicalize(&absolute) {
-                    Ok(canonical) => {
-                        if !self.visited_directories.insert(canonical) {
-                            continue;
-                        }
-                    }
-                    Err(error) => {
-                        self.record_io(&relative, &error);
-                        continue;
-                    }
-                }
-            }
+            self.rules.prepare_directory(&relative);
+            self.warnings.extend(self.rules.take_warnings());
 
             let entries = match fs::read_dir(&absolute) {
                 Ok(entries) => entries,
@@ -117,35 +104,32 @@ impl<'a> RepositoryWalker<'a> {
         };
 
         if file_type.is_symlink() {
-            if !self.options.follow_symlinks {
-                self.record_ignored(relative, IgnoreReason::Symlink, None);
-                return;
-            }
-            match fs::metadata(&absolute) {
-                Ok(metadata) if metadata.is_dir() => self.process_directory(absolute, relative),
-                Ok(metadata) if metadata.is_file() => {
-                    self.process_file(&absolute, relative, Some(metadata));
-                }
-                Ok(_) => {}
-                Err(error) => self.record_io(&relative, &error),
-            }
+            self.record_ignored(relative, IgnoreReason::Symlink, None);
         } else if file_type.is_dir() {
             self.process_directory(absolute, relative);
         } else if file_type.is_file() {
-            self.process_file(&absolute, relative, None);
+            self.process_file(&absolute, relative);
         }
     }
 
     fn process_directory(&mut self, absolute: PathBuf, relative: PathBuf) {
+        let name = relative
+            .file_name()
+            .expect("repository child directory has a file name");
+        if is_safety_core_directory(name) {
+            self.excluded_directories.push(relative.clone());
+            self.record_ignored(relative, IgnoreReason::DirectoryPolicy, None);
+            return;
+        }
+
         let whitelisted = self.rules.is_explicitly_whitelisted(&relative, true);
-        let reason = if self.rules.is_ignored(&relative, true) {
+        let policy = directory_policy(name, self.options.mode);
+        let reason = if policy.is_some() && !whitelisted {
+            policy
+        } else if self.rules.is_ignored(&relative, true) {
             Some(IgnoreReason::IgnoreRule)
-        } else if whitelisted {
-            None
         } else {
-            relative
-                .file_name()
-                .and_then(|name| directory_policy(name, self.options.mode))
+            None
         };
 
         if let Some(reason) = reason {
@@ -156,35 +140,25 @@ impl<'a> RepositoryWalker<'a> {
         }
     }
 
-    fn process_file(
-        &mut self,
-        absolute: &Path,
-        relative: PathBuf,
-        followed_metadata: Option<fs::Metadata>,
-    ) {
-        let whitelisted = self.rules.is_explicitly_whitelisted(&relative, false);
-        if self.rules.is_ignored(&relative, false) {
-            self.record_ignored(relative, IgnoreReason::IgnoreRule, None);
-            return;
-        }
-        if !whitelisted
-            && let Some(reason) = relative
-                .file_name()
-                .and_then(|name| file_policy(name, self.options.mode))
+    fn process_file(&mut self, absolute: &Path, relative: PathBuf) {
+        if let Some(reason) = relative
+            .file_name()
+            .and_then(|name| file_policy(name, self.options.mode))
         {
             self.record_ignored(relative, reason, None);
             return;
         }
+        if self.rules.is_ignored(&relative, false) {
+            self.record_ignored(relative, IgnoreReason::IgnoreRule, None);
+            return;
+        }
 
-        let metadata = match followed_metadata {
-            Some(metadata) => metadata,
-            None => match fs::metadata(absolute) {
-                Ok(metadata) => metadata,
-                Err(error) => {
-                    self.record_io(&relative, &error);
-                    return;
-                }
-            },
+        let metadata = match fs::metadata(absolute) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.record_io(&relative, &error);
+                return;
+            }
         };
         let byte_len = metadata.len();
         if byte_len > self.options.max_file_bytes {

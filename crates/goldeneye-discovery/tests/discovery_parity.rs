@@ -155,10 +155,68 @@ fn discovery_skips_file_symlinks_by_default_when_platform_allows_creation() {
     assert!(has_ignored(&report, "link.rs", IgnoreReason::Symlink));
 }
 
+#[test]
+fn discovery_never_follows_outside_root_file_or_directory_links() {
+    let repo = fixture(&[]);
+    let outside = fixture(&[
+        ("outside.rs", "fn outside() {}"),
+        ("nested/inside.rs", "fn inside() {}"),
+    ]);
+    let file_link = repo.path().join("file-link.rs");
+    let directory_link = repo.path().join("directory-link");
+    let file_link_created = try_create_file_symlink(&outside.path().join("outside.rs"), &file_link);
+    let directory_link_created = try_create_directory_link(outside.path(), &directory_link);
+    if !file_link_created && !directory_link_created {
+        return;
+    }
+    let report = discover(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+    assert!(report.files.is_empty());
+    if file_link_created {
+        assert!(has_ignored(&report, "file-link.rs", IgnoreReason::Symlink));
+    }
+    if directory_link_created {
+        assert!(has_ignored(
+            &report,
+            "directory-link",
+            IgnoreReason::Symlink
+        ));
+    }
+}
+
 #[cfg(unix)]
 fn try_create_file_symlink(target: &Path, link: &Path) -> bool {
     std::os::unix::fs::symlink(target, link).expect("create file symlink");
     true
+}
+
+#[cfg(unix)]
+fn try_create_directory_link(target: &Path, link: &Path) -> bool {
+    std::os::unix::fs::symlink(target, link).expect("create directory symlink");
+    true
+}
+
+#[cfg(windows)]
+fn try_create_directory_link(target: &Path, link: &Path) -> bool {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("run mklink for directory junction");
+    if output.status.success() {
+        true
+    } else if String::from_utf8_lossy(&output.stderr).contains("privilege")
+        || String::from_utf8_lossy(&output.stdout).contains("privilege")
+    {
+        false
+    } else {
+        panic!(
+            "create directory junction: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -193,6 +251,91 @@ fn cbm_whitelist_recovers_builtin_skipped_directory_before_policy() {
             .excluded_directories
             .contains(&PathBuf::from("vendor"))
     );
+}
+
+#[test]
+fn cbmignore_cannot_unskip_safety_core_directories() {
+    for directory in [".git", "node_modules", ".worktrees", ".claude-worktrees"] {
+        let keep = format!("{directory}/keep.rs");
+        let cbmignore = format!("!{directory}/\n!{directory}/keep.rs\n");
+        let repo = fixture(&[(".cbmignore", &cbmignore), (&keep, "fn keep() {}")]);
+
+        let report = discover(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+        assert!(
+            !discovered_paths(&report)
+                .iter()
+                .any(|path| path.starts_with(directory)),
+            "safety-core directory was traversed: {directory}"
+        );
+        assert!(
+            report
+                .excluded_directories
+                .contains(&PathBuf::from(directory))
+        );
+    }
+}
+
+#[test]
+fn cbmignore_cannot_resurrect_file_policy_matches() {
+    let repo = fixture(&[
+        (
+            ".cbmignore",
+            "!image.png\n!archive.zip\n!Cargo.lock\n!client.generated.rs\n",
+        ),
+        ("image.png", "png"),
+        ("archive.zip", "zip"),
+        ("Cargo.lock", "lock"),
+        ("client.generated.rs", "fn generated() {}"),
+    ]);
+
+    let full = discover(repo.path(), &DiscoveryOptions::default()).unwrap();
+    assert!(has_ignored(&full, "image.png", IgnoreReason::SuffixPolicy));
+
+    let fast = discover(
+        repo.path(),
+        &DiscoveryOptions {
+            mode: IndexMode::Fast,
+            ..DiscoveryOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(has_ignored(
+        &fast,
+        "archive.zip",
+        IgnoreReason::SuffixPolicy
+    ));
+    assert!(has_ignored(
+        &fast,
+        "Cargo.lock",
+        IgnoreReason::FilenamePolicy
+    ));
+    assert!(has_ignored(
+        &fast,
+        "client.generated.rs",
+        IgnoreReason::PatternPolicy
+    ));
+}
+
+#[test]
+fn excluded_trees_do_not_load_nested_ignore_files() {
+    let repo = fixture(&[("main.rs", "fn main() {}")]);
+    let deep = repo.path().join("node_modules").join(
+        (0..24)
+            .map(|index| format!("d{index}"))
+            .collect::<PathBuf>(),
+    );
+    fs::create_dir_all(&deep).expect("create excluded deep tree");
+    fs::write(deep.join(".cbmignore"), "[\n").expect("write invalid nested ignore file");
+    fs::create_dir_all(repo.path().join(".git/deep")).expect("create excluded git tree");
+    fs::write(repo.path().join(".git/deep/.cbmignore"), "[\n")
+        .expect("write invalid git ignore file");
+
+    let report = discover(repo.path(), &DiscoveryOptions::default())
+        .expect("excluded trees must not be scanned for ignore files");
+
+    assert_eq!(discovered_paths(&report), [PathBuf::from("main.rs")]);
+    assert!(report.warnings.is_empty());
 }
 
 #[test]

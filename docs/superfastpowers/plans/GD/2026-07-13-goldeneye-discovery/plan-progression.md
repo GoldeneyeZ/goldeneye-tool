@@ -56,3 +56,12 @@ Last updated: 2026-07-13 06:03
 - Code quality: checked
 - Next action: Task complete; continue to next task.
 
+## Task 7: Repair Discovery Safety and Ignore Parity
+
+- Path: `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-7/`
+- Task status: quality-checking
+- Implementer: unchecked
+- Spec review: checked
+- Code quality: unchecked
+- Next action: Run code quality review.
+

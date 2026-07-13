@@ -32,15 +32,25 @@ struct NormalizedReport {
 struct UpstreamFixture {
     repository: TempDir,
     global_ignore: TempDir,
-    symlink_available: bool,
+    _outside: TempDir,
+    link_available: bool,
+    outside_file_link_available: bool,
+    outside_directory_link_available: bool,
 }
 
 impl UpstreamFixture {
     fn materialize() -> Self {
         let repository = tempfile::tempdir().expect("create fixture repository");
         for (path, contents) in [
-            (".gitignore", "root-ignored.py\n"),
-            (".cbmignore", "!rescued.go\n!obj/\nroot-cbmignored.py\n"),
+            (".gitignore", "root-ignored.py\nroot-conflict.rs\n"),
+            (
+                ".cbmignore",
+                "!rescued.go\n!obj/\nroot-cbmignored.py\n!root-conflict.rs\n!info-conflict.rs\nnested/custom.rs\n!.git/\n!.git/keep.rs\n!node_modules/\n!node_modules/dependency.js\n!.worktrees/\n!.worktrees/keep.rs\n!.claude-worktrees/\n!.claude-worktrees/keep.rs\n!image.png\n!archive.zip\n!Cargo.lock\n!client.generated.rs\n",
+            ),
+            (".git/info/exclude", "info-conflict.rs\n"),
+            (".git/keep.rs", "x\n"),
+            (".worktrees/keep.rs", "x\n"),
+            (".claude-worktrees/keep.rs", "x\n"),
             ("src/main.rs", "fn main() {}\n"),
             ("src/naïve file.py", "print('ok')\n"),
             ("notes.unknown", "ignored\n"),
@@ -48,18 +58,24 @@ impl UpstreamFixture {
             ("views/home.blade.php", "{{ value }}\n"),
             (".env.local", "A=1\n"),
             ("root-ignored.py", "ignored\n"),
+            ("root-conflict.rs", "x\n"),
+            ("info-conflict.rs", "x\n"),
             ("root-cbmignored.py", "ignored\n"),
             ("global-ignored.go", "package ignored\n"),
             ("rescued.go", "package rescued\n"),
             ("nested/.gitignore", "local-ignored.rs\nrescued-local.rs\n"),
-            ("nested/.cbmignore", "!rescued-local.rs\n"),
+            ("nested/.cbmignore", "!rescued-local.rs\n!custom.rs\n"),
             ("nested/local-ignored.rs", "fn ignored() {}\n"),
             ("nested/rescued-local.rs", "fn rescued() {}\n"),
+            ("nested/custom.rs", "x\n"),
             ("node_modules/dependency.js", "ignored();\n"),
             ("docs/guide.md", "# Guide\n"),
             ("obj/kept.go", "package kept\n"),
             ("compiled.pyc", "bytecode\n"),
             ("archive.zip", "archive\n"),
+            ("image.png", "png\n"),
+            ("Cargo.lock", "lock\n"),
+            ("client.generated.rs", "x\n"),
             ("LICENSE", "license\n"),
             ("app.bundle.js", "bundle();\n"),
             ("large.rs", &"x".repeat(128)),
@@ -67,10 +83,19 @@ impl UpstreamFixture {
             write_fixture_file(repository.path(), path, contents);
         }
 
-        let symlink_available = create_file_symlink(
+        let link_available = create_file_symlink(
             &repository.path().join("src/main.rs"),
             &repository.path().join("link.rs"),
         );
+        let outside = tempfile::tempdir().expect("create outside-root fixture");
+        write_fixture_file(outside.path(), "outside.rs", "x\n");
+        write_fixture_file(outside.path(), "nested/inside.rs", "x\n");
+        let outside_file_link_available = create_file_symlink(
+            &outside.path().join("outside.rs"),
+            &repository.path().join("outside-file.rs"),
+        );
+        let outside_directory_link_available =
+            create_directory_link(outside.path(), &repository.path().join("outside-directory"));
 
         let global_ignore = tempfile::tempdir().expect("create global-ignore fixture");
         fs::write(
@@ -82,7 +107,10 @@ impl UpstreamFixture {
         Self {
             repository,
             global_ignore,
-            symlink_available,
+            _outside: outside,
+            link_available,
+            outside_file_link_available,
+            outside_directory_link_available,
         }
     }
 
@@ -100,7 +128,12 @@ impl UpstreamFixture {
     }
 
     fn expected(&self, mode: IndexMode) -> NormalizedReport {
-        expected_report(mode, self.symlink_available)
+        expected_report(
+            mode,
+            self.link_available,
+            self.outside_file_link_available,
+            self.outside_directory_link_available,
+        )
     }
 }
 
@@ -112,6 +145,23 @@ fn full_moderate_and_fast_reports_match_frozen_upstream_manifest() {
         assert_eq!(actual.root, fs::canonicalize(fixture.root()).unwrap());
         assert_eq!(normalize_report(mode, actual), fixture.expected(mode));
     }
+}
+
+#[test]
+fn ignore_loading_has_no_recursive_repository_prescan() {
+    let source = include_str!("../src/ignore_rules.rs");
+
+    assert!(!source.contains("fn collect_named_files"));
+    assert!(!source.contains("find_named_files(root"));
+}
+
+#[test]
+fn discovery_surface_has_no_link_following_option() {
+    let public_api = include_str!("../src/lib.rs");
+    let walker = include_str!("../src/walker.rs");
+
+    assert!(!public_api.contains("follow_symlinks"));
+    assert!(!walker.contains("follow_symlinks"));
 }
 
 #[test]
@@ -158,7 +208,12 @@ fn normalize_report(mode: IndexMode, report: DiscoveryReport) -> NormalizedRepor
     }
 }
 
-fn expected_report(mode: IndexMode, symlink_available: bool) -> NormalizedReport {
+fn expected_report(
+    mode: IndexMode,
+    link_available: bool,
+    outside_file_link_available: bool,
+    outside_directory_link_available: bool,
+) -> NormalizedReport {
     let mut files = Vec::new();
     let mut excluded_directories = Vec::new();
     let mut ignored = Vec::new();
@@ -172,7 +227,10 @@ fn expected_report(mode: IndexMode, symlink_available: bool) -> NormalizedReport
         if fields[1] != mode_name(mode) {
             continue;
         }
-        if fields[0] == "link.rs" && !symlink_available {
+        if (fields[0] == "link.rs" && !link_available)
+            || (fields[0] == "outside-file.rs" && !outside_file_link_available)
+            || (fields[0] == "outside-directory" && !outside_directory_link_available)
+        {
             continue;
         }
         assert!(
@@ -262,6 +320,35 @@ fn write_fixture_file(root: &Path, relative: &str, contents: &str) {
 fn create_file_symlink(target: &Path, link: &Path) -> bool {
     std::os::unix::fs::symlink(target, link).expect("create fixture symlink");
     true
+}
+
+#[cfg(unix)]
+fn create_directory_link(target: &Path, link: &Path) -> bool {
+    std::os::unix::fs::symlink(target, link).expect("create directory symlink");
+    true
+}
+
+#[cfg(windows)]
+fn create_directory_link(target: &Path, link: &Path) -> bool {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("run mklink for directory junction");
+    if output.status.success() {
+        true
+    } else if String::from_utf8_lossy(&output.stderr).contains("privilege")
+        || String::from_utf8_lossy(&output.stdout).contains("privilege")
+    {
+        false
+    } else {
+        panic!(
+            "create directory junction: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(windows)]

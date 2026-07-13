@@ -2,6 +2,8 @@ use std::ffi::OsStr;
 
 use crate::{IgnoreReason, IndexMode};
 
+const SAFETY_CORE_DIRS: [&str; 4] = [".git", "node_modules", ".worktrees", ".claude-worktrees"];
+
 const ALWAYS_SKIP_DIRS: [&str; 73] = [
     ".git",
     ".hg",
@@ -273,6 +275,10 @@ pub fn directory_policy(name: &OsStr, mode: IndexMode) -> Option<IgnoreReason> {
     } else {
         None
     }
+}
+
+pub(crate) fn is_safety_core_directory(name: &OsStr) -> bool {
+    contains_name(&SAFETY_CORE_DIRS, name)
 }
 
 #[must_use]
