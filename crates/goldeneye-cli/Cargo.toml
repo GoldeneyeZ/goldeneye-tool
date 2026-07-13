@@ -9,5 +9,8 @@ license.workspace = true
 goldeneye-mcp = { path = "../goldeneye-mcp" }
 serde_json.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

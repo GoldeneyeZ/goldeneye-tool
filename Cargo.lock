@@ -274,6 +274,7 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-mcp",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -355,8 +356,10 @@ dependencies = [
 name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-services",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
@@ -370,6 +373,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "goldeneye-services"
+version = "0.1.0"
+dependencies = [
+ "goldeneye-discovery",
+ "goldeneye-domain",
+ "goldeneye-index",
+ "goldeneye-query",
+ "goldeneye-store",
+ "goldeneye-syntax",
+ "serde",
  "tempfile",
  "thiserror",
 ]
