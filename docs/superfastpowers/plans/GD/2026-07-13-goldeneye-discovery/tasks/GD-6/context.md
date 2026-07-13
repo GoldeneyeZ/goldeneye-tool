@@ -17,8 +17,8 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Final task commit: pending review evidence commit
-- Reviewed commit range: GD-6 implementation commit through final evidence commit
+- Final task commit: `8bd2190`
+- Reviewed commit range: `8bd2190^..8bd2190`
 - Files created:
   - `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-6/context.md`
   - `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-6/task.md`
@@ -45,3 +45,5 @@ Files above are starting points only. Inspect any additional files needed to com
 - Implementation notes:
   - Exporter serializes every empty list field as the exact `-` sentinel.
   - Parser maps only exact `-` to an empty list and rejects comma-separated lists that mix `-` with data.
+  - Spec review: checked.
+  - Code quality review: checked.
