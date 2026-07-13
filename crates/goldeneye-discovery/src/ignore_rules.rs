@@ -99,7 +99,7 @@ impl IgnoreRules {
 
 impl CbmIgnoreIndex {
     fn build(root: &Path) -> Result<Self, DiscoveryError> {
-        let files = find_named_files(root, OsStr::new(".cbmignore"))?;
+        let files = find_named_files(root, OsStr::new(".cbmignore"));
         let matchers = files
             .iter()
             .map(|path| matcher_from_file(path))
@@ -164,7 +164,7 @@ fn build_standard_index(
     if exclude.is_file() {
         matchers.push(matcher_from_file_with_root(root, &exclude)?);
     }
-    for path in find_named_files(root, OsStr::new(".gitignore"))? {
+    for path in find_named_files(root, OsStr::new(".gitignore")) {
         matchers.push(matcher_from_file(&path)?);
     }
     Ok(matchers)
@@ -210,49 +210,36 @@ fn effective_match(matchers: &[ScopedMatcher], path: &Path, is_dir: bool) -> Rul
     result
 }
 
-fn find_named_files(root: &Path, name: &OsStr) -> Result<Vec<PathBuf>, DiscoveryError> {
+fn find_named_files(root: &Path, name: &OsStr) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    collect_named_files(root, name, &mut found)?;
+    collect_named_files(root, name, &mut found);
     found.sort_by(|left, right| {
         left.components()
             .count()
             .cmp(&right.components().count())
             .then_with(|| left.cmp(right))
     });
-    Ok(found)
+    found
 }
 
-fn collect_named_files(
-    directory: &Path,
-    name: &OsStr,
-    found: &mut Vec<PathBuf>,
-) -> Result<(), DiscoveryError> {
-    let entries = fs::read_dir(directory).map_err(|source| DiscoveryError::Io {
-        path: directory.to_path_buf(),
-        source,
-    })?;
-    let mut entries =
-        entries
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| DiscoveryError::Io {
-                path: directory.to_path_buf(),
-                source,
-            })?;
+fn collect_named_files(directory: &Path, name: &OsStr, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
     entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).map_err(|source| DiscoveryError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if metadata.file_type().is_symlink() {
             continue;
         }
         if metadata.is_dir() {
-            collect_named_files(&path, name, found)?;
+            collect_named_files(&path, name, found);
         } else if metadata.is_file() && entry.file_name() == name {
             found.push(path);
         }
     }
-    Ok(())
 }
