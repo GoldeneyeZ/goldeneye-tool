@@ -1,13 +1,13 @@
 # Goldeneye Full Grammar Provider Plan Progression
 
-Last updated: 2026-07-13 18:25 Europe/Paris
+Last updated: 2026-07-13 19:46 Europe/Paris
 
 - Plan: `docs/superfastpowers/plans/GFP/2026-07-13-goldeneye-full-grammar-provider.md`
 - Design: `docs/superfastpowers/specs/2026-07-13-goldeneye-full-grammar-provider-design.md`
 - Plan baseline commit: `6e2b800`
 - Design whitespace follow-up: `023837d`
 - Overall status: in_progress
-- Next action: Implement GFP-2 under TDD, then run independent spec and quality reviews.
+- Next action: Harden direct `verify_source` link tests, then implement GFP-3 under TDD.
 
 ## GFP-1: Extract Grammar-Pack Integrity into a Build-Safe Crate
 
@@ -21,11 +21,11 @@ Last updated: 2026-07-13 18:25 Europe/Paris
 ## GFP-2: Persist Factory Symbols and Generate the Exact Registry
 
 - Path: `tasks/GFP-2`
-- Task status: in_progress
-- Implementer: in_progress
-- Spec review: unchecked
-- Code quality: unchecked
-- Next action: Complete the GFP-2 implementation handoff and task gates.
+- Task status: complete
+- Implementer: complete (`95f596e`)
+- Spec review: checked (`05c2215`)
+- Code quality: checked (`11801e5`)
+- Next action: None; GFP-2 is accepted.
 
 ## GFP-3: Compile the Verified Native Grammar Pack Behind an Opt-In Feature
 
