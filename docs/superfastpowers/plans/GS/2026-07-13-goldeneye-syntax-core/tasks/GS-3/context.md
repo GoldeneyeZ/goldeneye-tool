@@ -90,4 +90,15 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Pending implementation, review evidence, final commit, and controller verification.
+- Implementation commit: `14f92a4` (`[GS-3] feat: add guarded syntax node locators`).
+- Reviewed range: `7adce58..14f92a4`.
+- Created: `crates/goldeneye-syntax/src/locator.rs`, `crates/goldeneye-syntax/tests/locators.rs`.
+- Modified: `Cargo.lock`, `crates/goldeneye-syntax/Cargo.toml`, `crates/goldeneye-syntax/src/lib.rs`.
+- Relevant code inspected: syntax snapshot/grammar APIs, validated domain locator identities, Tree-sitter 0.26.11 child/field APIs, GS plan, and Rust-port structural editing contract.
+- RED: focused locator test exited 101 with E0432 because `LocatorError`, `all_named_locators`, `locator_scope`, and `resolve_locator` did not exist.
+- GREEN: focused locator test passed 21/21; full syntax crate passed 35 integration tests (4 grammar + 10 diagnostic + 21 locator), with zero failures.
+- Quality gates: `cargo fmt --all --check` passed; `cargo clippy -p goldeneye-syntax --all-targets -- -D warnings` passed.
+- Final integration gates: workspace clippy passed; `cargo test --workspace` passed 139 tests across 25 suites with zero failures; `cargo build --workspace --release` passed; `git diff --check` reported no whitespace error.
+- Independent spec review: checked, no findings (`spec-review.md`).
+- Independent code quality review: checked, no findings (`code-quality.md`).
+- No active implementer handoff.
