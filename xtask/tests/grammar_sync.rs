@@ -2,12 +2,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use goldeneye_syntax::{GrammarRecord, hash_grammar_assets, lock_file_hash};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use xtask::{SyncOutcome, sync_grammars, verify_grammars};
+use xtask::{SyncOutcome, sync_git_grammars, sync_grammars, verify_git_grammars, verify_grammars};
 
 const TEST_COMMIT: &str = "1111111111111111111111111111111111111111";
 const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
@@ -94,6 +95,184 @@ fn verify_and_sync_clean_pack_without_mutating_source() {
         b"alpha parser\n"
     );
     assert!(destination.join("pack-state.json").is_file());
+}
+
+#[test]
+fn git_source_uses_lf_blobs_while_directory_source_sees_crlf_smudge() {
+    let temporary = tempfile::tempdir().unwrap();
+    let repository = temporary.path().join("repository");
+    fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "--quiet"]);
+    git(
+        &repository,
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    git(&repository, &["config", "user.name", "Fixture"]);
+    git(&repository, &["config", "core.autocrlf", "true"]);
+
+    let prefix = "vendor/grammars";
+    let source = repository.join(prefix);
+    write(&source.join("alpha/LICENSE"), b"MIT\r\n");
+    write(&source.join("alpha/parser.c"), b"alpha parser\r\n");
+    git(&repository, &["add", "vendor/grammars"]);
+    git(
+        &repository,
+        &[
+            "update-index",
+            "--chmod=+x",
+            "vendor/grammars/alpha/parser.c",
+        ],
+    );
+    git(&repository, &["commit", "--quiet", "-m", "fixture"]);
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+    let source_hash =
+        independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", b"alpha parser\n")]);
+    let lock = temporary.path().join("git-pack.toml");
+    write(
+        &lock,
+        one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
+    );
+    let destination = temporary.path().join("pack");
+
+    let directory_error = verify_grammars(&lock, &source).unwrap_err().to_string();
+    assert!(
+        directory_error.contains("hash mismatch"),
+        "{directory_error}"
+    );
+
+    let verified = verify_git_grammars(&lock, &repository, prefix).unwrap();
+    assert_eq!(verified.grammar_count, 1);
+    assert_eq!(verified.asset_count, 2);
+    assert_eq!(
+        sync_git_grammars(&lock, &repository, prefix, &destination).unwrap(),
+        SyncOutcome::Created
+    );
+    assert_eq!(
+        fs::read(destination.join("alpha/parser.c")).unwrap(),
+        b"alpha parser\n"
+    );
+    assert_eq!(
+        fs::read(source.join("alpha/parser.c")).unwrap(),
+        b"alpha parser\r\n"
+    );
+}
+
+#[test]
+fn git_source_ignores_replacement_refs_for_locked_commit() {
+    let temporary = tempfile::tempdir().unwrap();
+    let repository = temporary.path().join("repository");
+    fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "--quiet"]);
+    git(
+        &repository,
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    git(&repository, &["config", "user.name", "Fixture"]);
+    let prefix = "vendor/grammars";
+    let source = repository.join(prefix);
+    write(&source.join("alpha/LICENSE"), b"MIT\n");
+    write(&source.join("alpha/parser.c"), b"original parser\n");
+    git(&repository, &["add", "vendor/grammars"]);
+    git(&repository, &["commit", "--quiet", "-m", "original"]);
+    let original = git(&repository, &["rev-parse", "HEAD"]);
+    let source_hash =
+        independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", b"original parser\n")]);
+
+    write(&source.join("alpha/parser.c"), b"replacement parser\n");
+    git(&repository, &["add", "vendor/grammars/alpha/parser.c"]);
+    git(&repository, &["commit", "--quiet", "-m", "replacement"]);
+    let replacement = git(&repository, &["rev-parse", "HEAD"]);
+    git(&repository, &["replace", &original, &replacement]);
+
+    let lock = temporary.path().join("git-pack.toml");
+    write(
+        &lock,
+        one_grammar_lock(&original, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
+    );
+    let destination = temporary.path().join("pack");
+
+    verify_git_grammars(&lock, &repository, prefix).unwrap();
+    sync_git_grammars(&lock, &repository, prefix, &destination).unwrap();
+    assert_eq!(
+        fs::read(destination.join("alpha/parser.c")).unwrap(),
+        b"original parser\n"
+    );
+}
+
+#[test]
+fn git_source_rejects_non_regular_modes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let repository = temporary.path().join("repository");
+    fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "--quiet"]);
+    git(
+        &repository,
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    git(&repository, &["config", "user.name", "Fixture"]);
+    write(&repository.join("vendor/grammars/alpha/LICENSE"), b"MIT\n");
+    write(&repository.join("link-target"), b"outside.c");
+    git(&repository, &["add", "vendor/grammars/alpha/LICENSE"]);
+    let object_id = git(&repository, &["hash-object", "-w", "link-target"]);
+    git(
+        &repository,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("120000,{object_id},vendor/grammars/alpha/parser.c"),
+        ],
+    );
+    git(&repository, &["commit", "--quiet", "-m", "fixture"]);
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+    let source_hash = independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", b"outside.c")]);
+    let lock = temporary.path().join("git-pack.toml");
+    write(
+        &lock,
+        one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
+    );
+
+    let error = verify_git_grammars(&lock, &repository, "vendor/grammars")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("regular Git blob"), "{error}");
+}
+
+#[test]
+fn git_source_streams_assets_larger_than_two_copy_buffers() {
+    let temporary = tempfile::tempdir().unwrap();
+    let repository = temporary.path().join("repository");
+    fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "--quiet"]);
+    git(
+        &repository,
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    git(&repository, &["config", "user.name", "Fixture"]);
+    git(&repository, &["config", "core.autocrlf", "false"]);
+    let large_parser = vec![b'x'; 2 * 1024 * 1024 + 17];
+    write(&repository.join("vendor/grammars/alpha/LICENSE"), b"MIT\n");
+    write(
+        &repository.join("vendor/grammars/alpha/parser.c"),
+        &large_parser,
+    );
+    git(&repository, &["add", "vendor/grammars"]);
+    git(&repository, &["commit", "--quiet", "-m", "fixture"]);
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+    let source_hash = independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", &large_parser)]);
+    let lock = temporary.path().join("git-pack.toml");
+    write(
+        &lock,
+        one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
+    );
+    let destination = temporary.path().join("pack");
+
+    verify_git_grammars(&lock, &repository, "vendor/grammars").unwrap();
+    sync_git_grammars(&lock, &repository, "vendor/grammars", &destination).unwrap();
+    assert_eq!(
+        fs::read(destination.join("alpha/parser.c")).unwrap(),
+        large_parser
+    );
 }
 
 #[test]
@@ -309,6 +488,43 @@ grammar = "beta"
     )
 }
 
+fn one_grammar_lock(commit: &str, source_hash: &str, assets: &[&str]) -> String {
+    let assets = assets
+        .iter()
+        .map(|asset| format!("\"{asset}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"schema_version = 1
+upstream_repository = "https://example.invalid/upstream"
+upstream_commit = "{commit}"
+declared_grammar_count = 1
+declared_language_binding_count = 1
+compatible_abi_min = 13
+compatible_abi_max = 15
+hash_algorithm = "sha256"
+hash_domain = "goldeneye-grammar-assets-v1"
+
+[[grammars]]
+name = "alpha"
+repository = "https://example.invalid/alpha"
+commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+abi = 14
+assets = [{assets}]
+source_hash = "{source_hash}"
+scanner_language = "none"
+license_files = ["LICENSE"]
+verdict = "fixture"
+provenance_notes = []
+
+[[language_mappings]]
+language_id = "alpha"
+status = "available"
+grammar = "alpha"
+"#
+    )
+}
+
 fn independent_hash(root: &Path, assets: &[&str]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(ASSET_HASH_DOMAIN);
@@ -320,6 +536,34 @@ fn independent_hash(root: &Path, assets: &[&str]) -> String {
         hasher.update(content);
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn independent_hash_bytes(assets: &[(&str, &[u8])]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(ASSET_HASH_DOMAIN);
+    for (asset, content) in assets {
+        hasher.update((asset.len() as u64).to_be_bytes());
+        hasher.update(asset.as_bytes());
+        hasher.update((content.len() as u64).to_be_bytes());
+        hasher.update(content);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn git(repository: &Path, arguments: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repository)
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
 fn write(path: &Path, content: &[u8]) {

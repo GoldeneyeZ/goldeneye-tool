@@ -57,6 +57,51 @@ struct OwnedTempMarker {
     lock_hash: String,
 }
 
+enum GrammarSource {
+    Directory(PathBuf),
+    Git { repository: PathBuf, prefix: String },
+}
+
+impl GrammarSource {
+    fn directory(path: &Path) -> Result<Self, XtaskError> {
+        Ok(Self::Directory(canonical_safe_directory(path)?))
+    }
+
+    fn git(repository: &Path, prefix: &str) -> Result<Self, XtaskError> {
+        Ok(Self::Git {
+            repository: canonical_safe_directory(repository)?,
+            prefix: prefix.to_owned(),
+        })
+    }
+
+    fn safety_root(&self) -> &Path {
+        match self {
+            Self::Directory(path) => path,
+            Self::Git { repository, .. } => repository,
+        }
+    }
+
+    fn verify(&self, lock: &GrammarPackLock) -> Result<VerifiedPack, PackError> {
+        match self {
+            Self::Directory(path) => lock.verify_source(path),
+            Self::Git { repository, prefix } => lock.verify_git_source(repository, prefix),
+        }
+    }
+
+    fn copy_to(
+        &self,
+        lock: &GrammarPackLock,
+        destination: &Path,
+    ) -> Result<VerifiedPack, PackError> {
+        match self {
+            Self::Directory(path) => lock.copy_verified_assets(path, destination),
+            Self::Git { repository, prefix } => {
+                lock.copy_verified_git_assets(repository, prefix, destination)
+            }
+        }
+    }
+}
+
 /// Verify every asset referenced by a grammar-pack lock.
 ///
 /// # Errors
@@ -67,8 +112,24 @@ pub fn verify_grammars(
     source_root: impl AsRef<Path>,
 ) -> Result<VerifiedPack, XtaskError> {
     let lock = GrammarPackLock::load(lock_path)?;
-    let source_root = canonical_safe_directory(source_root.as_ref())?;
-    Ok(lock.verify_source(source_root)?)
+    let source = GrammarSource::directory(source_root.as_ref())?;
+    Ok(source.verify(&lock)?)
+}
+
+/// Verify every asset from the lock's exact upstream Git commit.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] when the lock, repository, prefix, pinned tree, or
+/// hashes are invalid.
+pub fn verify_git_grammars(
+    lock_path: impl AsRef<Path>,
+    git_repository: impl AsRef<Path>,
+    git_prefix: &str,
+) -> Result<VerifiedPack, XtaskError> {
+    let lock = GrammarPackLock::load(lock_path)?;
+    let source = GrammarSource::git(git_repository.as_ref(), git_prefix)?;
+    Ok(source.verify(&lock)?)
 }
 
 /// Verify and atomically materialize a grammar pack, or confirm a verified no-op.
@@ -82,12 +143,36 @@ pub fn sync_grammars(
     source_root: impl AsRef<Path>,
     destination_root: impl AsRef<Path>,
 ) -> Result<SyncOutcome, XtaskError> {
-    let lock_path = lock_path.as_ref();
+    let source = GrammarSource::directory(source_root.as_ref())?;
+    sync_grammar_source(lock_path.as_ref(), &source, destination_root.as_ref())
+}
+
+/// Verify and atomically materialize the lock's exact upstream Git tree.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] for invalid/overlapping paths, unsafe Git input,
+/// source verification failures, unsafe existing destinations, or atomic
+/// publication failures.
+pub fn sync_git_grammars(
+    lock_path: impl AsRef<Path>,
+    git_repository: impl AsRef<Path>,
+    git_prefix: &str,
+    destination_root: impl AsRef<Path>,
+) -> Result<SyncOutcome, XtaskError> {
+    let source = GrammarSource::git(git_repository.as_ref(), git_prefix)?;
+    sync_grammar_source(lock_path.as_ref(), &source, destination_root.as_ref())
+}
+
+fn sync_grammar_source(
+    lock_path: &Path,
+    source: &GrammarSource,
+    destination_root: &Path,
+) -> Result<SyncOutcome, XtaskError> {
     let lock = GrammarPackLock::load(lock_path)?;
     let lock_hash = lock_file_hash(lock_path)?;
-    let source_root = canonical_safe_directory(source_root.as_ref())?;
-    let destination = prepare_destination(destination_root.as_ref())?;
-    reject_overlap(&source_root, &destination.path)?;
+    let destination = prepare_destination(destination_root)?;
+    reject_overlap(source.safety_root(), &destination.path)?;
 
     let expected_state = PackState {
         schema_version: 1,
@@ -100,7 +185,7 @@ pub fn sync_grammars(
     if destination.exists {
         // A no-op remains source-driven: both the requested source and the
         // already-materialized destination are independently rehashed.
-        lock.verify_source(&source_root)?;
+        source.verify(&lock)?;
         verify_existing_pack(&lock, &destination.path, &expected_state)?;
         return Ok(SyncOutcome::AlreadyCurrent);
     }
@@ -128,7 +213,7 @@ pub fn sync_grammars(
     write_json_new(&temporary.path().join(TEMP_MARKER_FILE), &marker)?;
 
     let result = (|| {
-        lock.copy_verified_assets(&source_root, temporary.path())?;
+        source.copy_to(&lock, temporary.path())?;
         write_json_new(&temporary.path().join(PACK_STATE_FILE), &expected_state)?;
         remove_regular_file(&temporary.path().join(TEMP_MARKER_FILE))?;
         verify_materialized_layout(&lock, temporary.path())?;

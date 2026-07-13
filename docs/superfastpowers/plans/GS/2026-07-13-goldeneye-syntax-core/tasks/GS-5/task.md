@@ -80,16 +80,22 @@ Add `xtask` workspace member and workspace-local Cargo alias `xtask = "run -p xt
 ```bash
 cargo xtask grammars sync \
   --lock grammars/full-pack.toml \
-  --source .upstream/codebase-memory-mcp/internal/cbm/vendored/grammars \
+  --git-repo .upstream/codebase-memory-mcp \
+  --git-prefix internal/cbm/vendored/grammars \
   --dest target/goldeneye-grammars
 ```
+
+`--source <dir>` remains available for tiny fixtures and explicitly prepared
+byte-stable directories. It is mutually exclusive with the paired
+`--git-repo <dir> --git-prefix <path>` mode. The real pinned pack always uses
+Git mode, and the lock's `upstream_commit` is its sole revision authority.
 
 Behavior:
 
 1. never accesses network;
-2. canonicalizes source and the destination parent (plus destination when it exists);
-3. rejects source/destination overlap in either direction;
-4. rejects symlink/reparse or non-regular locked assets;
+2. canonicalizes the directory/Git repository safety root and the destination parent (plus destination when it exists);
+3. rejects the selected source safety root/destination overlap in either direction;
+4. rejects symlink/reparse or non-regular directory assets and every Git mode except `100644`/`100755`;
 5. verifies every locked source hash/license before copy;
 6. copies only the explicitly locked compilation assets (`*.c`, `*.h`, `*.inc`) and direct licenses;
 7. returns a no-op when an existing destination has the same verified `pack-state.json`;
@@ -117,10 +123,12 @@ python tools/export_grammar_lock.py --check \
   --output grammars/full-pack.toml
 cargo xtask grammars verify \
   --lock grammars/full-pack.toml \
-  --source .upstream/codebase-memory-mcp/internal/cbm/vendored/grammars
+  --git-repo .upstream/codebase-memory-mcp \
+  --git-prefix internal/cbm/vendored/grammars
 cargo xtask grammars sync \
   --lock grammars/full-pack.toml \
-  --source .upstream/codebase-memory-mcp/internal/cbm/vendored/grammars \
+  --git-repo .upstream/codebase-memory-mcp \
+  --git-prefix internal/cbm/vendored/grammars \
   --dest target/goldeneye-grammars-audit
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings

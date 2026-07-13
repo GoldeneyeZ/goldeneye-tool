@@ -28,9 +28,9 @@ EXPECTED_ASSETS = 907
 EXPECTED_ABI = {13: 9, 14: 78, 15: 72}
 EXPECTED_ORPHANS = {"objectscript_routine", "objectscript_udl"}
 EXPECTED_CORE_HASHES = {
-    "ada": "c37ebf2b1ac15bdedd2978396864f54dd268dc047ecdb8c34c1222b9b918c3b9",
-    "yaml": "c51872a69f360697d131d573cc7f30b0e484eaefbe39e130cc7d99ec88946659",
-    "rst": "f111cb14d24f9c93eb49145bfb14126d7f61eecf6ae872f4ec3835489c17aa3e",
+    "ada": "fe745430ec54b5c325ce94f94473855fdedde38d9f98e4cd01d5431ef438ff0e",
+    "yaml": "cf48df798c4e0c179a91408c9190d7dd6ab8b3736df09626f7c42f977b421a95",
+    "rst": "c676d0843e42f086ceda2d889c41cb83eccc67e97f11589a1175a72270bb9da7",
 }
 ASSET_HASH_DOMAIN = b"goldeneye-grammar-assets-v1\0"
 COPY_BUFFER = 1024 * 1024
@@ -83,6 +83,7 @@ def canonical_safe_directory(path: Path) -> Path:
 def git_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    environment["GIT_NO_LAZY_FETCH"] = "1"
     return environment
 
 
@@ -417,7 +418,7 @@ def parse_direct_parser(
         rb"(?:TS_PUBLIC\s+|extern\s+)?const\s+TSLanguage\s*\*\s*"
         rb"(tree_sitter_[A-Za-z0-9_]+)\s*\(\s*void\s*\)\s*\{"
     )
-    abi_values: set[int] = set()
+    abi_values: list[int] = []
     symbols: set[str] = set()
     total = 0
     overlap = b""
@@ -425,14 +426,19 @@ def parse_direct_parser(
         total += len(chunk)
         hasher.update(chunk)
         window = overlap + chunk
-        abi_values.update(int(value) for value in abi_pattern.findall(window))
+        overlap_len = len(overlap)
+        abi_values.extend(
+            int(match.group(1))
+            for match in abi_pattern.finditer(window)
+            if match.end() > overlap_len
+        )
         symbols.update(value.decode("ascii") for value in symbol_pattern.findall(window))
         overlap = window[-1024:]
     if len(abi_values) != 1:
         fail(f"direct parser must contain exactly one ABI marker: {parser_path}")
     if len(symbols) != 1:
         fail(f"direct parser must export exactly one grammar symbol: {parser_path}")
-    abi = next(iter(abi_values))
+    abi = abi_values[0]
     if abi not in EXPECTED_ABI:
         fail(f"unsupported grammar ABI {abi}: {parser_path}")
     return abi, next(iter(symbols)), total

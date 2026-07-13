@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 
-from tools.export_grammar_lock import ExportError, GitSnapshot
+from tools.export_grammar_lock import (
+    ExportError,
+    GitSnapshot,
+    git_environment,
+    parse_direct_parser,
+)
 
 
 class GitSnapshotTests(unittest.TestCase):
@@ -69,6 +75,39 @@ class GitSnapshotTests(unittest.TestCase):
 
         with GitSnapshot(self.repository, original) as snapshot:
             self.assertEqual(snapshot.read_bytes("grammar/parser.c"), b"original parser")
+
+    def test_disables_replacements_and_lazy_object_fetches(self) -> None:
+        environment = git_environment()
+
+        self.assertEqual(environment["GIT_NO_REPLACE_OBJECTS"], "1")
+        self.assertEqual(environment["GIT_NO_LAZY_FETCH"], "1")
+
+
+class DirectParserTests(unittest.TestCase):
+    def test_rejects_duplicate_identical_abi_markers(self) -> None:
+        parser = (
+            b"#define LANGUAGE_VERSION 14\n"
+            b"#define LANGUAGE_VERSION 14\n"
+            b"const TSLanguage *tree_sitter_fixture(void) {\n"
+        )
+
+        with self.assertRaisesRegex(ExportError, "exactly one ABI marker"):
+            parse_direct_parser([parser], "fixture/parser.c", hashlib.sha256())
+
+    def test_counts_boundary_crossing_abi_marker_once(self) -> None:
+        chunks = [
+            b"x" * 1020 + b"#define LANG",
+            b"UAGE_VERSION 14\nconst TSLanguage *tree_sitter_fixture(void) {\n",
+            b"trailer",
+        ]
+
+        abi, symbol, total = parse_direct_parser(
+            chunks, "fixture/parser.c", hashlib.sha256()
+        )
+
+        self.assertEqual(abi, 14)
+        self.assertEqual(symbol, "tree_sitter_fixture")
+        self.assertEqual(total, sum(map(len, chunks)))
 
 
 if __name__ == "__main__":

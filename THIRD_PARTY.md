@@ -39,7 +39,14 @@ closure.
 907 compilation/license files, and 160 explicit language-binding records. The
 lock preserves the heterogeneous `MANIFEST.md` provenance verdicts, missing
 upstream-revision reasons, and local source-patch notes; source hashes cover the
-patched vendored bytes.
+patched vendored bytes exactly as stored in that commit's Git blobs, without
+checkout line-ending normalization. Export, verification, and materialization
+disable replacement objects and lazy object fetching, accept only regular Git
+blob modes `100644`/`100755`, and stream the lock's exact commit through Git
+object plumbing. The real-pack commands therefore use `--git-repo
+.upstream/codebase-memory-mcp --git-prefix
+internal/cbm/vendored/grammars`; directory `--source` mode is retained only for
+tiny fixtures or deliberately prepared byte-stable directories.
 
 Every grammar directory has a directly locked `LICENSE`. Offline materialized
 packs and any future release pack must carry every locked per-grammar license

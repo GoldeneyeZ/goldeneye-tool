@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+mod git_source;
+
+use git_source::GitSourceSession;
 
 const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
 const LOCK_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-lock-v1\0";
@@ -193,7 +197,29 @@ impl GrammarPackLock {
     /// Returns [`PackError`] for unsafe paths, missing/non-regular assets,
     /// I/O failures, or content-hash mismatches.
     pub fn verify_source(&self, source_root: impl AsRef<Path>) -> Result<VerifiedPack, PackError> {
-        self.stream_assets(source_root.as_ref(), None)
+        let mut source = SourceSession::directory(source_root.as_ref())?;
+        self.stream_assets(&mut source, None)
+    }
+
+    /// Verify every locked asset from the lock's exact upstream Git commit.
+    ///
+    /// `git_prefix` names the grammar root inside that commit. The commit is
+    /// always taken from [`Self::upstream_commit`]; callers cannot substitute a
+    /// different revision.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackError`] for an unsafe repository/prefix, missing or
+    /// non-regular Git entries, malformed Git protocol output, I/O failures, or
+    /// content-hash mismatches.
+    pub fn verify_git_source(
+        &self,
+        git_repository: impl AsRef<Path>,
+        git_prefix: &str,
+    ) -> Result<VerifiedPack, PackError> {
+        let mut source =
+            SourceSession::git(git_repository.as_ref(), git_prefix, self.upstream_commit())?;
+        self.stream_assets(&mut source, None)
     }
 
     /// Copy locked assets while hashing the same open source handles.
@@ -207,23 +233,41 @@ impl GrammarPackLock {
         source_root: impl AsRef<Path>,
         destination_root: impl AsRef<Path>,
     ) -> Result<VerifiedPack, PackError> {
-        self.stream_assets(source_root.as_ref(), Some(destination_root.as_ref()))
+        let mut source = SourceSession::directory(source_root.as_ref())?;
+        self.stream_assets(&mut source, Some(destination_root.as_ref()))
+    }
+
+    /// Copy locked assets from the exact upstream Git commit while hashing the
+    /// same blob streams.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackError`] for unsafe paths, missing/non-regular Git entries,
+    /// malformed Git protocol output, pre-existing destination files, I/O
+    /// failures, or content-hash mismatches.
+    pub fn copy_verified_git_assets(
+        &self,
+        git_repository: impl AsRef<Path>,
+        git_prefix: &str,
+        destination_root: impl AsRef<Path>,
+    ) -> Result<VerifiedPack, PackError> {
+        let mut source =
+            SourceSession::git(git_repository.as_ref(), git_prefix, self.upstream_commit())?;
+        self.stream_assets(&mut source, Some(destination_root.as_ref()))
     }
 
     fn stream_assets(
         &self,
-        source_root: &Path,
+        source: &mut SourceSession,
         destination_root: Option<&Path>,
     ) -> Result<VerifiedPack, PackError> {
-        let source_directory = open_rooted_directory(source_root)?;
         if let Some(destination_root) = destination_root {
             ensure_safe_existing_directory(destination_root)?;
         }
 
         let mut asset_count = 0;
         for grammar in &self.grammars {
-            let actual =
-                stream_grammar_assets(grammar, source_root, &source_directory, destination_root)?;
+            let actual = stream_grammar_assets(grammar, source, destination_root)?;
             if actual != grammar.source_hash {
                 return Err(PackError::HashMismatch {
                     grammar: grammar.name.clone(),
@@ -233,6 +277,7 @@ impl GrammarPackLock {
             }
             asset_count += grammar.assets.len();
         }
+        source.finish()?;
 
         Ok(VerifiedPack {
             grammar_count: self.grammars.len(),
@@ -438,9 +483,10 @@ pub fn hash_grammar_assets(
     source_root: impl AsRef<Path>,
     grammar: &GrammarRecord,
 ) -> Result<String, PackError> {
-    let source_root = source_root.as_ref();
-    let source_directory = open_rooted_directory(source_root)?;
-    stream_grammar_assets(grammar, source_root, &source_directory, None)
+    let mut source = SourceSession::directory(source_root.as_ref())?;
+    let hash = stream_grammar_assets(grammar, &mut source, None)?;
+    source.finish()?;
+    Ok(hash)
 }
 
 /// Hash the exact bytes of a grammar-pack lock for `pack-state.json`.
@@ -471,8 +517,7 @@ pub fn lock_file_hash(path: impl AsRef<Path>) -> Result<String, PackError> {
 
 fn stream_grammar_assets(
     grammar: &GrammarRecord,
-    source_root: &Path,
-    source_directory: &File,
+    source: &mut SourceSession,
     destination_root: Option<&Path>,
 ) -> Result<String, PackError> {
     let mut hasher = Sha256::new();
@@ -482,11 +527,131 @@ fn stream_grammar_assets(
     for asset in &grammar.assets {
         let relative = format!("{}/{}", grammar.name, asset);
         let relative_bytes = asset.as_bytes();
-        let source_path = source_root.join(&grammar.name).join(asset);
-        let source_file = open_source_asset(
-            source_directory,
-            source_root,
+        source.with_asset(
             &grammar.name,
+            asset,
+            |content_len, source_path, reader| {
+                hasher.update((relative_bytes.len() as u64).to_be_bytes());
+                hasher.update(relative_bytes);
+                hasher.update(content_len.to_be_bytes());
+
+                let mut destination = if let Some(destination_root) = destination_root {
+                    let destination_path = destination_root.join(&grammar.name).join(asset);
+                    if let Some(parent) = destination_path.parent() {
+                        fs::create_dir_all(parent).map_err(|source| PackError::Io {
+                            path: parent.to_path_buf(),
+                            source,
+                        })?;
+                    }
+                    Some(
+                        OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&destination_path)
+                            .map_err(|source| PackError::Io {
+                                path: destination_path,
+                                source,
+                            })?,
+                    )
+                } else {
+                    None
+                };
+
+                let mut copied = 0_u64;
+                loop {
+                    let read = reader.read(&mut buffer).map_err(|source| PackError::Io {
+                        path: source_path.clone(),
+                        source,
+                    })?;
+                    if read == 0 {
+                        break;
+                    }
+                    copied += read as u64;
+                    hasher.update(&buffer[..read]);
+                    if let Some(writer) = destination.as_mut() {
+                        writer
+                            .write_all(&buffer[..read])
+                            .map_err(|source| PackError::Io {
+                                path: PathBuf::from(&relative),
+                                source,
+                            })?;
+                    }
+                }
+                if copied != content_len {
+                    return invalid(format!(
+                        "asset {relative} changed size while being read: expected {content_len}, got {copied}"
+                    ));
+                }
+                if let Some(mut writer) = destination {
+                    writer.flush().map_err(|source| PackError::Io {
+                        path: PathBuf::from(&relative),
+                        source,
+                    })?;
+                }
+                Ok(())
+            },
+        )?;
+    }
+
+    Ok(hex_digest(hasher.finalize()))
+}
+
+enum SourceSession {
+    Directory(DirectorySourceSession),
+    Git(GitSourceSession),
+}
+
+impl SourceSession {
+    fn directory(source_root: &Path) -> Result<Self, PackError> {
+        Ok(Self::Directory(DirectorySourceSession {
+            root: source_root.to_path_buf(),
+            directory: open_rooted_directory(source_root)?,
+        }))
+    }
+
+    fn git(repository: &Path, prefix: &str, commit: &str) -> Result<Self, PackError> {
+        Ok(Self::Git(GitSourceSession::new(
+            repository, prefix, commit,
+        )?))
+    }
+
+    fn with_asset<T>(
+        &mut self,
+        grammar_name: &str,
+        asset: &str,
+        operation: impl FnOnce(u64, PathBuf, &mut dyn Read) -> Result<T, PackError>,
+    ) -> Result<T, PackError> {
+        match self {
+            Self::Directory(source) => source.with_asset(grammar_name, asset, operation),
+            Self::Git(source) => source.with_asset(grammar_name, asset, operation),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), PackError> {
+        match self {
+            Self::Directory(_) => Ok(()),
+            Self::Git(source) => source.finish(),
+        }
+    }
+}
+
+struct DirectorySourceSession {
+    root: PathBuf,
+    directory: File,
+}
+
+impl DirectorySourceSession {
+    fn with_asset<T>(
+        &self,
+        grammar_name: &str,
+        asset: &str,
+        operation: impl FnOnce(u64, PathBuf, &mut dyn Read) -> Result<T, PackError>,
+    ) -> Result<T, PackError> {
+        let source_path = self.root.join(grammar_name).join(asset);
+        let source_file = open_source_asset(
+            &self.directory,
+            &self.root,
+            grammar_name,
             asset,
             &source_path,
         )?;
@@ -497,67 +662,9 @@ fn stream_grammar_assets(
                 source,
             })?
             .len();
-
-        hasher.update((relative_bytes.len() as u64).to_be_bytes());
-        hasher.update(relative_bytes);
-        hasher.update(content_len.to_be_bytes());
-
         let mut reader = BufReader::with_capacity(BUFFER_SIZE, source_file);
-        let mut destination = if let Some(destination_root) = destination_root {
-            let destination_path = destination_root.join(&grammar.name).join(asset);
-            if let Some(parent) = destination_path.parent() {
-                fs::create_dir_all(parent).map_err(|source| PackError::Io {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
-            let file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&destination_path)
-                .map_err(|source| PackError::Io {
-                    path: destination_path,
-                    source,
-                })?;
-            Some(BufWriter::with_capacity(BUFFER_SIZE, file))
-        } else {
-            None
-        };
-
-        let mut copied = 0_u64;
-        loop {
-            let read = reader.read(&mut buffer).map_err(|source| PackError::Io {
-                path: source_path.clone(),
-                source,
-            })?;
-            if read == 0 {
-                break;
-            }
-            copied += read as u64;
-            hasher.update(&buffer[..read]);
-            if let Some(writer) = destination.as_mut() {
-                writer
-                    .write_all(&buffer[..read])
-                    .map_err(|source| PackError::Io {
-                        path: PathBuf::from(&relative),
-                        source,
-                    })?;
-            }
-        }
-        if copied != content_len {
-            return invalid(format!(
-                "asset {relative} changed size while being read: expected {content_len}, got {copied}"
-            ));
-        }
-        if let Some(mut writer) = destination {
-            writer.flush().map_err(|source| PackError::Io {
-                path: PathBuf::from(&relative),
-                source,
-            })?;
-        }
+        operation(content_len, source_path, &mut reader)
     }
-
-    Ok(hex_digest(hasher.finalize()))
 }
 
 fn validate_sorted_unique(kind: &str, paths: &[String]) -> Result<(), PackError> {

@@ -3,7 +3,12 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xtask::{SyncOutcome, sync_grammars, verify_grammars};
+use xtask::{SyncOutcome, sync_git_grammars, sync_grammars, verify_git_grammars, verify_grammars};
+
+enum GrammarSource {
+    Directory(PathBuf),
+    Git { repository: PathBuf, prefix: String },
+}
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -26,21 +31,41 @@ fn run(arguments: &[String]) -> Result<String, String> {
     let command = arguments[1].as_str();
     let options = parse_options(&arguments[2..])?;
     let lock = required_path(&options, "--lock")?;
-    let source = required_path(&options, "--source")?;
     match command {
         "verify" => {
-            reject_unknown(&options, &["--lock", "--source"])?;
-            let verified = verify_grammars(lock, source).map_err(|error| error.to_string())?;
+            reject_unknown(
+                &options,
+                &["--lock", "--source", "--git-repo", "--git-prefix"],
+            )?;
+            let verified = match grammar_source(&options)? {
+                GrammarSource::Directory(source) => {
+                    verify_grammars(lock, source).map_err(|error| error.to_string())?
+                }
+                GrammarSource::Git { repository, prefix } => {
+                    verify_git_grammars(lock, repository, &prefix)
+                        .map_err(|error| error.to_string())?
+                }
+            };
             Ok(format!(
                 "verified {} grammars / {} assets",
                 verified.grammar_count, verified.asset_count
             ))
         }
         "sync" => {
-            reject_unknown(&options, &["--lock", "--source", "--dest"])?;
+            reject_unknown(
+                &options,
+                &["--lock", "--source", "--git-repo", "--git-prefix", "--dest"],
+            )?;
             let destination = required_path(&options, "--dest")?;
-            let outcome =
-                sync_grammars(lock, source, destination).map_err(|error| error.to_string())?;
+            let outcome = match grammar_source(&options)? {
+                GrammarSource::Directory(source) => {
+                    sync_grammars(lock, source, destination).map_err(|error| error.to_string())?
+                }
+                GrammarSource::Git { repository, prefix } => {
+                    sync_git_grammars(lock, repository, &prefix, destination)
+                        .map_err(|error| error.to_string())?
+                }
+            };
             Ok(match outcome {
                 SyncOutcome::Created => "grammar pack materialized".into(),
                 SyncOutcome::AlreadyCurrent => "grammar pack already current".into(),
@@ -73,6 +98,24 @@ fn required_path(options: &BTreeMap<String, String>, key: &str) -> Result<PathBu
         .ok_or_else(|| format!("missing {key}; {}", usage()))
 }
 
+fn grammar_source(options: &BTreeMap<String, String>) -> Result<GrammarSource, String> {
+    match (
+        options.get("--source"),
+        options.get("--git-repo"),
+        options.get("--git-prefix"),
+    ) {
+        (Some(source), None, None) => Ok(GrammarSource::Directory(PathBuf::from(source))),
+        (None, Some(repository), Some(prefix)) => Ok(GrammarSource::Git {
+            repository: PathBuf::from(repository),
+            prefix: prefix.clone(),
+        }),
+        _ => Err(format!(
+            "choose exactly one grammar source mode: --source <dir> or paired --git-repo <dir> --git-prefix <path>; {}",
+            usage()
+        )),
+    }
+}
+
 fn reject_unknown(options: &BTreeMap<String, String>, allowed: &[&str]) -> Result<(), String> {
     if let Some(option) = options.keys().find(|key| !allowed.contains(&key.as_str())) {
         return Err(format!("unknown option {option}; {}", usage()));
@@ -81,5 +124,49 @@ fn reject_unknown(options: &BTreeMap<String, String>, allowed: &[&str]) -> Resul
 }
 
 fn usage() -> String {
-    "usage: cargo xtask grammars verify --lock <file> --source <dir> | cargo xtask grammars sync --lock <file> --source <dir> --dest <dir>".into()
+    "usage: cargo xtask grammars verify --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) | cargo xtask grammars sync --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) --dest <dir>".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run;
+
+    #[test]
+    fn rejects_mixed_directory_and_git_source_modes() {
+        let arguments = [
+            "grammars",
+            "verify",
+            "--lock",
+            "lock.toml",
+            "--source",
+            "source",
+            "--git-repo",
+            "repository",
+            "--git-prefix",
+            "vendor/grammars",
+        ]
+        .map(str::to_owned);
+
+        let error = run(&arguments).unwrap_err();
+
+        assert!(error.contains("exactly one grammar source mode"), "{error}");
+    }
+
+    #[test]
+    fn rejects_missing_or_incomplete_source_modes() {
+        let cases = [
+            vec!["--lock", "lock.toml"],
+            vec!["--lock", "lock.toml", "--git-repo", "repository"],
+            vec!["--lock", "lock.toml", "--git-prefix", "vendor/grammars"],
+        ];
+
+        for options in cases {
+            let mut arguments = vec!["grammars".to_owned(), "verify".to_owned()];
+            arguments.extend(options.into_iter().map(str::to_owned));
+
+            let error = run(&arguments).unwrap_err();
+
+            assert!(error.contains("exactly one grammar source mode"), "{error}");
+        }
+    }
 }
