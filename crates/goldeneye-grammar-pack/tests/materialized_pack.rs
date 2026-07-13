@@ -130,9 +130,9 @@ fn final_asset_symlink_is_rejected() {
     let outside = fixture.temporary.path().join("outside-parser.c");
     fs::write(&outside, b"external parser\n").unwrap();
     fs::remove_file(&parser).unwrap();
-    if create_file_symlink(&outside, &parser).is_err() {
-        return;
-    }
+    create_final_link_or_reparse(&outside, &parser)
+        .expect("failed to create required final link/reparse fixture");
+    assert!(is_link_or_reparse(&parser));
 
     assert!(fixture.verify().is_err());
 }
@@ -143,9 +143,9 @@ fn intermediate_directory_symlink_is_rejected() {
     let grammar_root = fixture.root.join("alpha");
     let outside = fixture.temporary.path().join("outside-alpha");
     fs::rename(&grammar_root, &outside).unwrap();
-    if create_directory_symlink(&outside, &grammar_root).is_err() {
-        return;
-    }
+    create_directory_link_or_reparse(&outside, &grammar_root)
+        .expect("failed to create required directory link/reparse fixture");
+    assert!(is_link_or_reparse(&grammar_root));
 
     assert!(fixture.verify().is_err());
 }
@@ -261,21 +261,77 @@ fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 #[cfg(unix)]
-fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+fn create_final_link_or_reparse(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
 #[cfg(windows)]
-fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_file(target, link)
+fn create_final_link_or_reparse(target: &Path, link: &Path) -> std::io::Result<()> {
+    match std::os::windows::fs::symlink_file(target, link) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(1314) =>
+        {
+            fs::remove_file(target)?;
+            let junction_target = target.with_file_name("final-reparse-target");
+            let staging_link = link.with_file_name("final-reparse-link");
+            fs::create_dir(&junction_target)?;
+            create_directory_junction(&junction_target, &staging_link)?;
+            fs::rename(staging_link, link)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(unix)]
-fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+fn create_directory_link_or_reparse(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
 #[cfg(windows)]
-fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_dir(target, link)
+fn create_directory_link_or_reparse(target: &Path, link: &Path) -> std::io::Result<()> {
+    match std::os::windows::fs::symlink_dir(target, link) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(1314) =>
+        {
+            create_directory_junction(target, link)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn is_link_or_reparse(path: &Path) -> bool {
+    fs::symlink_metadata(path).unwrap().file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn is_link_or_reparse(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    let metadata = fs::symlink_metadata(path).unwrap();
+    metadata.file_type().is_symlink()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(windows)]
+fn create_directory_junction(target: &Path, link: &Path) -> std::io::Result<()> {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(std::io::Error::other(format!(
+        "mklink /J failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )))
 }

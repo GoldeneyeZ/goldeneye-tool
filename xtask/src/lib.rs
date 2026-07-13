@@ -24,6 +24,11 @@ pub enum SyncOutcome {
 pub enum XtaskError {
     #[error(transparent)]
     Pack(#[from] PackError),
+    #[error("existing destination is not a verified Goldeneye pack: {source}")]
+    ExistingPack {
+        #[source]
+        source: PackError,
+    },
     #[error("failed to access {path}: {source}")]
     Io {
         path: PathBuf,
@@ -282,11 +287,7 @@ fn verify_existing_pack(
 ) -> Result<(), XtaskError> {
     verify_materialized_pack(lock_path, lock, destination)
         .map(|_| ())
-        .map_err(|error| {
-            XtaskError::Invalid(format!(
-                "existing destination is not a verified Goldeneye pack: {error}"
-            ))
-        })
+        .map_err(|source| XtaskError::ExistingPack { source })
 }
 
 fn cleanup_owned_stale_temps(parent: &Path, destination_name: &str) -> Result<(), XtaskError> {

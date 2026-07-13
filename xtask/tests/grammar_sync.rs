@@ -1,14 +1,17 @@
 use std::collections::BTreeMap;
+use std::error::Error as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use goldeneye_grammar_pack::{GrammarRecord, hash_grammar_assets, lock_file_hash};
+use goldeneye_grammar_pack::{GrammarRecord, PackError, hash_grammar_assets, lock_file_hash};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use xtask::{SyncOutcome, sync_git_grammars, sync_grammars, verify_git_grammars, verify_grammars};
+use xtask::{
+    SyncOutcome, XtaskError, sync_git_grammars, sync_grammars, verify_git_grammars, verify_grammars,
+};
 
 const TEST_COMMIT: &str = "1111111111111111111111111111111111111111";
 const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
@@ -379,6 +382,42 @@ fn matching_pack_state_never_hides_tampered_materialized_asset() {
         .to_string();
     assert!(error.contains("hash mismatch"), "{error}");
     assert_eq!(snapshot(&destination), before);
+}
+
+#[test]
+fn existing_pack_hash_mismatch_preserves_typed_source_and_context() {
+    let fixture = Fixture::new();
+    let destination = fixture.destination("pack");
+    sync_grammars(&fixture.lock, &fixture.source, &destination).unwrap();
+    let parser = destination.join("alpha/parser.c");
+    let mut modified = fs::read(&parser).unwrap();
+    modified[0] ^= 1;
+    fs::write(parser, modified).unwrap();
+
+    let error = sync_grammars(&fixture.lock, &fixture.source, &destination).unwrap_err();
+
+    assert!(
+        matches!(
+            &error,
+            XtaskError::ExistingPack {
+                source: PackError::HashMismatch { .. }
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(
+        error.to_string().contains("existing destination"),
+        "{error}"
+    );
+    assert!(
+        matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<PackError>()),
+            Some(PackError::HashMismatch { .. })
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
