@@ -8,10 +8,12 @@ use thiserror::Error;
 mod ignore_rules;
 mod language;
 mod policy;
+mod walker;
 
 pub use ignore_rules::IgnoreRules;
 pub use language::{LanguageRegistry, LanguageSpec};
 pub use policy::{directory_policy, file_policy};
+pub use walker::{MAX_IGNORED_DETAILS, discover};
 
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
