@@ -1,2 +1,4 @@
 /target/
 /.upstream/
+__pycache__/
+*.pyc

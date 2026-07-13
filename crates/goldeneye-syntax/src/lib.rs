@@ -4,6 +4,7 @@ mod engine;
 mod grammar;
 mod inspect;
 mod locator;
+mod pack;
 
 pub use engine::{
     DiagnosticKind, MAX_DIAGNOSTIC_DETAILS, ReparseResult, SyntaxDiagnostic, SyntaxEdit,
@@ -19,3 +20,7 @@ pub use inspect::{
     inspect_syntax,
 };
 pub use locator::{LocatorError, all_named_locators, locator_scope, resolve_locator};
+pub use pack::{
+    GrammarPackLock, GrammarRecord, LanguageBindingStatus, LanguageMapping, PackError,
+    VerifiedPack, hash_grammar_assets, lock_file_hash,
+};
