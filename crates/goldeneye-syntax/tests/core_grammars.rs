@@ -1,5 +1,23 @@
 use goldeneye_domain::LanguageId;
 use goldeneye_syntax::{CoreGrammarProvider, GrammarProvider, GrammarSource, SyntaxError};
+use std::collections::BTreeMap;
+
+const CORE_GRAMMAR_PACKAGES: [&str; 5] = [
+    "tree-sitter-go",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-typescript",
+];
+
+const CORE_RUNTIME_PACKAGES: [(&str, &str); 6] = [
+    ("go", "tree-sitter-go"),
+    ("javascript", "tree-sitter-javascript"),
+    ("python", "tree-sitter-python"),
+    ("rust", "tree-sitter-rust"),
+    ("tsx", "tree-sitter-typescript"),
+    ("typescript", "tree-sitter-typescript"),
+];
 
 struct Fixture {
     id: &'static str,
@@ -42,15 +60,78 @@ fn fixtures() -> [Fixture; 6] {
     ]
 }
 
-fn expected_core_metadata() -> [(&'static str, &'static str, &'static str); 6] {
-    [
-        ("go", "tree-sitter-go", "0.25.0"),
-        ("javascript", "tree-sitter-javascript", "0.25.0"),
-        ("python", "tree-sitter-python", "0.25.0"),
-        ("rust", "tree-sitter-rust", "0.24.2"),
-        ("tsx", "tree-sitter-typescript", "0.23.2"),
-        ("typescript", "tree-sitter-typescript", "0.23.2"),
-    ]
+fn exact_manifest_pins(manifest: &str) -> Result<BTreeMap<String, String>, String> {
+    let document = toml::from_str::<toml::Value>(manifest)
+        .map_err(|error| format!("invalid goldeneye-syntax manifest: {error}"))?;
+    let dependencies = document
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .ok_or_else(|| "manifest is missing [dependencies]".to_owned())?;
+
+    CORE_GRAMMAR_PACKAGES
+        .into_iter()
+        .map(|package| {
+            let requirement = dependencies
+                .get(package)
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| format!("{package} must be a string dependency pin"))?;
+            let version = requirement
+                .strip_prefix('=')
+                .filter(|version| !version.is_empty())
+                .ok_or_else(|| format!("{package} must use an exact =version pin"))?;
+
+            Ok((package.to_owned(), version.to_owned()))
+        })
+        .collect()
+}
+
+fn validate_provider_metadata_against_manifest(manifest: &str) -> Result<(), String> {
+    let pins = exact_manifest_pins(manifest)?;
+
+    for (id, expected_package) in CORE_RUNTIME_PACKAGES {
+        let grammar = CoreGrammarProvider
+            .grammar(&LanguageId::new(id).expect("core runtime IDs are non-empty"))
+            .map_err(|error| format!("provider rejected {id}: {error}"))?;
+        let GrammarSource::RustCrate { package, version } = grammar.source else {
+            return Err(format!("{id} did not report Rust crate provenance"));
+        };
+
+        if package != expected_package {
+            return Err(format!(
+                "{id} reported package {package}, expected {expected_package}"
+            ));
+        }
+
+        let pinned_version = pins
+            .get(expected_package)
+            .expect("every runtime package has a checked manifest pin");
+        if version != *pinned_version {
+            return Err(format!(
+                "{expected_package} manifest pin {pinned_version} disagrees with {id} provider metadata {version}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn manifest_with_drifted_pin(manifest: &str, package: &str) -> String {
+    let mut document = toml::from_str::<toml::Value>(manifest).unwrap();
+    let dependencies = document
+        .get_mut("dependencies")
+        .and_then(toml::Value::as_table_mut)
+        .unwrap();
+    let requirement = dependencies
+        .get(package)
+        .and_then(toml::Value::as_str)
+        .unwrap()
+        .to_owned();
+    dependencies.insert(
+        package.to_owned(),
+        toml::Value::String(format!("{requirement}-synthetic-drift")),
+    );
+
+    toml::to_string(&document).unwrap()
 }
 
 #[test]
@@ -89,20 +170,13 @@ fn every_core_grammar_parses_valid_source() {
 }
 
 #[test]
-fn provider_reports_pinned_metadata_and_typed_unsupported_error() {
-    for (id, package, version) in expected_core_metadata() {
+fn provider_reports_abi_value_semantics_and_typed_unsupported_error() {
+    for (id, _) in CORE_RUNTIME_PACKAGES {
         let grammar = CoreGrammarProvider
             .grammar(&LanguageId::new(id).unwrap())
             .unwrap();
 
         assert_eq!(grammar.language_id.as_str(), id);
-        assert_eq!(
-            grammar.source,
-            GrammarSource::RustCrate {
-                package: package.into(),
-                version: version.into(),
-            }
-        );
         assert_eq!(
             usize::try_from(grammar.abi).unwrap(),
             grammar.language.abi_version()
@@ -130,4 +204,26 @@ fn core_provider_is_safe_to_share_between_workers() {
     fn assert_send_sync<T: Send + Sync>() {}
 
     assert_send_sync::<CoreGrammarProvider>();
+}
+
+#[test]
+fn provider_metadata_matches_exact_manifest_pins() {
+    validate_provider_metadata_against_manifest(include_str!("../Cargo.toml")).unwrap();
+}
+
+#[test]
+fn metadata_guard_rejects_each_synthetic_manifest_pin_drift() {
+    let manifest = include_str!("../Cargo.toml");
+
+    for package in CORE_GRAMMAR_PACKAGES {
+        let drifted_manifest = manifest_with_drifted_pin(manifest, package);
+        let error = validate_provider_metadata_against_manifest(&drifted_manifest).unwrap_err();
+
+        assert!(
+            error.contains(package)
+                && error.contains("manifest pin")
+                && error.contains("provider metadata"),
+            "drift failure for {package} was not a provider metadata mismatch: {error}"
+        );
+    }
 }
