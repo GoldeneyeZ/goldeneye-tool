@@ -212,6 +212,7 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
  "serde",
+ "serde_json",
  "thiserror",
  "tree-sitter",
  "tree-sitter-go",
