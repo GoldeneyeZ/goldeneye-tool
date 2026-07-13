@@ -16,3 +16,55 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  full-pack:
+    name: full grammar pack (Linux, offline)
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Goldeneye
+        uses: actions/checkout@v4
+      - name: Check out the audited upstream
+        uses: actions/checkout@v4
+        with:
+          repository: DeusData/codebase-memory-mcp
+          ref: 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c
+          path: .upstream/codebase-memory-mcp
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          components: rustfmt, clippy
+      - name: Acquire locked Rust dependencies
+        run: cargo fetch --locked
+      - name: Enter the offline boundary
+        shell: bash
+        run: |
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+          echo "GOLDENEYE_GRAMMAR_PACK_DIR=target/goldeneye-grammars" >> "$GITHUB_ENV"
+      - name: Reproduce and materialize the audited pack
+        run: |
+          python tools/export_grammar_lock.py --check --source .upstream/codebase-memory-mcp --expected-commit 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c --output grammars/full-pack.toml
+          cargo xtask grammars sync --lock grammars/full-pack.toml --git-repo .upstream/codebase-memory-mcp --git-prefix internal/cbm/vendored/grammars --dest target/goldeneye-grammars
+          cargo xtask grammars verify --lock grammars/full-pack.toml --source target/goldeneye-grammars
+          cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/goldeneye-full-grammars/src/generated.rs --check
+          cargo xtask grammars generate-notices --lock grammars/full-pack.toml --output grammars/full-pack-license-ledger.md --check
+      - name: Compile and audit the native full provider
+        run: |
+          cargo clippy -p goldeneye-full-grammars --all-targets --features compiled -- -D warnings
+          cargo test -p goldeneye-full-grammars --features compiled
+          cargo clippy -p goldeneye-syntax --all-targets --no-default-features --features full-grammar-pack -- -D warnings
+          cargo test -p goldeneye-syntax --no-default-features --features full-grammar-pack
+          cargo test -p goldeneye-syntax --all-features
+      - name: Prove the full-only feature graph
+        shell: bash
+        run: |
+          feature_tree="$(cargo tree -p goldeneye-syntax --no-default-features --features full-grammar-pack -e features)"
+          printf '%s\n' "$feature_tree"
+          grep -q 'goldeneye-full-grammars' <<< "$feature_tree"
+          for package in tree-sitter-go tree-sitter-javascript tree-sitter-python tree-sitter-rust tree-sitter-typescript; do
+            if grep -Eq "(^|[[:space:]])${package} v" <<< "$feature_tree"; then
+              echo "full-only graph unexpectedly contains ${package}" >&2
+              exit 1
+            fi
+          done
+      - name: Build the release-mode runtime audit binary
+        run: cargo test -p goldeneye-syntax --release --no-default-features --features full-grammar-pack --no-run

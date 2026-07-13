@@ -35,26 +35,50 @@ closure.
 
 `grammars/full-pack.toml` is deterministic metadata derived from
 `DeusData/codebase-memory-mcp` commit
-`2469ecc3a7a2f80debe296e1f17a1efcfdb9450c`. It locks 159 grammar directories,
-907 compilation/license files, and 160 explicit language-binding records. The
-lock preserves the heterogeneous `MANIFEST.md` provenance verdicts, missing
-upstream-revision reasons, and local source-patch notes; source hashes cover the
-patched vendored bytes exactly as stored in that commit's Git blobs, without
-checkout line-ending normalization. Export, verification, and materialization
-disable replacement objects and lazy object fetching, accept only regular Git
-blob modes `100644`/`100755`, and stream the lock's exact commit through Git
-object plumbing. The real-pack commands therefore use `--git-repo
+`2469ecc3a7a2f80debe296e1f17a1efcfdb9450c`. It locks 159 grammar groups, one
+native-support group, 914 compilation/license assets, and 160 explicit
+language-binding records. The support group contains the shared `common`
+native-support assets required by the verified CFML scanner. The lock preserves
+the heterogeneous `MANIFEST.md` provenance verdicts, missing upstream-revision
+reasons, and local source-patch notes; source hashes cover the vendored bytes
+exactly as stored in that commit's Git blobs, without checkout line-ending
+normalization. Export, verification, and materialization disable replacement
+objects and lazy object fetching, accept only regular Git blob modes
+`100644`/`100755`, and stream the lock's exact commit through Git object
+plumbing. Real-pack commands use `--git-repo
 .upstream/codebase-memory-mcp --git-prefix
-internal/cbm/vendored/grammars`; directory `--source` mode is retained only for
-tiny fixtures or deliberately prepared byte-stable directories.
+internal/cbm/vendored/grammars`; directory `--source` mode is for materialized
+verification, tiny fixtures, or deliberately prepared byte-stable directories.
 
-Every grammar directory has a directly locked `LICENSE`. Offline materialized
-packs and any future release pack must carry every locked per-grammar license
-file beside its compilation assets. The audited set includes MIT, CC0-1.0,
-Apache-2.0, ISC, and in-house/fork-specific notices. No grammar asset is covered
-merely by Goldeneye's project license, and a summary notice cannot replace
-those per-grammar texts. This lock/materialization support is metadata only;
-it does not claim that the full 159-grammar provider is linked into the runtime.
+Every grammar group has a directly locked `LICENSE`. The deterministic
+`grammars/full-pack-license-ledger.md` contains 159 grammar rows and two
+native-support license rows, `common/LICENSE` and
+`common/tree_sitter/LICENSE`. Offline materialized packs and any future release
+pack must carry every locked license file beside its compilation assets. The
+audited set includes MIT, CC0-1.0, Apache-2.0, ISC, and
+in-house/fork-specific notices. No asset is covered merely by Goldeneye's
+project license, and a summary notice cannot replace those direct license
+texts.
+
+The opt-in GFP native lane compiles one namespaced wrapper/archive for each
+locked grammar source and exposes 159 available language IDs backed by 157
+unique callable factories. On MSVC only, the COBOL scanner is accepted at one
+exact hash and structure, then two proven variable-length array bounds are
+changed in an `OUT_DIR` copy; all drift fails closed and other platforms compile
+the verified source directly. This derived copy does not alter the lock or
+materialized cache.
+
+No upstream application C code is linked, and there is no bundled Tree-sitter
+runtime from `codebase-memory-mcp`; the runtime comes from the locked Rust
+`tree-sitter` crate. A core-only build is not evidence for the 160-ID full
+registry. Full-pack tests prove factory/link/ABI/parser acceptance and basic
+lifecycle coverage, but this does not prove broad behavioral conformance for
+every grammar and scanner path.
+
+Phase 6 is the release-license and packaging boundary. It must bundle all
+locked grammar and support license texts, record platform/compiler evidence,
+and run the final binary self-audit before the full provider is advertised as a
+publishable artifact.
 
 ## Generated Language Registry Data
 
