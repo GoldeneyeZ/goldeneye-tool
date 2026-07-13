@@ -167,4 +167,63 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Pending implementation, review evidence, final commit, and controller verification.
+- Implementation state: committed at
+  `4b02e9962a089e1b44bc8471d323f522d517ee77`; independent spec and code-quality
+  reviews are checked after their repair loops.
+- Files created: `.cargo/config.toml`;
+  `crates/goldeneye-syntax/src/pack.rs`;
+  `crates/goldeneye-syntax/tests/grammar_lock.rs`;
+  `grammars/full-pack.toml`; `tools/export_grammar_lock.py`;
+  `xtask/Cargo.toml`; `xtask/src/lib.rs`; `xtask/src/main.rs`;
+  `xtask/tests/grammar_sync.rs`.
+- Files modified: `.gitignore`; `Cargo.toml`; `Cargo.lock`;
+  `crates/goldeneye-syntax/Cargo.toml`;
+  `crates/goldeneye-syntax/src/lib.rs`; `THIRD_PARTY.md`; the authoritative
+  GS plan/task wording; this context; and GS-5's progression section.
+- Additional evidence inspected: pinned upstream `MANIFEST.md`, `cbm.h`,
+  `lang_specs.c`, all 157 `grammar_*.c` wrappers, all 159 direct ABI parsers,
+  and the complete 907-file vendored grammar inventory.
+- TDD RED evidence:
+  - release-lock test failed with E0432 because `GrammarPackLock` did not exist;
+  - sync suite failed with E0432 because `SyncOutcome`, `verify_grammars`, and
+    `sync_grammars` did not exist;
+  - identifier regression failed because `bad/name` was incorrectly accepted;
+  - failed-publish cleanup unit failed because the marker-independent owned-temp
+    cleanup helper did not exist;
+  - allowlist regressions failed because `README.md`, nested `LICENSE`, and a
+    missing direct `parser.c` were incorrectly accepted;
+  - pinned-snapshot tests failed because the exporter had no `GitSnapshot` and
+    still read mutable worktree paths;
+  - the first code-quality review failed on Windows source and exporter
+    pathname-reopen races;
+  - the replacement-ref regression returned the substitute commit's
+    `replacement parser` bytes instead of the original commit's `original
+    parser` bytes because Git replacement objects were still enabled.
+- Focused GREEN evidence: release-lock tests 7 passed; exporter snapshot tests
+  3 passed; xtask unit 1 passed;
+  sync safety/reproducibility tests 11 passed; focused format/clippy clean.
+- Real pinned gate evidence:
+  - exporter `--check` reproduced `grammars/full-pack.toml` byte-for-byte;
+  - verify reported 159 grammars / 907 assets;
+  - absent-destination sync atomically materialized 908 files (907 locked files
+    plus state), 1,292,959,623 bytes;
+  - a second full sync rehashed source and destination and returned
+    `grammar pack already current`.
+- Workspace gate evidence: `cargo fmt --check` passed; workspace clippy passed
+  with `-D warnings`; all workspace tests passed; workspace release build passed;
+  `git diff --check` exited 0 (only local autocrlf conversion warnings).
+- Cross-platform repair evidence: the actual `pack.rs` and Unix symlink tests
+  typechecked for `x86_64-unknown-linux-gnu` through an isolated manifest. The
+  full workspace cross-check stopped before this crate because no
+  `x86_64-linux-gnu-gcc` is installed for existing Tree-sitter C build scripts.
+- Independent spec review: checked after closing all three Important findings
+  (strict asset/license allowlist, capability-relative no-follow traversal, and
+  replacement-ref-proof exact-commit export).
+- Independent code-quality review: checked after closing both Medium findings
+  (cross-platform source traversal and immutable pinned-Git-object export),
+  then checked again after the replacement-object hardening.
+- Implementation notes: hashing uses the exact NUL-terminated framed SHA-256
+  contract over grammar-relative UTF-8 paths and raw bytes. ABI comes only from
+  each direct parser (`13=9`, `14=78`, `15=72`); the nested RST helper remains a
+  copied asset. Materialization is offline metadata/tooling and does not claim a
+  full runtime `GrammarProvider`.

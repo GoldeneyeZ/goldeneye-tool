@@ -54,18 +54,24 @@ Expected: FAIL because lock/export types do not exist.
 
 `pack.rs` deserializes the TOML into owned records. Top-level metadata declares grammar count, language-binding count, compatible ABI range, and upstream commit; validation checks those declared counts plus unique names/IDs, relative slash-normalized paths, ABI compatibility, non-empty hashes, and non-empty license declarations. Every language binding is explicitly `available` with a grammar name or `unavailable` with a reason; every unbound grammar asset is explicitly marked orphaned with a reason. This keeps tiny test packs valid while the committed release lock test independently pins `159`, `160`, and the audited upstream commit. `xtask` depends on this shared model; it must not carry a second lock parser.
 
-The audited upstream `MANIFEST.md` ABI summary is stale. Generated `parser.c` is authoritative: ABI 13 has 9 grammars, ABI 14 has 78, and ABI 15 has 72. Upstream also has one detected language without a `ts_factory` (`nim`), three IDs sharing YAML (`yaml`, `kustomize`, `k8s`), and two unbound ObjectScript grammar assets. Therefore 159 active IDs resolve to 157 unique bound grammar assets. These are explicit lock states, never silent count exceptions.
+The audited upstream `MANIFEST.md` ABI summary is stale. Each grammar's direct `<grammar>/parser.c` must contain exactly one `LANGUAGE_VERSION` marker; those 159 generated parsers are authoritative: ABI 13 has 9 grammars, ABI 14 has 78, and ABI 15 has 72. The nested `rst/tree_sitter_rst/parser.c` is a scanner helper with no ABI marker: it is locked and copied as compilation source but excluded from the histogram. Upstream also has one detected language without a `ts_factory` (`nim`), three IDs sharing YAML (`yaml`, `kustomize`, `k8s`), and two unbound ObjectScript grammar assets. Therefore 159 active IDs resolve to 157 unique bound grammar assets. These are explicit lock states, never silent count exceptions.
 
 `tools/export_grammar_lock.py` reads pinned upstream:
 
 - `internal/cbm/vendored/grammars/MANIFEST.md`;
-- all parser/scanner/header assets;
+- every compilation asset under each grammar (`*.c`, `*.h`, and `*.inc`, including helper sources) plus the direct `LICENSE`;
 - `crates/goldeneye-discovery/data/languages.tsv`;
 - upstream grammar registry mappings.
 
-It emits one TOML grammar record with name, pinned repository/commit, ABI read from each generated `parser.c`, relative asset paths, framed SHA-256 source hash, scanner language, license files, verdict, and optional explicit orphan reason. It emits 160 language bindings, including explicit unavailable entries. Output contains no timestamps or absolute paths and sorts every record/path/binding. It refuses ABI outside the runtime-compatible range, missing license, count mismatch, implicit unavailable/orphan state, unresolved available binding, symlink/non-regular assets, or source outside grammar root.
+All upstream metadata and asset bytes come from the exact expected commit's Git
+tree (`ls-tree` plus streaming `cat-file --batch`), not mutable worktree file
+paths. Git replacement-object resolution is disabled for every subprocess so
+replacement refs cannot substitute another tree under the pinned commit ID.
+Only regular Git blob modes are accepted for files the exporter reads.
 
-Grammar hashing is exactly `SHA-256("goldeneye-grammar-assets-v1\\0" || repeated(u64_be(path_len) || slash_normalized_utf8_path || u64_be(content_len) || raw_content))` over every copied parser/scanner/header/license asset sorted by path bytes. Length framing prevents path/content concatenation ambiguity; non-UTF-8 or non-normalized paths are rejected.
+It emits one TOML grammar record with name, pinned repository/commit (or an explicit reason when the audited manifest has no upstream revision), ABI read from the direct generated `parser.c`, relative asset paths, framed SHA-256 source hash, scanner language, license files, verdict, local-patch provenance, and optional explicit orphan reason. It emits 160 language bindings, including explicit unavailable entries. Output contains no timestamps or absolute paths and sorts every record/path/binding. It refuses ABI outside the runtime-compatible range, a missing/multiple direct ABI parser, missing license, count mismatch, implicit unavailable/orphan state, unresolved available binding, symlink/non-regular assets, or source outside grammar root.
+
+Grammar hashing is exactly `SHA-256(ASCII("goldeneye-grammar-assets-v1") || 0x00 || repeated(u64_be(path_len) || slash_normalized_utf8_path || u64_be(content_len) || raw_content))` over every locked `*.c`, `*.h`, `*.inc`, and direct `LICENSE`, sorted by UTF-8 path bytes. `path_len` is the UTF-8 byte length and `content_len` is the raw byte length. Length framing prevents path/content concatenation ambiguity; non-UTF-8 or non-normalized paths are rejected.
 
 - [ ] **Step 4: Implement explicit offline sync command**
 
@@ -85,7 +91,7 @@ Behavior:
 3. rejects source/destination overlap in either direction;
 4. rejects symlink/reparse or non-regular locked assets;
 5. verifies every locked source hash/license before copy;
-6. copies only locked parser/scanner/header/license assets;
+6. copies only the explicitly locked compilation assets (`*.c`, `*.h`, `*.inc`) and direct licenses;
 7. returns a no-op when an existing destination has the same verified `pack-state.json`;
 8. rejects an existing mismatched/non-pack destination without deleting or modifying it;
 9. writes an absent destination through a temporary sibling then atomic rename;
