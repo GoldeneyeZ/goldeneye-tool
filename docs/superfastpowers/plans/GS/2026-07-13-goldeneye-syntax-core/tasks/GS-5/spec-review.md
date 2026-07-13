@@ -1,5 +1,12 @@
 # GS-5 Spec Review
 
+Result: failed (reopened by final integration review)
+
+Active findings: raw Git-byte parity and duplicate identical ABI marker acceptance.
+Source: `../../final-review.md`
+
+## Prior Checked Review
+
 Result: checked after repair
 
 Reviewed: 2026-07-13 12:41 Europe/Paris

@@ -1,5 +1,10 @@
 # Code Quality Review for GS-1
 
+- Result: unchecked after final integration reopen
+- Source: `../../final-review.md`
+
+## Prior Checked Review
+
 - Result: checked
 - Reviewer: independent read-only subagent `gs1_quality_reviewer`
 - Reviewed range: `b9dfd27^..b9dfd27`

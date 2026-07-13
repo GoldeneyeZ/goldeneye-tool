@@ -1,31 +1,32 @@
 # GS-5 Implementer Handoff
 
-- Status: complete; implementation, spec, and code quality checked
-- Implementation commit: `4b02e9962a089e1b44bc8471d323f522d517ee77`
-- Reviewed range: `76b618b..4b02e99`
+- Status: active
+- Review type: final integration
+- Source: `docs/superfastpowers/plans/GS/2026-07-13-goldeneye-syntax-core/final-review.md`
+- Reviewed range: `9c0cee8..6853e05`
 
-## Delivered
+## Required Fixes
 
-- Audited deterministic 159-grammar/160-binding lock generated from pinned
-  codebase-memory-mcp commit `2469ecc3a7a2f80debe296e1f17a1efcfdb9450c`.
-- Shared validated lock/hash/copy implementation and offline `cargo xtask
-  grammars verify|sync` workflow with atomic, non-overwriting publication.
-- Complete 907-file compilation/license inventory, explicit unavailable/orphan
-  states, direct-parser ABI authority, legal ledger, and safety/reproducibility
-  tests.
-- Spec-review repairs: strict compilation/direct-license allowlist,
-  capability-relative no-follow source traversal, and replacement-ref-proof
-  reads from the exact pinned Git commit.
-- Quality-review repairs: capability-relative no-follow traversal across Unix
-  and Windows, plus immutable pinned-Git-object exporter reads.
+1. The committed 159 source hashes describe a Windows `core.autocrlf=true`
+   worktree, while the hardened exporter hashes exact LF Git blobs. Exporter
+   `--check` exits 1; filesystem verify/sync accept different bytes.
+2. `parse_direct_parser` deduplicates ABI marker values, so two identical
+   `LANGUAGE_VERSION` markers incorrectly satisfy the exactly-one contract.
 
-## Gate State
+## Acceptance Criteria
 
-- Independent spec review: checked after repair, no remaining finding.
-- Focused tests: exporter snapshot 3/3, grammar lock 7/7, xtask unit 1/1, sync
-  11/11.
-- Real pinned exporter/verify/sync gate: passed.
-- Format, workspace clippy `-D warnings`, workspace tests, release build, and
-  diff check: passed.
-- Separate fresh code-quality review: checked after repair, no remaining
-  actionable finding.
+- Treat raw bytes from pinned commit
+  `2469ecc3a7a2f80debe296e1f17a1efcfdb9450c` as the canonical source without
+  line-ending normalization.
+- Make exporter, verify, and sync consume the same byte-stable source across
+  platforms. Preserve directory-source support for tiny fixtures; for the real
+  pinned source, prefer explicit Git-object materialization over relying on a
+  user's checkout configuration.
+- Disable Git replacement resolution and reject non-regular Git modes in every
+  Git-object path. Hash and copy each asset from the same immutable stream.
+- Regenerate all 159 hashes and the Ada/YAML/RST core expectations from the
+  exact blobs. Update provenance documentation and real-gate commands.
+- Add RED regressions for an autocrlf/smudged checkout and for duplicate
+  identical ABI markers, without overlap-window double-counting.
+- Rerun exporter `--check`, real verify/sync, focused tests, workspace gates,
+  and fresh independent spec/code-quality reviews.

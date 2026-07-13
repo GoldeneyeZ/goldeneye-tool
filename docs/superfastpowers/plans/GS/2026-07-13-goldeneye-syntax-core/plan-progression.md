@@ -1,15 +1,15 @@
 # Plan Progression
 
-Last updated: 2026-07-13 12:41 Europe/Paris
+Last updated: 2026-07-13 13:08 Europe/Paris
 
 ## Task 1: Create Grammar Provider and Six-Language Core
 
 - Path: `docs/superfastpowers/plans/GS/2026-07-13-goldeneye-syntax-core/tasks/GS-1/`
-- Task status: complete
-- Implementer: checked
-- Spec review: checked
-- Code quality: checked
-- Next action: Task complete; continue to next task.
+- Task status: implementing
+- Implementer: failed
+- Spec review: failed
+- Code quality: unchecked
+- Next action: Fix core grammar metadata pin drift found by final integration review.
 
 ## Task 2: Implement Parser Snapshots and Diagnostics
 
@@ -41,8 +41,8 @@ Last updated: 2026-07-13 12:41 Europe/Paris
 ## Task 5: Freeze Full Grammar-Pack Metadata and Offline Sync
 
 - Path: `docs/superfastpowers/plans/GS/2026-07-13-goldeneye-syntax-core/tasks/GS-5/`
-- Task status: complete
-- Implementer: checked
-- Spec review: checked
-- Code quality: checked
-- Next action: Task complete; continue to the next task.
+- Task status: implementing
+- Implementer: failed
+- Spec review: failed
+- Code quality: unchecked
+- Next action: Fix raw Git-byte parity and duplicate ABI-marker findings from final integration review.
