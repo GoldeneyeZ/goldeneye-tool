@@ -11,11 +11,13 @@ repository = "https://github.com/GoldeneyeZ/goldeneye-tool"
 
 [workspace.dependencies]
 cap-primitives = "=4.0.2"
+cc = "=1.2.67"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0"
 toml = "0.9"
+tree-sitter-language = "=0.1.7"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

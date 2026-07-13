@@ -9,6 +9,33 @@ publish = false
 
 [features]
 default = []
+compiled = [
+    "dep:cc",
+    "dep:goldeneye-grammar-pack",
+    "dep:sha2",
+    "dep:tree-sitter-language",
+]
+
+[dependencies]
+tree-sitter-language = { workspace = true, optional = true }
+
+[build-dependencies]
+cc = { workspace = true, optional = true }
+goldeneye-grammar-pack = { path = "../goldeneye-grammar-pack", optional = true }
+sha2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+cc.workspace = true
+goldeneye-grammar-pack = { path = "../goldeneye-grammar-pack" }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile = "3.23"
+tree-sitter = "=0.26.11"
+tree-sitter-go = "=0.25.0"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-python = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-typescript = "=0.23.2"
 
 [lints.rust]
 unsafe_code = "deny"

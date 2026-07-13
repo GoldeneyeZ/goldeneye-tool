@@ -399,6 +399,15 @@ fn generated_outputs_support_non_mutating_check_mode() {
 }
 
 #[test]
+fn license_ledger_accounts_for_native_support_licenses() {
+    let notices = render_notices(lock_path()).unwrap();
+
+    assert!(notices.contains("## Native Support Assets"));
+    assert!(notices.contains("<code>common/LICENSE</code>"));
+    assert!(notices.contains("<code>common/tree_sitter/LICENSE</code>"));
+}
+
+#[test]
 fn license_ledger_has_exact_sorted_provenance_rows() {
     let path = lock_path();
     let lock = GrammarPackLock::load(&path).unwrap();
@@ -424,8 +433,8 @@ fn license_ledger_has_exact_sorted_provenance_rows() {
             "| --- | --- | --- | --- | --- |",
         ]
     );
-    let rows = &lines[8..];
-    assert_eq!(rows.len(), 159);
+    let grammar_rows = &lines[8..8 + 159];
+    assert_eq!(grammar_rows.len(), 159);
     assert_eq!(
         lock.grammars
             .iter()
@@ -447,7 +456,7 @@ fn license_ledger_has_exact_sorted_provenance_rows() {
         .map(|grammar| grammar.name.as_str())
         .collect::<Vec<_>>();
     expected_names.sort_unstable();
-    let actual_names = rows
+    let actual_names = grammar_rows
         .iter()
         .map(|row| {
             row.strip_prefix("| <code>")
@@ -484,9 +493,10 @@ fn license_ledger_has_exact_sorted_provenance_rows() {
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        rows,
+        grammar_rows,
         expected_rows.iter().map(String::as_str).collect::<Vec<_>>()
     );
+    assert_native_support_ledger(&lock, &lines[8 + 159..]);
     assert!(first.contains("<code>objectscript_routine</code>"));
     assert!(first.contains("<code>objectscript_udl</code>"));
 
@@ -498,6 +508,48 @@ fn license_ledger_has_exact_sorted_provenance_rows() {
     assert_eq!(
         without_embedded_lock_hash(&first),
         without_embedded_lock_hash(&reordered)
+    );
+}
+
+fn assert_native_support_ledger(lock: &GrammarPackLock, support_lines: &[&str]) {
+    assert_eq!(
+        &support_lines[..5],
+        &[
+            "",
+            "## Native Support Assets",
+            "",
+            "| Support group | Repository | Revision or missing-revision reason | License path | Source SHA-256 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    );
+    let support_rows = &support_lines[5..];
+    assert_eq!(support_rows.len(), 2);
+    let support = &lock.native_support[0];
+    let revision = support
+        .commit
+        .as_deref()
+        .or(support.missing_commit_reason.as_deref())
+        .unwrap();
+    let expected_support_rows = support
+        .license_files
+        .iter()
+        .map(|license| {
+            format!(
+                "| {} | {} | {} | {} | {} |",
+                html_cell(&support.name),
+                html_cell(&support.repository),
+                html_cell(revision),
+                html_cell(&format!("{}/{}", support.name, license)),
+                html_cell(&support.source_hash)
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        support_rows,
+        expected_support_rows
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -625,9 +677,12 @@ fn full_grammar_crate_is_default_empty_and_lint_isolated() {
     assert!(manifest.contains("[lints.rust]\nunsafe_code = \"deny\""));
     assert!(manifest.contains("[lints.clippy]\nall = \"deny\"\npedantic = \"deny\""));
     assert!(!manifest.contains("[lints]\nworkspace = true"));
-    assert!(!manifest.contains("tree-sitter-language"));
-    assert!(!library.contains("mod generated"));
-    assert!(!library.contains("include!"));
+    assert!(manifest.contains("tree-sitter-language = { workspace = true, optional = true }"));
+    assert!(manifest.contains("compiled = ["));
+    assert!(
+        library.contains("#[cfg(feature = \"compiled\")]\n#[allow(unsafe_code)]\nmod generated")
+    );
+    assert!(library.contains("include!(\"generated.rs\")"));
     assert!(!library.contains("GOLDENEYE_GRAMMAR_PACK_DIR"));
     assert!(crate_root.join("src/generated.rs").is_file());
 }

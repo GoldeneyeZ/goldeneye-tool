@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
+const NATIVE_SUPPORT_HASH_DOMAIN: &[u8] = b"goldeneye-native-support-assets-v1\0";
 const UPSTREAM_COMMIT: &str = "1111111111111111111111111111111111111111";
 
 struct Fixture {
@@ -65,6 +66,64 @@ fn exact_state_layout_and_hash_match_is_verified() {
             grammar_count: 1,
             asset_count: 2,
         }
+    );
+}
+
+#[test]
+fn native_support_assets_are_domain_separated_verified_and_counted() {
+    let temporary = tempfile::tempdir().unwrap();
+    let lock_path = temporary.path().join("full-pack.toml");
+    let root = temporary.path().join("materialized");
+    fs::create_dir_all(root.join("alpha")).unwrap();
+    fs::create_dir_all(root.join("common/tree_sitter")).unwrap();
+
+    let grammar_assets = [
+        ("LICENSE", b"grammar license\n".as_slice()),
+        ("parser.c", b"parser fixture\n".as_slice()),
+    ];
+    let support_assets = [
+        ("LICENSE", b"support license\n".as_slice()),
+        ("scanner.h", b"support scanner\n".as_slice()),
+        ("tree_sitter/LICENSE", b"tree-sitter license\n".as_slice()),
+    ];
+    for (path, bytes) in grammar_assets {
+        fs::write(root.join("alpha").join(path), bytes).unwrap();
+    }
+    for (path, bytes) in support_assets {
+        let destination = root.join("common").join(path);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(destination, bytes).unwrap();
+    }
+    let grammar_hash = independent_hash_with_domain(ASSET_HASH_DOMAIN, &grammar_assets);
+    let support_hash = independent_hash_with_domain(NATIVE_SUPPORT_HASH_DOMAIN, &support_assets);
+    assert_ne!(
+        support_hash,
+        independent_hash_with_domain(ASSET_HASH_DOMAIN, &support_assets)
+    );
+    fs::write(&lock_path, support_lock(&grammar_hash, &support_hash)).unwrap();
+    let lock = GrammarPackLock::load(&lock_path).unwrap();
+    write_state(
+        &root,
+        &GrammarPackState::expected(&lock_path, &lock).unwrap(),
+    );
+
+    assert_eq!(lock.native_support.len(), 1);
+    assert_eq!(
+        verify_materialized_pack(&lock_path, &lock, &root).unwrap(),
+        VerifiedPack {
+            grammar_count: 1,
+            asset_count: 5,
+        }
+    );
+    assert_eq!(
+        lock.locked_asset_paths().collect::<Vec<_>>(),
+        [
+            "alpha/LICENSE",
+            "alpha/parser.c",
+            "common/LICENSE",
+            "common/scanner.h",
+            "common/tree_sitter/LICENSE",
+        ]
     );
 }
 
@@ -231,8 +290,12 @@ fn write_json(path: &Path, value: &impl serde::Serialize) {
 }
 
 fn independent_hash(assets: &[(&str, &[u8])]) -> String {
+    independent_hash_with_domain(ASSET_HASH_DOMAIN, assets)
+}
+
+fn independent_hash_with_domain(domain: &[u8], assets: &[(&str, &[u8])]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(ASSET_HASH_DOMAIN);
+    hasher.update(domain);
     for (path, bytes) in assets {
         hasher.update((path.len() as u64).to_be_bytes());
         hasher.update(path.as_bytes());
@@ -240,6 +303,51 @@ fn independent_hash(assets: &[(&str, &[u8])]) -> String {
         hasher.update(bytes);
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn support_lock(grammar_hash: &str, support_hash: &str) -> String {
+    format!(
+        r#"schema_version = 1
+upstream_repository = "https://example.invalid/upstream"
+upstream_commit = "{UPSTREAM_COMMIT}"
+declared_grammar_count = 1
+declared_language_binding_count = 1
+declared_native_support_count = 1
+compatible_abi_min = 13
+compatible_abi_max = 15
+hash_algorithm = "sha256"
+hash_domain = "goldeneye-grammar-assets-v1"
+
+[[grammars]]
+name = "alpha"
+repository = "https://example.invalid/alpha"
+commit = "2222222222222222222222222222222222222222"
+abi = 15
+exported_symbol = "tree_sitter_alpha"
+assets = ["LICENSE", "parser.c"]
+source_hash = "{grammar_hash}"
+scanner_language = "none"
+license_files = ["LICENSE"]
+verdict = "fixture"
+provenance_notes = []
+
+[[native_support]]
+name = "common"
+repository = "https://example.invalid/common"
+commit = "3333333333333333333333333333333333333333"
+hash_domain = "goldeneye-native-support-assets-v1"
+assets = ["LICENSE", "scanner.h", "tree_sitter/LICENSE"]
+source_hash = "{support_hash}"
+license_files = ["LICENSE", "tree_sitter/LICENSE"]
+verdict = "shared-native-support"
+provenance_notes = []
+
+[[language_mappings]]
+language_id = "alpha"
+status = "available"
+grammar = "alpha"
+"#
+    )
 }
 
 fn tiny_lock(source_hash: &str) -> String {

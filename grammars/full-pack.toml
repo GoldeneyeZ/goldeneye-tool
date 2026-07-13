@@ -4,6 +4,7 @@ upstream_repository = "https://github.com/DeusData/codebase-memory-mcp"
 upstream_commit = "2469ecc3a7a2f80debe296e1f17a1efcfdb9450c"
 declared_grammar_count = 159
 declared_language_binding_count = 160
+declared_native_support_count = 1
 compatible_abi_min = 13
 compatible_abi_max = 15
 hash_algorithm = "sha256"
@@ -2077,6 +2078,17 @@ scanner_language = "c"
 license_files = ["LICENSE"]
 verdict = "registry-disagreement-resolved"
 provenance_notes = []
+
+[[native_support]]
+name = "common"
+repository = "https://github.com/tree-sitter/tree-sitter"
+missing_commit_reason = "vendored shared native support has no recorded upstream revision; bytes are pinned by codebase-memory-mcp 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c"
+hash_domain = "goldeneye-native-support-assets-v1"
+assets = ["LICENSE", "scanner.h", "tag.h", "tree_sitter/LICENSE", "tree_sitter/alloc.h", "tree_sitter/array.h", "tree_sitter/parser.h"]
+source_hash = "7d0793cccc055645f86722c6caa616c888da4c719d4f9a79ce1950221318bafc"
+license_files = ["LICENSE", "tree_sitter/LICENSE"]
+verdict = "shared-native-support"
+provenance_notes = ["required by the CFML external scanner through ../../common/scanner.h"]
 
 [[language_mappings]]
 language_id = "ada"

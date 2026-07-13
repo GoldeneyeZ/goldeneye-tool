@@ -391,6 +391,25 @@ fn append_language_registry(
 fn render_notices_lock(lock: &GrammarPackLock, lock_hash: &str) -> String {
     let mut grammars = lock.grammars.iter().collect::<Vec<_>>();
     grammars.sort_unstable_by(|left, right| left.name.as_bytes().cmp(right.name.as_bytes()));
+    let mut native_support_licenses = lock
+        .native_support
+        .iter()
+        .flat_map(|support| {
+            support
+                .license_files
+                .iter()
+                .map(move |license| (support, license))
+        })
+        .collect::<Vec<_>>();
+    native_support_licenses.sort_unstable_by(
+        |(left_support, left_license), (right_support, right_license)| {
+            left_support
+                .name
+                .as_bytes()
+                .cmp(right_support.name.as_bytes())
+                .then_with(|| left_license.as_bytes().cmp(right_license.as_bytes()))
+        },
+    );
 
     let mut ledger = String::new();
     ledger.push_str("# Full Grammar Pack License Ledger\n\n");
@@ -421,6 +440,30 @@ fn render_notices_lock(lock: &GrammarPackLock, lock_hash: &str) -> String {
             html_cell(&grammar.source_hash),
         )
         .expect("writing to a String cannot fail");
+    }
+    if !native_support_licenses.is_empty() {
+        ledger.push_str("\n## Native Support Assets\n\n");
+        ledger.push_str(
+            "| Support group | Repository | Revision or missing-revision reason | License path | Source SHA-256 |\n",
+        );
+        ledger.push_str("| --- | --- | --- | --- | --- |\n");
+        for (support, license) in native_support_licenses {
+            let revision = support
+                .commit
+                .as_deref()
+                .or(support.missing_commit_reason.as_deref())
+                .expect("validated native-support provenance");
+            writeln!(
+                ledger,
+                "| {} | {} | {} | {} | {} |",
+                html_cell(&support.name),
+                html_cell(&support.repository),
+                html_cell(revision),
+                html_cell(&format!("{}/{}", support.name, license)),
+                html_cell(&support.source_hash),
+            )
+            .expect("writing to a String cannot fail");
+        }
     }
     ledger
 }

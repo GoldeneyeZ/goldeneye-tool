@@ -281,6 +281,31 @@ class DirectParserTests(unittest.TestCase):
 
 
 class LockEmissionTests(unittest.TestCase):
+    def test_emits_domain_separated_native_support_group(self) -> None:
+        source = emit_lock(
+            "1" * 40,
+            [],
+            [
+                {
+                    "name": "common",
+                    "repository": "https://example.invalid/common",
+                    "commit": "2" * 40,
+                    "hash_domain": "goldeneye-native-support-assets-v1",
+                    "assets": ["LICENSE", "tree_sitter/LICENSE"],
+                    "source_hash": "3" * 64,
+                    "license_files": ["LICENSE", "tree_sitter/LICENSE"],
+                    "verdict": "shared-native-support",
+                    "provenance_notes": ["required by fixture scanner"],
+                }
+            ],
+            [],
+        )
+
+        self.assertIn("declared_native_support_count = 1", source)
+        self.assertIn("[[native_support]]", source)
+        self.assertIn('hash_domain = "goldeneye-native-support-assets-v1"', source)
+        self.assertIn('license_files = ["LICENSE", "tree_sitter/LICENSE"]', source)
+
     def test_persists_exported_symbol_in_each_grammar_record(self) -> None:
         source = emit_lock(
             "1" * 40,
@@ -299,6 +324,7 @@ class LockEmissionTests(unittest.TestCase):
                     "provenance_notes": [],
                 }
             ],
+            [],
             [
                 {
                     "language_id": "cobol",

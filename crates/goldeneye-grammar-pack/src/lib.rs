@@ -16,6 +16,7 @@ mod git_source;
 use git_source::GitSourceSession;
 
 const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
+const NATIVE_SUPPORT_HASH_DOMAIN: &[u8] = b"goldeneye-native-support-assets-v1\0";
 const LOCK_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-lock-v1\0";
 const BUFFER_SIZE: usize = 1024 * 1024;
 
@@ -61,11 +62,15 @@ pub struct GrammarPackLock {
     upstream_commit: String,
     declared_grammar_count: usize,
     declared_language_binding_count: usize,
+    #[serde(default)]
+    declared_native_support_count: usize,
     compatible_abi_min: u32,
     compatible_abi_max: u32,
     hash_algorithm: String,
     hash_domain: String,
     pub grammars: Vec<GrammarRecord>,
+    #[serde(default)]
+    pub native_support: Vec<NativeSupportRecord>,
     pub language_mappings: Vec<LanguageMapping>,
 }
 
@@ -86,6 +91,22 @@ pub struct GrammarRecord {
     #[serde(default)]
     pub provenance_notes: Vec<String>,
     pub orphan_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeSupportRecord {
+    pub name: String,
+    pub repository: String,
+    pub commit: Option<String>,
+    pub missing_commit_reason: Option<String>,
+    pub hash_domain: String,
+    pub assets: Vec<String>,
+    pub source_hash: String,
+    pub license_files: Vec<String>,
+    pub verdict: String,
+    #[serde(default)]
+    pub provenance_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -255,12 +276,20 @@ impl GrammarPackLock {
     }
 
     pub fn locked_asset_paths(&self) -> impl Iterator<Item = String> + '_ {
-        self.grammars.iter().flat_map(|grammar| {
-            grammar
-                .assets
-                .iter()
-                .map(move |asset| format!("{}/{asset}", grammar.name))
-        })
+        self.grammars
+            .iter()
+            .flat_map(|grammar| {
+                grammar
+                    .assets
+                    .iter()
+                    .map(move |asset| format!("{}/{asset}", grammar.name))
+            })
+            .chain(self.native_support.iter().flat_map(|support| {
+                support
+                    .assets
+                    .iter()
+                    .map(move |asset| format!("{}/{asset}", support.name))
+            }))
     }
 
     /// Verify every locked source asset and grammar hash.
@@ -270,8 +299,9 @@ impl GrammarPackLock {
     /// Returns [`PackError`] for unsafe paths, missing/non-regular assets,
     /// I/O failures, or content-hash mismatches.
     pub fn verify_source(&self, source_root: impl AsRef<Path>) -> Result<VerifiedPack, PackError> {
-        let mut source = SourceSession::directory(source_root.as_ref())?;
-        self.stream_assets(&mut source, None)
+        let mut grammar_source = SourceSession::directory(source_root.as_ref())?;
+        let mut support_source = SourceSession::directory(source_root.as_ref())?;
+        self.stream_assets(&mut grammar_source, &mut support_source, None)
     }
 
     /// Verify every locked asset from the lock's exact upstream Git commit.
@@ -290,9 +320,13 @@ impl GrammarPackLock {
         git_repository: impl AsRef<Path>,
         git_prefix: &str,
     ) -> Result<VerifiedPack, PackError> {
-        let mut source =
-            SourceSession::git(git_repository.as_ref(), git_prefix, self.upstream_commit())?;
-        self.stream_assets(&mut source, None)
+        let repository = git_repository.as_ref();
+        let mut grammar_source =
+            SourceSession::git(repository, git_prefix, self.upstream_commit())?;
+        let support_prefix = self.native_support_git_prefix(git_prefix)?;
+        let mut support_source =
+            SourceSession::git(repository, &support_prefix, self.upstream_commit())?;
+        self.stream_assets(&mut grammar_source, &mut support_source, None)
     }
 
     /// Copy locked assets while hashing the same open source handles.
@@ -306,8 +340,13 @@ impl GrammarPackLock {
         source_root: impl AsRef<Path>,
         destination_root: impl AsRef<Path>,
     ) -> Result<VerifiedPack, PackError> {
-        let mut source = SourceSession::directory(source_root.as_ref())?;
-        self.stream_assets(&mut source, Some(destination_root.as_ref()))
+        let mut grammar_source = SourceSession::directory(source_root.as_ref())?;
+        let mut support_source = SourceSession::directory(source_root.as_ref())?;
+        self.stream_assets(
+            &mut grammar_source,
+            &mut support_source,
+            Some(destination_root.as_ref()),
+        )
     }
 
     /// Copy locked assets from the exact upstream Git commit while hashing the
@@ -324,14 +363,23 @@ impl GrammarPackLock {
         git_prefix: &str,
         destination_root: impl AsRef<Path>,
     ) -> Result<VerifiedPack, PackError> {
-        let mut source =
-            SourceSession::git(git_repository.as_ref(), git_prefix, self.upstream_commit())?;
-        self.stream_assets(&mut source, Some(destination_root.as_ref()))
+        let repository = git_repository.as_ref();
+        let mut grammar_source =
+            SourceSession::git(repository, git_prefix, self.upstream_commit())?;
+        let support_prefix = self.native_support_git_prefix(git_prefix)?;
+        let mut support_source =
+            SourceSession::git(repository, &support_prefix, self.upstream_commit())?;
+        self.stream_assets(
+            &mut grammar_source,
+            &mut support_source,
+            Some(destination_root.as_ref()),
+        )
     }
 
     fn stream_assets(
         &self,
-        source: &mut SourceSession,
+        grammar_source: &mut SourceSession,
+        support_source: &mut SourceSession,
         destination_root: Option<&Path>,
     ) -> Result<VerifiedPack, PackError> {
         if let Some(destination_root) = destination_root {
@@ -340,7 +388,7 @@ impl GrammarPackLock {
 
         let mut asset_count = 0;
         for grammar in &self.grammars {
-            let actual = stream_grammar_assets(grammar, source, destination_root)?;
+            let actual = stream_grammar_assets(grammar, grammar_source, destination_root)?;
             if actual != grammar.source_hash {
                 return Err(PackError::HashMismatch {
                     grammar: grammar.name.clone(),
@@ -350,7 +398,19 @@ impl GrammarPackLock {
             }
             asset_count += grammar.assets.len();
         }
-        source.finish()?;
+        for support in &self.native_support {
+            let actual = stream_native_support_assets(support, support_source, destination_root)?;
+            if actual != support.source_hash {
+                return Err(PackError::HashMismatch {
+                    grammar: support.name.clone(),
+                    expected: support.source_hash.clone(),
+                    actual,
+                });
+            }
+            asset_count += support.assets.len();
+        }
+        grammar_source.finish()?;
+        support_source.finish()?;
 
         Ok(VerifiedPack {
             grammar_count: self.grammars.len(),
@@ -358,9 +418,26 @@ impl GrammarPackLock {
         })
     }
 
+    fn native_support_git_prefix(&self, grammar_prefix: &str) -> Result<String, PackError> {
+        if self.native_support.is_empty() {
+            return Ok(grammar_prefix.to_owned());
+        }
+        let (parent, leaf) = grammar_prefix.rsplit_once('/').ok_or_else(|| {
+            PackError::Invalid(
+                "native support requires a Git grammar prefix ending in /grammars".into(),
+            )
+        })?;
+        if parent.is_empty() || leaf != "grammars" {
+            return invalid("native support requires a Git grammar prefix ending in /grammars");
+        }
+        validate_relative_path(parent)?;
+        Ok(parent.to_owned())
+    }
+
     fn validate(&self) -> Result<(), PackError> {
         self.validate_header()?;
         let grammar_names = self.validate_grammars()?;
+        self.validate_native_support(&grammar_names)?;
         let bound_grammars = self.validate_language_mappings(&grammar_names)?;
         self.validate_binding_states(&bound_grammars)
     }
@@ -395,6 +472,13 @@ impl GrammarPackLock {
                 "declared language-binding count {} does not match {} records",
                 self.declared_language_binding_count,
                 self.language_mappings.len()
+            ));
+        }
+        if self.declared_native_support_count != self.native_support.len() {
+            return invalid(format!(
+                "declared native-support count {} does not match {} records",
+                self.declared_native_support_count,
+                self.native_support.len()
             ));
         }
 
@@ -491,6 +575,83 @@ impl GrammarPackLock {
         }
 
         Ok(grammar_names)
+    }
+
+    fn validate_native_support(&self, grammar_names: &BTreeSet<String>) -> Result<(), PackError> {
+        let mut group_names = grammar_names
+            .iter()
+            .map(|name| name.to_lowercase())
+            .collect::<BTreeSet<_>>();
+        let mut destination_paths = BTreeSet::new();
+        for support in &self.native_support {
+            validate_component(&support.name)?;
+            if !group_names.insert(support.name.to_lowercase()) {
+                return invalid(format!(
+                    "duplicate or case-folded native-support group {}",
+                    support.name
+                ));
+            }
+            require_nonempty("native-support repository", &support.repository)?;
+            match (&support.commit, &support.missing_commit_reason) {
+                (Some(commit), None) => require_nonempty("native-support commit", commit)?,
+                (None, Some(reason)) => {
+                    require_nonempty("native-support missing commit reason", reason)?;
+                }
+                _ => {
+                    return invalid(format!(
+                        "native-support group {} must declare exactly one of commit or missing_commit_reason",
+                        support.name
+                    ));
+                }
+            }
+            if support.hash_domain != "goldeneye-native-support-assets-v1" {
+                return invalid(format!(
+                    "native-support group {} must use goldeneye-native-support-assets-v1",
+                    support.name
+                ));
+            }
+            require_nonempty("native-support verdict", &support.verdict)?;
+            validate_hash(&support.source_hash)?;
+            validate_sorted_unique("native-support asset", &support.assets)?;
+            validate_sorted_unique("native-support license", &support.license_files)?;
+            if support.assets.is_empty() {
+                return invalid(format!(
+                    "native-support group {} has no assets",
+                    support.name
+                ));
+            }
+            if support.license_files.is_empty() {
+                return invalid(format!(
+                    "native-support group {} has no license files",
+                    support.name
+                ));
+            }
+            let assets = support.assets.iter().collect::<BTreeSet<_>>();
+            for asset in &support.assets {
+                validate_relative_path(asset)?;
+                let destination = format!("{}/{}", support.name, asset).to_lowercase();
+                if !destination_paths.insert(destination) {
+                    return invalid(format!(
+                        "case-folded native-support destination collision at {}/{}",
+                        support.name, asset
+                    ));
+                }
+            }
+            for license in &support.license_files {
+                validate_relative_path(license)?;
+                if !assets.contains(license) {
+                    return invalid(format!(
+                        "native-support group {} license {} is not a locked asset",
+                        support.name, license
+                    ));
+                }
+            }
+            for note in &support.provenance_notes {
+                require_nonempty("native-support provenance note", note)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_language_mappings(
@@ -715,15 +876,45 @@ fn stream_grammar_assets(
     source: &mut SourceSession,
     destination_root: Option<&Path>,
 ) -> Result<String, PackError> {
+    stream_group_assets(
+        &grammar.name,
+        &grammar.assets,
+        ASSET_HASH_DOMAIN,
+        source,
+        destination_root,
+    )
+}
+
+fn stream_native_support_assets(
+    support: &NativeSupportRecord,
+    source: &mut SourceSession,
+    destination_root: Option<&Path>,
+) -> Result<String, PackError> {
+    stream_group_assets(
+        &support.name,
+        &support.assets,
+        NATIVE_SUPPORT_HASH_DOMAIN,
+        source,
+        destination_root,
+    )
+}
+
+fn stream_group_assets(
+    group_name: &str,
+    assets: &[String],
+    hash_domain: &[u8],
+    source: &mut SourceSession,
+    destination_root: Option<&Path>,
+) -> Result<String, PackError> {
     let mut hasher = Sha256::new();
-    hasher.update(ASSET_HASH_DOMAIN);
+    hasher.update(hash_domain);
     let mut buffer = vec![0; BUFFER_SIZE];
 
-    for asset in &grammar.assets {
-        let relative = format!("{}/{}", grammar.name, asset);
+    for asset in assets {
+        let relative = format!("{group_name}/{asset}");
         let relative_bytes = asset.as_bytes();
         source.with_asset(
-            &grammar.name,
+            group_name,
             asset,
             |content_len, source_path, reader| {
                 hasher.update((relative_bytes.len() as u64).to_be_bytes());
@@ -731,7 +922,7 @@ fn stream_grammar_assets(
                 hasher.update(content_len.to_be_bytes());
 
                 let mut destination = if let Some(destination_root) = destination_root {
-                    let destination_path = destination_root.join(&grammar.name).join(asset);
+                    let destination_path = destination_root.join(group_name).join(asset);
                     if let Some(parent) = destination_path.parent() {
                         fs::create_dir_all(parent).map_err(|source| PackError::Io {
                             path: parent.to_path_buf(),
@@ -988,7 +1179,7 @@ fn open_source_asset(
     use cap_primitives::fs::{FollowSymlinks, OpenOptions, open, open_dir_nofollow};
 
     validate_component(grammar_name)?;
-    validate_asset_path(asset)?;
+    validate_relative_path(asset)?;
 
     let mut current_path = source_root.join(grammar_name);
     let mut directory =

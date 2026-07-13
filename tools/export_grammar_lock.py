@@ -24,7 +24,9 @@ from typing import Iterable, Iterator
 
 EXPECTED_GRAMMARS = 159
 EXPECTED_BINDINGS = 160
-EXPECTED_ASSETS = 907
+EXPECTED_GRAMMAR_ASSETS = 907
+EXPECTED_NATIVE_SUPPORT_ASSETS = 7
+EXPECTED_TOTAL_ASSETS = EXPECTED_GRAMMAR_ASSETS + EXPECTED_NATIVE_SUPPORT_ASSETS
 EXPECTED_ABI = {13: 9, 14: 78, 15: 72}
 EXPECTED_ORPHANS = {"objectscript_routine", "objectscript_udl"}
 LANGUAGE_GRAMMAR_EXCEPTIONS = {
@@ -53,9 +55,20 @@ EXPECTED_CORE_HASHES = {
     "rst": "c676d0843e42f086ceda2d889c41cb83eccc67e97f11589a1175a72270bb9da7",
 }
 ASSET_HASH_DOMAIN = b"goldeneye-grammar-assets-v1\0"
+NATIVE_SUPPORT_HASH_DOMAIN = b"goldeneye-native-support-assets-v1\0"
 COPY_BUFFER = 1024 * 1024
 ALLOWED_SOURCE_SUFFIXES = {".c", ".h", ".inc"}
 UPSTREAM_REPOSITORY = "https://github.com/DeusData/codebase-memory-mcp"
+NATIVE_SUPPORT_ROOT = "internal/cbm/vendored/common"
+NATIVE_SUPPORT_ASSET_PATHS = (
+    "LICENSE",
+    "scanner.h",
+    "tag.h",
+    "tree_sitter/LICENSE",
+    "tree_sitter/alloc.h",
+    "tree_sitter/array.h",
+    "tree_sitter/parser.h",
+)
 
 
 class ExportError(RuntimeError):
@@ -430,6 +443,21 @@ def grammar_assets(snapshot: GitSnapshot, grammar_name: str) -> list[Path]:
     return assets
 
 
+def native_support_assets(snapshot: GitSnapshot) -> list[Path]:
+    prefix = f"{NATIVE_SUPPORT_ROOT}/"
+    assets = [Path(path[len(prefix) :]) for path in snapshot.paths_under(prefix)]
+    assets.sort(key=lambda path: normalized_relative(path).encode("utf-8"))
+    actual = tuple(normalized_relative(path) for path in assets)
+    if actual != NATIVE_SUPPORT_ASSET_PATHS:
+        fail(
+            "shared native-support asset set changed: "
+            f"expected {NATIVE_SUPPORT_ASSET_PATHS}, found {actual}"
+        )
+    for relative in assets:
+        snapshot.entry(f"{NATIVE_SUPPORT_ROOT}/{normalized_relative(relative)}")
+    return assets
+
+
 def parse_direct_parser(
     chunks: Iterable[bytes], parser_path: str, hasher: "hashlib._Hash"
 ) -> tuple[int, str, int]:
@@ -512,6 +540,29 @@ def hash_assets(
     if abi is None or exported_symbol is None:
         fail(f"grammar {grammar_name} lacks a direct ABI-bearing parser.c")
     return hasher.hexdigest(), abi, exported_symbol, total_bytes
+
+
+def hash_native_support_assets(snapshot: GitSnapshot, assets: list[Path]) -> tuple[str, int]:
+    hasher = hashlib.sha256(NATIVE_SUPPORT_HASH_DOMAIN)
+    total_bytes = 0
+    for relative_path in assets:
+        relative = normalized_relative(relative_path)
+        relative_bytes = relative.encode("utf-8")
+        source_path = f"{NATIVE_SUPPORT_ROOT}/{relative}"
+        entry = snapshot.entry(source_path)
+        hasher.update(struct.pack(">Q", len(relative_bytes)))
+        hasher.update(relative_bytes)
+        hasher.update(struct.pack(">Q", entry.size))
+
+        copied = 0
+        for chunk in snapshot.chunks(source_path):
+            copied += len(chunk)
+            hasher.update(chunk)
+        if copied != entry.size:
+            fail(f"pinned native-support asset size mismatch: {source_path}")
+        total_bytes += copied
+
+    return hasher.hexdigest(), total_bytes
 
 
 def parse_wrappers(snapshot: GitSnapshot) -> dict[str, str]:
@@ -651,6 +702,7 @@ def toml_array(values: Iterable[str]) -> str:
 def emit_lock(
     expected_commit: str,
     grammar_records: list[dict[str, object]],
+    native_support_records: list[dict[str, object]],
     language_mappings: list[dict[str, str]],
 ) -> str:
     lines = [
@@ -660,6 +712,7 @@ def emit_lock(
         f"upstream_commit = {toml_string(expected_commit)}",
         f"declared_grammar_count = {len(grammar_records)}",
         f"declared_language_binding_count = {len(language_mappings)}",
+        f"declared_native_support_count = {len(native_support_records)}",
         "compatible_abi_min = 13",
         "compatible_abi_max = 15",
         'hash_algorithm = "sha256"',
@@ -698,6 +751,33 @@ def emit_lock(
                 f"orphan_reason = {toml_string(str(record['orphan_reason']))}"
             )
         lines.append("")
+
+    for record in native_support_records:
+        lines.extend(
+            [
+                "[[native_support]]",
+                f"name = {toml_string(str(record['name']))}",
+                f"repository = {toml_string(str(record['repository']))}",
+            ]
+        )
+        if "commit" in record:
+            lines.append(f"commit = {toml_string(str(record['commit']))}")
+        else:
+            lines.append(
+                "missing_commit_reason = "
+                + toml_string(str(record["missing_commit_reason"]))
+            )
+        lines.extend(
+            [
+                f"hash_domain = {toml_string(str(record['hash_domain']))}",
+                f"assets = {toml_array(record['assets'])}",  # type: ignore[arg-type]
+                f"source_hash = {toml_string(str(record['source_hash']))}",
+                f"license_files = {toml_array(record['license_files'])}",  # type: ignore[arg-type]
+                f"verdict = {toml_string(str(record['verdict']))}",
+                f"provenance_notes = {toml_array(record['provenance_notes'])}",  # type: ignore[arg-type]
+                "",
+            ]
+        )
 
     for mapping in language_mappings:
         lines.extend(
@@ -789,8 +869,40 @@ def export_snapshot(
 
     if abi_histogram != EXPECTED_ABI:
         fail(f"parser.c ABI histogram mismatch: {abi_histogram}")
-    if total_assets != EXPECTED_ASSETS:
-        fail(f"expected {EXPECTED_ASSETS} locked assets, found {total_assets}")
+    if total_assets != EXPECTED_GRAMMAR_ASSETS:
+        fail(
+            f"expected {EXPECTED_GRAMMAR_ASSETS} locked grammar assets, "
+            f"found {total_assets}"
+        )
+
+    support_assets = native_support_assets(snapshot)
+    support_hash, _support_bytes = hash_native_support_assets(snapshot, support_assets)
+    native_support_records: list[dict[str, object]] = [
+        {
+            "name": "common",
+            "repository": "https://github.com/tree-sitter/tree-sitter",
+            "missing_commit_reason": (
+                "vendored shared native support has no recorded upstream revision; bytes "
+                f"are pinned by codebase-memory-mcp {expected_commit}"
+            ),
+            "hash_domain": "goldeneye-native-support-assets-v1",
+            "assets": [normalized_relative(path) for path in support_assets],
+            "source_hash": support_hash,
+            "license_files": ["LICENSE", "tree_sitter/LICENSE"],
+            "verdict": "shared-native-support",
+            "provenance_notes": [
+                "required by the CFML external scanner through ../../common/scanner.h"
+            ],
+        }
+    ]
+    locked_assets = total_assets + len(support_assets)
+    if len(support_assets) != EXPECTED_NATIVE_SUPPORT_ASSETS:
+        fail(
+            f"expected {EXPECTED_NATIVE_SUPPORT_ASSETS} native-support assets, "
+            f"found {len(support_assets)}"
+        )
+    if locked_assets != EXPECTED_TOTAL_ASSETS:
+        fail(f"expected {EXPECTED_TOTAL_ASSETS} total locked assets, found {locked_assets}")
     for grammar, expected_hash in EXPECTED_CORE_HASHES.items():
         actual_hash = next(
             record["source_hash"] for record in records if record["name"] == grammar
@@ -829,7 +941,7 @@ def export_snapshot(
     if sum(1 for mapping in mappings if mapping["status"] == "available") != 159:
         fail("available language count changed")
 
-    return emit_lock(expected_commit, records, mappings)
+    return emit_lock(expected_commit, records, native_support_records, mappings)
 
 
 def write_atomic(path: Path, content: str) -> None:

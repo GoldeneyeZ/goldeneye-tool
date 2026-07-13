@@ -283,6 +283,20 @@ dependencies = [
 [[package]]
 name = "goldeneye-full-grammars"
 version = "0.1.0"
+dependencies = [
+ "cc",
+ "goldeneye-grammar-pack",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-javascript",
+ "tree-sitter-language",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
 
 [[package]]
 name = "goldeneye-grammar-pack"
