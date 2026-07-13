@@ -27,6 +27,26 @@ EXPECTED_BINDINGS = 160
 EXPECTED_ASSETS = 907
 EXPECTED_ABI = {13: 9, 14: 78, 15: 72}
 EXPECTED_ORPHANS = {"objectscript_routine", "objectscript_udl"}
+LANGUAGE_GRAMMAR_EXCEPTIONS = {
+    "csharp": "c_sharp",
+    "dlang": "d",
+    "emacslisp": "elisp",
+    "k8s": "yaml",
+    "kustomize": "yaml",
+    "llvm_ir": "llvm",
+    "makefile": "make",
+    "vimscript": "vim",
+}
+FACTORY_SYMBOL_EXCEPTIONS = {
+    "assembly": "tree_sitter_asm",
+    "cobol": "tree_sitter_COBOL",
+    "gotemplate": "tree_sitter_gotmpl",
+    "janet": "tree_sitter_janet_simple",
+    "php": "tree_sitter_php_only",
+    "protobuf": "tree_sitter_proto",
+    "qml": "tree_sitter_qmljs",
+    "sshconfig": "tree_sitter_ssh_config",
+}
 EXPECTED_CORE_HASHES = {
     "ada": "fe745430ec54b5c325ce94f94473855fdedde38d9f98e4cd01d5431ef438ff0e",
     "yaml": "cf48df798c4e0c179a91408c9190d7dd6ab8b3736df09626f7c42f977b421a95",
@@ -419,7 +439,7 @@ def parse_direct_parser(
         rb"(tree_sitter_[A-Za-z0-9_]+)\s*\(\s*void\s*\)\s*\{"
     )
     abi_values: list[int] = []
-    symbols: set[str] = set()
+    symbols: list[str] = []
     total = 0
     overlap = b""
     chunk_iterator = iter(chunk for chunk in chunks if chunk)
@@ -437,7 +457,11 @@ def parse_direct_parser(
             for match in abi_pattern.finditer(search_window)
             if overlap_len < match.end(1) <= physical_end
         )
-        symbols.update(value.decode("ascii") for value in symbol_pattern.findall(window))
+        symbols.extend(
+            match.group(1).decode("ascii")
+            for match in symbol_pattern.finditer(window)
+            if overlap_len < match.end() <= physical_end
+        )
         overlap = window[-1024:]
         chunk = next_chunk
     if len(abi_values) != 1:
@@ -447,7 +471,7 @@ def parse_direct_parser(
     abi = abi_values[0]
     if abi not in EXPECTED_ABI:
         fail(f"unsupported grammar ABI {abi}: {parser_path}")
-    return abi, next(iter(symbols)), total
+    return abi, symbols[0], total
 
 
 def hash_assets(
@@ -558,6 +582,64 @@ def parse_language_factories(source: str) -> dict[str, str]:
     return factories
 
 
+def register_exported_symbol(
+    symbols: dict[str, str], symbol: str, grammar_name: str
+) -> None:
+    if symbol in symbols:
+        fail(f"duplicate exported grammar symbol {symbol}")
+    symbols[symbol] = grammar_name
+
+
+def expected_exported_symbol(grammar_name: str) -> str:
+    return FACTORY_SYMBOL_EXCEPTIONS.get(
+        grammar_name, f"tree_sitter_{grammar_name}"
+    )
+
+
+def resolve_language_mappings(
+    language_ids: Iterable[str],
+    language_factories: dict[str, str],
+    symbol_to_grammar: dict[str, str],
+    wrapper_by_grammar: dict[str, str],
+) -> list[dict[str, str]]:
+    mappings: list[dict[str, str]] = []
+    for language_id in language_ids:
+        if language_id == "nim":
+            mappings.append(
+                {
+                    "language_id": "nim",
+                    "status": "unavailable",
+                    "reason": (
+                        "codebase-memory-mcp retains the language ID but has no lang_specs "
+                        "entry or Tree-sitter factory at the pinned commit"
+                    ),
+                }
+            )
+            continue
+        factory = language_factories.get(language_id)
+        if factory is None:
+            fail(f"available language {language_id} has no factory")
+        grammar = symbol_to_grammar.get(factory)
+        if grammar is None:
+            fail(f"language factory {factory} does not resolve to a grammar asset")
+        expected_grammar = LANGUAGE_GRAMMAR_EXCEPTIONS.get(language_id, language_id)
+        if grammar != expected_grammar:
+            fail(
+                f"language factory mismatch for {language_id}: "
+                f"expected grammar {expected_grammar}, resolved {grammar}"
+            )
+        if grammar not in wrapper_by_grammar:
+            fail(f"language {language_id} resolves to unwrapped grammar {grammar}")
+        mappings.append(
+            {
+                "language_id": language_id,
+                "status": "available",
+                "grammar": grammar,
+            }
+        )
+    return mappings
+
+
 def toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
@@ -602,6 +684,7 @@ def emit_lock(
         lines.extend(
             [
                 f"abi = {record['abi']}",
+                f"exported_symbol = {toml_string(str(record['exported_symbol']))}",
                 f"assets = {toml_array(record['assets'])}",  # type: ignore[arg-type]
                 f"source_hash = {toml_string(str(record['source_hash']))}",
                 f"scanner_language = {toml_string(str(record['scanner_language']))}",
@@ -679,9 +762,13 @@ def export_snapshot(
         source_hash, abi, symbol, _total_bytes = hash_assets(
             snapshot, grammar_name, assets
         )
-        if symbol in symbol_to_grammar:
-            fail(f"duplicate exported grammar symbol {symbol}")
-        symbol_to_grammar[symbol] = grammar_name
+        expected_symbol = expected_exported_symbol(grammar_name)
+        if symbol != expected_symbol:
+            fail(
+                f"direct parser factory mismatch for {grammar_name}: "
+                f"expected {expected_symbol}, found {symbol}"
+            )
+        register_exported_symbol(symbol_to_grammar, symbol, grammar_name)
         abi_histogram[abi] = abi_histogram.get(abi, 0) + 1
         total_assets += len(assets)
 
@@ -690,6 +777,7 @@ def export_snapshot(
             "name": grammar_name,
             **provenance,
             "abi": abi,
+            "exported_symbol": symbol,
             "assets": [normalized_relative(path) for path in assets],
             "source_hash": source_hash,
             "scanner_language": (
@@ -717,35 +805,9 @@ def export_snapshot(
         if symbol is None:
             fail(f"wrapper {wrapper} targets grammar without an exported symbol: {grammar}")
 
-    mappings: list[dict[str, str]] = []
-    for language_id in language_ids:
-        if language_id == "nim":
-            mappings.append(
-                {
-                    "language_id": "nim",
-                    "status": "unavailable",
-                    "reason": (
-                        "codebase-memory-mcp retains the language ID but has no lang_specs "
-                        "entry or Tree-sitter factory at the pinned commit"
-                    ),
-                }
-            )
-            continue
-        factory = language_factories.get(language_id)
-        if factory is None:
-            fail(f"available language {language_id} has no factory")
-        grammar = symbol_to_grammar.get(factory)
-        if grammar is None:
-            fail(f"language factory {factory} does not resolve to a grammar asset")
-        if grammar not in wrapper_by_grammar:
-            fail(f"language {language_id} resolves to unwrapped grammar {grammar}")
-        mappings.append(
-            {
-                "language_id": language_id,
-                "status": "available",
-                "grammar": grammar,
-            }
-        )
+    mappings = resolve_language_mappings(
+        language_ids, language_factories, symbol_to_grammar, wrapper_by_grammar
+    )
 
     mappings.sort(key=lambda mapping: mapping["language_id"].encode("utf-8"))
     bound = {

@@ -281,6 +281,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-full-grammars"
+version = "0.1.0"
+
+[[package]]
 name = "goldeneye-grammar-pack"
 version = "0.1.0"
 dependencies = [
@@ -984,6 +988,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "syn",
  "tempfile",
  "thiserror",
 ]

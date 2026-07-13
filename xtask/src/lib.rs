@@ -1,12 +1,14 @@
 //! Workspace maintenance commands.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use goldeneye_grammar_pack::{
-    GrammarPackLock, GrammarPackState, PACK_STATE_FILE, PackError, VerifiedPack,
-    verify_materialized_pack,
+    GrammarPackLock, GrammarPackState, GrammarRecord, LanguageBindingStatus, LanguageMapping,
+    PACK_STATE_FILE, PackError, VerifiedPack, verify_materialized_pack,
 };
 use serde::{Deserialize, Serialize};
 use tempfile::Builder;
@@ -18,6 +20,12 @@ const TEMP_MARKER_FILE: &str = ".goldeneye-owned-temp.json";
 pub enum SyncOutcome {
     Created,
     AlreadyCurrent,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GenerationOutcome {
+    Written,
+    Unchanged,
 }
 
 #[derive(Debug, Error)]
@@ -126,6 +134,388 @@ pub fn verify_git_grammars(
     let lock = GrammarPackLock::load(lock_path)?;
     let source = GrammarSource::git(git_repository.as_ref(), git_prefix)?;
     Ok(source.verify(&lock)?)
+}
+
+/// Render the checked-in full-provider registry from one validated lock buffer.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] when the lock cannot be read, hashed, or validated,
+/// or when its audited full-pack cardinalities have drifted.
+pub fn render_provider(lock_path: impl AsRef<Path>) -> Result<String, XtaskError> {
+    let (lock, lock_hash) = GrammarPackLock::load_with_hash(lock_path)?;
+    ensure_full_lock(&lock)?;
+    Ok(render_provider_lock(&lock, &lock_hash))
+}
+
+/// Render the deterministic full-pack license ledger.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] when the lock cannot be read, hashed, or validated,
+/// or when its audited full-pack cardinalities have drifted.
+pub fn render_notices(lock_path: impl AsRef<Path>) -> Result<String, XtaskError> {
+    let (lock, lock_hash) = GrammarPackLock::load_with_hash(lock_path)?;
+    ensure_full_lock(&lock)?;
+    Ok(render_notices_lock(&lock, &lock_hash))
+}
+
+/// Generate or check the checked-in full-provider registry.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] for invalid locks, output I/O failures, or drift in
+/// check mode.
+pub fn generate_provider(
+    lock_path: impl AsRef<Path>,
+    output_path: impl AsRef<Path>,
+    check: bool,
+) -> Result<GenerationOutcome, XtaskError> {
+    let content = render_provider(lock_path)?;
+    write_generated(output_path.as_ref(), &content, check)
+}
+
+/// Generate or check the checked-in full-pack license ledger.
+///
+/// # Errors
+///
+/// Returns [`XtaskError`] for invalid locks, output I/O failures, or drift in
+/// check mode.
+pub fn generate_notices(
+    lock_path: impl AsRef<Path>,
+    output_path: impl AsRef<Path>,
+    check: bool,
+) -> Result<GenerationOutcome, XtaskError> {
+    let content = render_notices(lock_path)?;
+    write_generated(output_path.as_ref(), &content, check)
+}
+
+fn ensure_full_lock(lock: &GrammarPackLock) -> Result<(), XtaskError> {
+    let mut unavailable = lock.unavailable_language_ids();
+    unavailable.sort_unstable();
+    let mut orphans = lock.orphan_grammar_names();
+    orphans.sort_unstable();
+    if lock.grammars.len() != 159
+        || lock.language_mappings.len() != 160
+        || lock.available_language_count() != 159
+        || lock.unique_bound_grammar_count() != 157
+        || unavailable != ["nim"]
+        || orphans != ["objectscript_routine", "objectscript_udl"]
+    {
+        return invalid(format!(
+            "full grammar inventory drift: grammars={}, ids={}, available={}, unique={}, unavailable={unavailable:?}, orphans={orphans:?}",
+            lock.grammars.len(),
+            lock.language_mappings.len(),
+            lock.available_language_count(),
+            lock.unique_bound_grammar_count(),
+        ));
+    }
+    Ok(())
+}
+
+fn render_provider_lock(lock: &GrammarPackLock, lock_hash: &str) -> String {
+    let grammars_by_name = lock
+        .grammars
+        .iter()
+        .map(|grammar| (grammar.name.as_str(), grammar))
+        .collect::<BTreeMap<_, _>>();
+    let bound_names = lock
+        .language_mappings
+        .iter()
+        .filter(|mapping| mapping.status == LanguageBindingStatus::Available)
+        .map(|mapping| {
+            mapping
+                .grammar
+                .as_deref()
+                .expect("validated available mapping")
+        })
+        .collect::<BTreeSet<_>>();
+    let grammar_indices = bound_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (*name, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut mappings = lock.language_mappings.iter().collect::<Vec<_>>();
+    mappings.sort_unstable_by(|left, right| {
+        left.language_id
+            .as_bytes()
+            .cmp(right.language_id.as_bytes())
+    });
+
+    let mut source = provider_prelude(lock, lock_hash);
+    append_factory_registry(&mut source, &bound_names, &grammars_by_name);
+    append_grammar_registry(&mut source, &bound_names, &grammars_by_name);
+    append_language_registry(&mut source, &mappings, &grammar_indices);
+    source.push_str("pub(crate) fn language_fn(grammar_index: usize) -> Option<LanguageFn> {\n");
+    source.push_str("    FACTORIES.get(grammar_index).copied().map(|factory| {\n");
+    source.push_str(
+        "        // SAFETY: every factory is a verified, linked Tree-sitter language entry.\n",
+    );
+    source.push_str("        unsafe { LanguageFn::from_raw(factory) }\n");
+    source.push_str("    })\n");
+    source.push_str("}\n");
+    source
+}
+
+fn provider_prelude(lock: &GrammarPackLock, lock_hash: &str) -> String {
+    let mut source = String::new();
+    writeln!(source, "// goldeneye-full-pack-lock-sha256: {lock_hash}")
+        .expect("writing to a String cannot fail");
+    source.push_str("// Generated by cargo xtask grammars generate-provider; do not edit.\n\n");
+    source.push_str("use tree_sitter_language::LanguageFn;\n\n");
+    writeln!(
+        source,
+        "pub(crate) const FULL_PACK_LOCK_SHA256: &str = {};",
+        rust_string(lock_hash)
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        source,
+        "pub(crate) const FULL_PACK_UPSTREAM_COMMIT: &str = {};",
+        rust_string(lock.upstream_commit())
+    )
+    .expect("writing to a String cannot fail");
+    source.push_str("pub(crate) const DECLARED_LANGUAGE_COUNT: usize = 160;\n");
+    source.push_str("pub(crate) const AVAILABLE_LANGUAGE_COUNT: usize = 159;\n");
+    source.push_str("pub(crate) const UNIQUE_GRAMMAR_COUNT: usize = 157;\n");
+    source.push_str("pub(crate) const COMPILED_SOURCE_COUNT: usize = 159;\n");
+    source.push_str("pub(crate) const ORPHAN_SOURCE_COUNT: usize = 2;\n\n");
+    source.push_str("#[derive(Clone, Copy)]\n");
+    source.push_str("pub(crate) struct GeneratedGrammar {\n");
+    source.push_str("    pub(crate) name: &'static str,\n");
+    source.push_str("    pub(crate) exported_symbol: &'static str,\n");
+    source.push_str("    pub(crate) abi: u32,\n");
+    source.push_str("    pub(crate) scanner_language: &'static str,\n");
+    source.push_str("    pub(crate) source_hash: &'static str,\n");
+    source.push_str("}\n\n");
+    source.push_str("#[derive(Clone, Copy)]\n");
+    source.push_str("pub(crate) enum GeneratedAvailability {\n");
+    source.push_str("    Available { grammar_index: usize },\n");
+    source.push_str("    Unavailable { reason: &'static str },\n");
+    source.push_str("}\n\n");
+    source.push_str("#[derive(Clone, Copy)]\n");
+    source.push_str("pub(crate) struct GeneratedLanguage {\n");
+    source.push_str("    pub(crate) id: &'static str,\n");
+    source.push_str("    pub(crate) availability: GeneratedAvailability,\n");
+    source.push_str("}\n\n");
+    source
+}
+
+fn append_factory_registry(
+    source: &mut String,
+    bound_names: &BTreeSet<&str>,
+    grammars_by_name: &BTreeMap<&str, &GrammarRecord>,
+) {
+    source.push_str("unsafe extern \"C\" {\n");
+    for (ordinal, name) in bound_names.iter().enumerate() {
+        let grammar = grammars_by_name
+            .get(name)
+            .expect("validated mapping references a grammar");
+        let link_name = format!("goldeneye_full_{}", grammar.exported_symbol);
+        writeln!(source, "    #[link_name = {}]", rust_string(&link_name))
+            .expect("writing to a String cannot fail");
+        writeln!(source, "    fn grammar_{ordinal:03}() -> *const ();")
+            .expect("writing to a String cannot fail");
+    }
+    source.push_str("}\n\n");
+    source.push_str("const FACTORIES: [unsafe extern \"C\" fn() -> *const (); 157] = [\n");
+    for ordinal in 0..bound_names.len() {
+        writeln!(source, "    grammar_{ordinal:03},").expect("writing to a String cannot fail");
+    }
+    source.push_str("];\n\n");
+}
+
+fn append_grammar_registry(
+    source: &mut String,
+    bound_names: &BTreeSet<&str>,
+    grammars_by_name: &BTreeMap<&str, &GrammarRecord>,
+) {
+    source.push_str("pub(crate) static GRAMMARS: [GeneratedGrammar; 157] = [\n");
+    for name in bound_names {
+        let grammar = grammars_by_name
+            .get(name)
+            .expect("validated mapping references a grammar");
+        writeln!(
+            source,
+            "    GeneratedGrammar {{ name: {}, exported_symbol: {}, abi: {}, scanner_language: {}, source_hash: {} }},",
+            rust_string(&grammar.name),
+            rust_string(&grammar.exported_symbol),
+            grammar.abi,
+            rust_string(&grammar.scanner_language),
+            rust_string(&grammar.source_hash),
+        )
+        .expect("writing to a String cannot fail");
+    }
+    source.push_str("];\n\n");
+}
+
+fn append_language_registry(
+    source: &mut String,
+    mappings: &[&LanguageMapping],
+    grammar_indices: &BTreeMap<&str, usize>,
+) {
+    source.push_str("pub(crate) static LANGUAGES: [GeneratedLanguage; 160] = [\n");
+    for mapping in mappings {
+        match mapping.status {
+            LanguageBindingStatus::Available => {
+                let grammar = mapping
+                    .grammar
+                    .as_deref()
+                    .expect("validated available mapping");
+                let index = grammar_indices[grammar];
+                writeln!(
+                    source,
+                    "    GeneratedLanguage {{ id: {}, availability: GeneratedAvailability::Available {{ grammar_index: {index} }} }},",
+                    rust_string(&mapping.language_id),
+                )
+                .expect("writing to a String cannot fail");
+            }
+            LanguageBindingStatus::Unavailable => {
+                let reason = mapping
+                    .reason
+                    .as_deref()
+                    .expect("validated unavailable mapping");
+                writeln!(
+                    source,
+                    "    GeneratedLanguage {{ id: {}, availability: GeneratedAvailability::Unavailable {{ reason: {} }} }},",
+                    rust_string(&mapping.language_id),
+                    rust_string(reason),
+                )
+                .expect("writing to a String cannot fail");
+            }
+        }
+    }
+    source.push_str("];\n\n");
+}
+
+fn render_notices_lock(lock: &GrammarPackLock, lock_hash: &str) -> String {
+    let mut grammars = lock.grammars.iter().collect::<Vec<_>>();
+    grammars.sort_unstable_by(|left, right| left.name.as_bytes().cmp(right.name.as_bytes()));
+
+    let mut ledger = String::new();
+    ledger.push_str("# Full Grammar Pack License Ledger\n\n");
+    ledger.push_str("Generated by cargo xtask grammars generate-notices; do not edit.\n\n");
+    writeln!(
+        ledger,
+        "<!-- goldeneye-full-pack-lock-sha256: {lock_hash} -->"
+    )
+    .expect("writing to a String cannot fail");
+    ledger.push('\n');
+    ledger.push_str(
+        "| Grammar | Repository | Revision or missing-revision reason | Direct license path | Source SHA-256 |\n",
+    );
+    ledger.push_str("| --- | --- | --- | --- | --- |\n");
+    for grammar in grammars {
+        let revision = grammar
+            .commit
+            .as_deref()
+            .or(grammar.missing_commit_reason.as_deref())
+            .expect("validated grammar provenance");
+        writeln!(
+            ledger,
+            "| {} | {} | {} | {} | {} |",
+            html_cell(&grammar.name),
+            html_cell(&grammar.repository),
+            html_cell(revision),
+            html_cell(&format!("{}/LICENSE", grammar.name)),
+            html_cell(&grammar.source_hash),
+        )
+        .expect("writing to a String cannot fail");
+    }
+    ledger
+}
+
+fn rust_string(value: &str) -> String {
+    let mut literal = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\"' => literal.push_str("\\\""),
+            '\\' => literal.push_str("\\\\"),
+            '\n' => literal.push_str("\\n"),
+            '\r' => literal.push_str("\\r"),
+            '\t' => literal.push_str("\\t"),
+            control if control.is_control() => {
+                write!(literal, "\\u{{{:x}}}", u32::from(control))
+                    .expect("writing to a String cannot fail");
+            }
+            other => literal.push(other),
+        }
+    }
+    literal.push('\"');
+    literal
+}
+
+fn html_cell(value: &str) -> String {
+    let escaped = value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "&#124;")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;");
+    format!("<code>{escaped}</code>")
+}
+
+fn write_generated(
+    output_path: &Path,
+    content: &str,
+    check: bool,
+) -> Result<GenerationOutcome, XtaskError> {
+    let existing = match fs::read(output_path) {
+        Ok(existing) => Some(existing),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(source) => {
+            return Err(XtaskError::Io {
+                path: output_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if existing.as_deref() == Some(content.as_bytes()) {
+        return Ok(GenerationOutcome::Unchanged);
+    }
+    if check {
+        return invalid(format!(
+            "generated output drift at {}; rerun the matching cargo xtask grammars generator",
+            output_path.display()
+        ));
+    }
+
+    let parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| XtaskError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let mut temporary = Builder::new()
+        .prefix(".goldeneye-generated-")
+        .tempfile_in(parent)
+        .map_err(|source| XtaskError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    temporary
+        .write_all(content.as_bytes())
+        .map_err(|source| XtaskError::Io {
+            path: temporary.path().to_path_buf(),
+            source,
+        })?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|source| XtaskError::Io {
+            path: temporary.path().to_path_buf(),
+            source,
+        })?;
+    temporary
+        .persist(output_path)
+        .map_err(|error| XtaskError::Io {
+            path: output_path.to_path_buf(),
+            source: error.error,
+        })?;
+    Ok(GenerationOutcome::Written)
 }
 
 /// Verify and atomically materialize a grammar pack, or confirm a verified no-op.

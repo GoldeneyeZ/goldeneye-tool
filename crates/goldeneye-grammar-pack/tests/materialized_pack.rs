@@ -251,6 +251,7 @@ name = "alpha"
 repository = "https://example.invalid/alpha"
 commit = "2222222222222222222222222222222222222222"
 abi = 15
+exported_symbol = "tree_sitter_alpha"
 assets = ["LICENSE", "parser.c"]
 source_hash = "{source_hash}"
 scanner_language = "none"

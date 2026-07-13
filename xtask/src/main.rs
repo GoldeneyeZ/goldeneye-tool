@@ -3,7 +3,10 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xtask::{SyncOutcome, sync_git_grammars, sync_grammars, verify_git_grammars, verify_grammars};
+use xtask::{
+    GenerationOutcome, SyncOutcome, generate_notices, generate_provider, sync_git_grammars,
+    sync_grammars, verify_git_grammars, verify_grammars,
+};
 
 enum GrammarSource {
     Directory(PathBuf),
@@ -71,22 +74,58 @@ fn run(arguments: &[String]) -> Result<String, String> {
                 SyncOutcome::AlreadyCurrent => "grammar pack already current".into(),
             })
         }
+        "generate-provider" | "generate-notices" => {
+            reject_unknown(&options, &["--lock", "--output", "--check"])?;
+            let output = required_path(&options, "--output")?;
+            let check = options.contains_key("--check");
+            let outcome = if command == "generate-provider" {
+                generate_provider(lock, output, check).map_err(|error| error.to_string())?
+            } else {
+                generate_notices(lock, output, check).map_err(|error| error.to_string())?
+            };
+            Ok(match (command, outcome) {
+                ("generate-provider", GenerationOutcome::Written) => {
+                    "full grammar provider generated".into()
+                }
+                ("generate-notices", GenerationOutcome::Written) => {
+                    "full grammar notices generated".into()
+                }
+                ("generate-provider", GenerationOutcome::Unchanged) => {
+                    "full grammar provider is current".into()
+                }
+                ("generate-notices", GenerationOutcome::Unchanged) => {
+                    "full grammar notices are current".into()
+                }
+                _ => unreachable!("matched generator command"),
+            })
+        }
         _ => Err(usage()),
     }
 }
 
 fn parse_options(arguments: &[String]) -> Result<BTreeMap<String, String>, String> {
-    if !arguments.len().is_multiple_of(2) {
-        return Err(usage());
-    }
     let mut options = BTreeMap::new();
-    for pair in arguments.chunks_exact(2) {
-        if !pair[0].starts_with("--") || pair[1].starts_with("--") {
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = &arguments[index];
+        if !option.starts_with("--") {
             return Err(usage());
         }
-        if options.insert(pair[0].clone(), pair[1].clone()).is_some() {
-            return Err(format!("duplicate option {}", pair[0]));
+        if option == "--check" {
+            if options.insert(option.clone(), "true".into()).is_some() {
+                return Err(format!("duplicate option {option}"));
+            }
+            index += 1;
+            continue;
         }
+        let value = arguments.get(index + 1).ok_or_else(usage)?;
+        if value.starts_with("--") {
+            return Err(usage());
+        }
+        if options.insert(option.clone(), value.clone()).is_some() {
+            return Err(format!("duplicate option {option}"));
+        }
+        index += 2;
     }
     Ok(options)
 }
@@ -124,7 +163,7 @@ fn reject_unknown(options: &BTreeMap<String, String>, allowed: &[&str]) -> Resul
 }
 
 fn usage() -> String {
-    "usage: cargo xtask grammars verify --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) | cargo xtask grammars sync --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) --dest <dir>".into()
+    "usage: cargo xtask grammars verify --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) | cargo xtask grammars sync --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) --dest <dir> | cargo xtask grammars generate-provider --lock <file> --output <file> [--check] | cargo xtask grammars generate-notices --lock <file> --output <file> [--check]".into()
 }
 
 #[cfg(test)]

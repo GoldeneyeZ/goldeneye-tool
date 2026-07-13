@@ -63,6 +63,7 @@ fn hash_framing_matches_pinned_golden() {
         commit: Some(TEST_COMMIT.into()),
         missing_commit_reason: None,
         abi: 15,
+        exported_symbol: "tree_sitter_one".into(),
         assets: vec!["LICENSE".into()],
         source_hash: "a78de479071a0eb45f0990913847f457d8c37cfea62ebcdc16cb6fbdaaae8868".into(),
         scanner_language: "none".into(),
@@ -495,6 +496,7 @@ name = "alpha"
 repository = "https://example.invalid/alpha"
 commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 abi = 14
+exported_symbol = "tree_sitter_alpha"
 assets = ["LICENSE", "parser.c"]
 source_hash = "{alpha_hash}"
 scanner_language = "none"
@@ -507,6 +509,7 @@ name = "beta"
 repository = "https://example.invalid/beta"
 commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 abi = 15
+exported_symbol = "tree_sitter_beta"
 assets = ["LICENSE", "parser.c", "scanner.c"]
 source_hash = "{beta_hash}"
 scanner_language = "c"
@@ -549,6 +552,7 @@ name = "alpha"
 repository = "https://example.invalid/alpha"
 commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 abi = 14
+exported_symbol = "tree_sitter_alpha"
 assets = [{assets}]
 source_hash = "{source_hash}"
 scanner_language = "none"

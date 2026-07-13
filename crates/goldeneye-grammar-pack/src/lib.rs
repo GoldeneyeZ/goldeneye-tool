@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::string::FromUtf8Error;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -30,6 +31,12 @@ pub enum PackError {
     },
     #[error("invalid grammar lock TOML: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("grammar lock {path} is not UTF-8: {source}")]
+    Utf8 {
+        path: PathBuf,
+        #[source]
+        source: FromUtf8Error,
+    },
     #[error("invalid JSON in {path}: {source}")]
     Json {
         path: PathBuf,
@@ -70,6 +77,7 @@ pub struct GrammarRecord {
     pub commit: Option<String>,
     pub missing_commit_reason: Option<String>,
     pub abi: u32,
+    pub exported_symbol: String,
     pub assets: Vec<String>,
     pub source_hash: String,
     pub scanner_language: String,
@@ -145,12 +153,32 @@ impl GrammarPackLock {
     /// Returns [`PackError`] when the file cannot be read, TOML cannot be
     /// decoded, or any lock invariant fails.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, PackError> {
+        Self::load_with_hash(path).map(|(lock, _hash)| lock)
+    }
+
+    /// Load and validate a grammar-pack lock while hashing the same bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackError`] when the exact regular-file bytes cannot be read,
+    /// are not UTF-8, TOML cannot be decoded, or any lock invariant fails.
+    pub fn load_with_hash(path: impl AsRef<Path>) -> Result<(Self, String), PackError> {
         let path = path.as_ref();
-        let source = fs::read_to_string(path).map_err(|source| PackError::Io {
+        let file = open_regular_file(path)?;
+        let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|source| PackError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        let hash = lock_bytes_hash(&bytes);
+        let source = String::from_utf8(bytes).map_err(|source| PackError::Utf8 {
             path: path.to_path_buf(),
             source,
         })?;
-        Self::parse(&source)
+        Ok((Self::parse(&source)?, hash))
     }
 
     /// Parse and validate a grammar-pack lock from TOML text.
@@ -375,6 +403,7 @@ impl GrammarPackLock {
 
     fn validate_grammars(&self) -> Result<BTreeSet<String>, PackError> {
         let mut grammar_names = BTreeSet::new();
+        let mut exported_symbols = BTreeSet::new();
         let mut destination_paths = BTreeSet::new();
         for grammar in &self.grammars {
             validate_component(&grammar.name)?;
@@ -398,7 +427,19 @@ impl GrammarPackLock {
                     grammar.name, grammar.abi, self.compatible_abi_min, self.compatible_abi_max
                 ));
             }
-            require_nonempty("scanner_language", &grammar.scanner_language)?;
+            validate_exported_symbol(&grammar.exported_symbol)?;
+            if !exported_symbols.insert(grammar.exported_symbol.clone()) {
+                return invalid(format!(
+                    "duplicate exported symbol {}",
+                    grammar.exported_symbol
+                ));
+            }
+            if !matches!(grammar.scanner_language.as_str(), "none" | "c") {
+                return invalid(format!(
+                    "grammar {} has unsupported scanner language {}",
+                    grammar.name, grammar.scanner_language
+                ));
+            }
             require_nonempty("verdict", &grammar.verdict)?;
             validate_hash(&grammar.source_hash)?;
             validate_sorted_unique("asset", &grammar.assets)?;
@@ -558,6 +599,13 @@ pub fn lock_file_hash(path: impl AsRef<Path>) -> Result<String, PackError> {
         hasher.update(&buffer[..read]);
     }
     Ok(hex_digest(hasher.finalize()))
+}
+
+fn lock_bytes_hash(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(LOCK_HASH_DOMAIN);
+    hasher.update(bytes);
+    hex_digest(hasher.finalize())
 }
 
 /// Verify a materialized grammar pack's state, exact layout, and asset hashes.
@@ -832,6 +880,23 @@ fn validate_hash(hash: &str) -> Result<(), PackError> {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
         return invalid("source_hash must be 64 lowercase hexadecimal characters");
+    }
+    Ok(())
+}
+
+fn validate_exported_symbol(symbol: &str) -> Result<(), PackError> {
+    if !symbol.starts_with("tree_sitter_") || symbol.len() == "tree_sitter_".len() {
+        return invalid(format!(
+            "exported symbol {symbol:?} must start with tree_sitter_"
+        ));
+    }
+    if !symbol
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return invalid(format!(
+            "exported symbol {symbol:?} is not an ASCII C identifier"
+        ));
     }
     Ok(())
 }
