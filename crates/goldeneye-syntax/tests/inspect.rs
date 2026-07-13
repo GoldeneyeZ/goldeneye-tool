@@ -1,3 +1,5 @@
+#![cfg(feature = "core-grammars")]
+
 use std::{fmt::Write as _, sync::Arc};
 
 use goldeneye_domain::{

@@ -326,6 +326,7 @@ name = "goldeneye-syntax"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-full-grammars",
  "goldeneye-grammar-pack",
  "serde",
  "serde_json",

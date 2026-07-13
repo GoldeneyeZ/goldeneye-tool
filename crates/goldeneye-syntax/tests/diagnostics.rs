@@ -1,3 +1,5 @@
+#![cfg(feature = "core-grammars")]
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},

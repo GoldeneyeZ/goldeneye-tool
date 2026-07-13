@@ -1,3 +1,5 @@
+#![cfg(feature = "core-grammars")]
+
 use std::{collections::HashSet, sync::Arc};
 
 use goldeneye_domain::{

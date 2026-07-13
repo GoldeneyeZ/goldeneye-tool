@@ -32,6 +32,15 @@ pub enum SyntaxError {
     #[error("Tree-sitter grammar ABI {abi} for language {language_id:?} exceeds u32")]
     GrammarAbiOverflow { language_id: LanguageId, abi: usize },
 
+    #[error(
+        "Tree-sitter grammar ABI mismatch for language {language_id:?}: expected {expected}, got {actual}"
+    )]
+    GrammarAbiMismatch {
+        language_id: LanguageId,
+        expected: u32,
+        actual: u32,
+    },
+
     #[error("Tree-sitter rejected the grammar for language {language_id:?}")]
     IncompatibleGrammar { language_id: LanguageId },
 
@@ -137,16 +146,19 @@ pub trait GrammarProvider: Send + Sync {
     /// # Errors
     ///
     /// Returns [`SyntaxError::UnsupportedGrammar`] when this provider does not
-    /// expose `language_id`, or [`SyntaxError::GrammarAbiOverflow`] when the
-    /// generated ABI cannot be represented by the public metadata type.
+    /// expose `language_id`, [`SyntaxError::GrammarAbiOverflow`] when the
+    /// generated ABI cannot be represented by the public metadata type, or
+    /// [`SyntaxError::GrammarAbiMismatch`] when runtime and locked ABIs differ.
     fn grammar(&self, language_id: &LanguageId) -> Result<Grammar, SyntaxError>;
 
     fn supported_ids(&self) -> Vec<LanguageId>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg(feature = "core-grammars")]
 pub struct CoreGrammarProvider;
 
+#[cfg(feature = "core-grammars")]
 impl GrammarProvider for CoreGrammarProvider {
     fn grammar(&self, language_id: &LanguageId) -> Result<Grammar, SyntaxError> {
         let (language, package, version): (Language, &str, &str) = match language_id.as_str() {

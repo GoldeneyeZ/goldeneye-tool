@@ -1,3 +1,5 @@
+#![cfg(feature = "core-grammars")]
+
 use goldeneye_domain::LanguageId;
 use goldeneye_syntax::{CoreGrammarProvider, GrammarProvider, GrammarSource, SyntaxError};
 use std::collections::BTreeMap;
@@ -71,10 +73,17 @@ fn exact_manifest_pins(manifest: &str) -> Result<BTreeMap<String, String>, Strin
     CORE_GRAMMAR_PACKAGES
         .into_iter()
         .map(|package| {
-            let requirement = dependencies
+            let dependency = dependencies
                 .get(package)
+                .and_then(toml::Value::as_table)
+                .ok_or_else(|| format!("{package} must be an inline dependency table"))?;
+            if dependency.get("optional").and_then(toml::Value::as_bool) != Some(true) {
+                return Err(format!("{package} must be optional"));
+            }
+            let requirement = dependency
+                .get("version")
                 .and_then(toml::Value::as_str)
-                .ok_or_else(|| format!("{package} must be a string dependency pin"))?;
+                .ok_or_else(|| format!("{package} must declare a version"))?;
             let version = requirement
                 .strip_prefix('=')
                 .filter(|version| !version.is_empty())
@@ -121,15 +130,20 @@ fn manifest_with_drifted_pin(manifest: &str, package: &str) -> String {
         .get_mut("dependencies")
         .and_then(toml::Value::as_table_mut)
         .unwrap();
-    let requirement = dependencies
+    let dependency = dependencies
         .get(package)
+        .and_then(toml::Value::as_table)
+        .unwrap();
+    let requirement = dependency
+        .get("version")
         .and_then(toml::Value::as_str)
+        .unwrap();
+    let drifted = format!("{requirement}-synthetic-drift");
+    dependencies
+        .get_mut(package)
+        .and_then(toml::Value::as_table_mut)
         .unwrap()
-        .to_owned();
-    dependencies.insert(
-        package.to_owned(),
-        toml::Value::String(format!("{requirement}-synthetic-drift")),
-    );
+        .insert("version".into(), toml::Value::String(drifted));
 
     toml::to_string(&document).unwrap()
 }
