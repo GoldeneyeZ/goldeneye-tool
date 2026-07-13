@@ -211,4 +211,50 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Pending implementation, review evidence, final commit, and controller verification.
+### Implementation
+
+- Commit: `5282cd8` (`[GS-2] feat: parse immutable syntax snapshots`)
+- Created:
+  - `crates/goldeneye-domain/src/syntax.rs`
+  - `crates/goldeneye-domain/tests/syntax_types.rs`
+  - `crates/goldeneye-syntax/src/engine.rs`
+  - `crates/goldeneye-syntax/tests/diagnostics.rs`
+- Modified:
+  - `Cargo.lock`
+  - `crates/goldeneye-domain/Cargo.toml`
+  - `crates/goldeneye-domain/src/lib.rs`
+  - `crates/goldeneye-syntax/src/grammar.rs`
+  - `crates/goldeneye-syntax/src/lib.rs`
+- Relevant files inspected:
+  - `crates/goldeneye-domain/tests/language_id.rs`
+  - `crates/goldeneye-syntax/Cargo.toml`
+  - `crates/goldeneye-syntax/src/grammar.rs`
+  - `crates/goldeneye-syntax/tests/core_grammars.rs`
+
+### TDD Evidence
+
+- Domain RED: `cargo test -p goldeneye-domain --test syntax_types` exited 101 with the twelve syntax identities unresolved and validated `ProjectId`/`LanguageId` Serde absent.
+- Engine RED: `cargo test -p goldeneye-syntax --test diagnostics` exited 101 with `SyntaxEngine`, snapshot/edit/diagnostic types, and typed engine error variants unresolved.
+- Suffix-continuity RED: focused `edit_rejects_unreported_changes_after_the_replacement` exited 101 after temporarily removing the suffix guard; restoring the guard made the focused test pass.
+- FullPack fingerprint repair RED: the focused provider test exited 101 with `incorrect-asset` instead of the locked asset name under a deliberate branch mutation; restoring the canonical branch made it pass.
+- Provider identity repair RED: the parse/reparse mismatch filter exited 101 with two missing `ProviderLanguageMismatch` variants against `2a307a0`; the new typed guard makes both focused tests pass before invalid fixture fingerprint metadata can be read.
+- Domain GREEN: `cargo test -p goldeneye-domain --test syntax_types` passed 5/5.
+- Engine GREEN: `cargo test -p goldeneye-syntax --test diagnostics` passed 10/10 after both review repairs.
+
+### Verification
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace`: passed after final repairs, 118 passed and 0 failed across 24 test/doc-test summaries.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo build --workspace`: passed.
+- `cargo build --workspace --release`: passed after final repairs.
+- `git diff --check`: passed before the implementation commit.
+
+### Reviewer Notes
+
+- Domain owns validated, Tree-sitter-free Serde identities; every custom scalar and invariant-bearing aggregate deserializes through its constructor.
+- Syntax owns the parser cache, raw-byte snapshots, diagnostic traversal, checked coordinate conversions, and validated incremental edit application.
+- Incremental validation proves both unchanged prefix and unchanged suffix. The old tree is cloned before `InputEdit`, so the previous snapshot remains immutable.
+- The byte-column edit fixture starts at byte 8 after `café`; it also inserts a valid generic syntax component so `Tree::changed_ranges` reports a structural range rather than the empty range produced by an identifier-text-only change.
+- A fixture `GrammarProvider` now proves FullPack fingerprints use provider `full-pack`, the locked asset name rather than language ID, the exact source hash revision, and exact ABI.
+- Both parse and reparse validate requested versus provider-returned language identity immediately after lookup. Mismatch tests use deliberately invalid downstream metadata to prove the guard precedes fingerprinting and parser reuse; the reparse test also rechecks old snapshot immutability.
