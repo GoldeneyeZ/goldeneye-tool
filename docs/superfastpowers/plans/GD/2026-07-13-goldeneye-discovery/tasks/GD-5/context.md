@@ -17,10 +17,34 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Final task commit: pending
-- Reviewed commit range: pending
-- Files created: pending
-- Files modified: pending
-- Additional relevant files: pending
-- Verification commands/results: pending
+- Final task commit: pending review evidence commit
+- Reviewed commit range: GD-5 implementation commit through final evidence commit
+- Files created:
+  - `crates/goldeneye-discovery/tests/upstream_parity.rs`
+  - `crates/goldeneye-discovery/tests/fixtures/discovery/manifest.tsv`
+  - `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-5/implementer-handoff.md`
+- Files modified:
+  - `THIRD_PARTY.md`
+  - `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/plan-progression.md`
+- Additional relevant files inspected:
+  - `.upstream/codebase-memory-mcp/src/discover/discover.c`
+  - `.upstream/codebase-memory-mcp/src/discover/language.c`
+  - `.upstream/codebase-memory-mcp/tests/test_discover.c`
+  - `.upstream/codebase-memory-mcp/tests/test_language.c`
+  - `Cargo.lock`
+  - `tools/export_upstream_languages.py`
+- TDD evidence:
+  - RED: replay test exited 101 with missing `UpstreamFixture` and `normalize_report`.
+  - GREEN: task replay passed 2/2 after fixture/helper implementation.
+- Verification commands/results:
+  - `cargo fmt --check`: pass
+  - `cargo clippy --workspace --all-targets -- -D warnings`: pass
+  - `cargo test --workspace`: pass, including upstream parity 2/2
+  - `cargo build --workspace --release`: pass
+  - `git diff --check`: pass; Windows line-ending conversion notices only
+  - locked metadata legal closure check: 16/16 entries present
+  - manifest audit: 75 rows, 25 per mode, all required categories present
+- Implementation notes:
+  - Normalization changes only path separators and filters platform permission warnings.
+  - Upstream's Windows symlink test is platform-skipped; fixture attempts the symlink and omits only that cited row when Windows denies privilege.
 
