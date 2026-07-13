@@ -1,8 +1,13 @@
+mod graph;
 mod syntax;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
+pub use graph::{
+    EdgeDiscriminator, EdgeKind, FileId, FileRecord, GraphEdge, GraphIdentityError, GraphNode,
+    GraphProperties, NodeId, NodeLabel, ProjectRecord, QualifiedName,
+};
 pub use syntax::{
     AncestorStep, ByteSpan, ContentHash, FileContext, Generation, GrammarFingerprint, LocatorScope,
     NodeAnchor, NodeLocator, ProjectRelativePath, SourcePoint, SourceSpan, SyntaxIdentityError,
@@ -12,6 +17,8 @@ pub use syntax::{
 pub enum DomainError {
     #[error("project ID must not be empty")]
     EmptyProjectId,
+    #[error("project ID must not contain NUL")]
+    NulProjectId,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -61,7 +68,7 @@ impl<'de> Deserialize<'de> for LanguageId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProjectId(String);
 
 impl ProjectId {
@@ -74,6 +81,9 @@ impl ProjectId {
         let value = value.into();
         if value.is_empty() {
             return Err(DomainError::EmptyProjectId);
+        }
+        if value.contains('\0') {
+            return Err(DomainError::NulProjectId);
         }
         Ok(Self(value))
     }
@@ -109,6 +119,10 @@ mod tests {
     #[test]
     fn project_id_rejects_empty_value() {
         assert_eq!(ProjectId::new(""), Err(DomainError::EmptyProjectId));
+        assert_eq!(
+            ProjectId::new("bad\0project"),
+            Err(DomainError::NulProjectId)
+        );
     }
 
     #[test]

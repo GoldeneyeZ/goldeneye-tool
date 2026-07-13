@@ -1,15 +1,18 @@
 [package]
-name = "goldeneye-domain"
+name = "goldeneye-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-blake3 = "1.8"
-serde.workspace = true
+goldeneye-domain = { path = "../goldeneye-domain" }
+rusqlite.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
