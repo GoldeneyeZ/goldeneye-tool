@@ -134,7 +134,11 @@ fn final_asset_symlink_is_rejected() {
         .expect("failed to create required final link/reparse fixture");
     assert!(is_link_or_reparse(&parser));
 
-    assert!(fixture.verify().is_err());
+    let source_verification = fixture.lock.verify_source(&fixture.root);
+    let materialized_verification = fixture.verify();
+
+    assert!(materialized_verification.is_err());
+    assert!(source_verification.is_err());
 }
 
 #[test]
@@ -147,7 +151,11 @@ fn intermediate_directory_symlink_is_rejected() {
         .expect("failed to create required directory link/reparse fixture");
     assert!(is_link_or_reparse(&grammar_root));
 
-    assert!(fixture.verify().is_err());
+    let source_verification = fixture.lock.verify_source(&fixture.root);
+    let materialized_verification = fixture.verify();
+
+    assert!(materialized_verification.is_err());
+    assert!(source_verification.is_err());
 }
 
 #[cfg(windows)]
