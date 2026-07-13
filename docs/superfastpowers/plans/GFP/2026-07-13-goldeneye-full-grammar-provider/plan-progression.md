@@ -1,13 +1,13 @@
 # Goldeneye Full Grammar Provider Plan Progression
 
-Last updated: 2026-07-13 19:46 Europe/Paris
+Last updated: 2026-07-13 19:54 Europe/Paris
 
 - Plan: `docs/superfastpowers/plans/GFP/2026-07-13-goldeneye-full-grammar-provider.md`
 - Design: `docs/superfastpowers/specs/2026-07-13-goldeneye-full-grammar-provider-design.md`
 - Plan baseline commit: `6e2b800`
 - Design whitespace follow-up: `023837d`
 - Overall status: in_progress
-- Next action: Harden direct `verify_source` link tests, then implement GFP-3 under TDD.
+- Next action: Implement GFP-3 under TDD in bypass mode.
 
 ## GFP-1: Extract Grammar-Pack Integrity into a Build-Safe Crate
 
@@ -30,11 +30,11 @@ Last updated: 2026-07-13 19:46 Europe/Paris
 ## GFP-3: Compile the Verified Native Grammar Pack Behind an Opt-In Feature
 
 - Path: `tasks/GFP-3`
-- Task status: pending
-- Implementer: unchecked
-- Spec review: unchecked
-- Code quality: unchecked
-- Next action: Wait for GFP-2 to complete.
+- Task status: in_progress
+- Implementer: in_progress
+- Spec review: bypassed (single final audit after all tasks)
+- Code quality: bypassed (single final audit after all tasks)
+- Next action: Complete the GFP-3 implementation and focused gates.
 
 ## GFP-4: Add the Safe Full GrammarProvider and Runtime Audit
 
