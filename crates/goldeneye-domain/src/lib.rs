@@ -6,6 +6,35 @@ pub enum DomainError {
     EmptyProjectId,
 }
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum LanguageIdError {
+    #[error("language ID cannot be empty")]
+    Empty,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LanguageId(String);
+
+impl LanguageId {
+    /// Creates a language identifier from a non-empty value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LanguageIdError::Empty`] when `value` is empty.
+    pub fn new(value: impl Into<String>) -> Result<Self, LanguageIdError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(LanguageIdError::Empty);
+        }
+        Ok(Self(value))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectId(String);
 

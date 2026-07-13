@@ -15,6 +15,13 @@ pub use language::{LanguageRegistry, LanguageSpec};
 pub use policy::{directory_policy, file_policy};
 pub use walker::{MAX_IGNORED_DETAILS, discover};
 
+/// Shared tool-neutral language identifier.
+///
+/// Pre-release 0.1 API note: constructing an empty ID now returns
+/// [`goldeneye_domain::LanguageIdError`] instead of
+/// `DiscoveryError::InvalidLanguageId`.
+pub use goldeneye_domain::LanguageId;
+
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,29 +29,6 @@ pub enum IndexMode {
     Full,
     Moderate,
     Fast,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LanguageId(String);
-
-impl LanguageId {
-    /// Creates a language identifier from a non-empty value.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DiscoveryError::InvalidLanguageId`] when `value` is empty.
-    pub fn new(value: impl Into<String>) -> Result<Self, DiscoveryError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(DiscoveryError::InvalidLanguageId);
-        }
-        Ok(Self(value))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,9 +70,6 @@ pub enum DiscoveryError {
 
     #[error("repository root is not a directory: {path}")]
     NonDirectoryRoot { path: PathBuf },
-
-    #[error("language ID cannot be empty")]
-    InvalidLanguageId,
 
     #[error("invalid language data at line {line}: {detail}")]
     InvalidLanguageData { line: usize, detail: String },
@@ -171,7 +152,7 @@ mod tests {
     fn language_id_rejects_empty_values_and_preserves_valid_values() {
         assert!(matches!(
             LanguageId::new(""),
-            Err(DiscoveryError::InvalidLanguageId)
+            Err(goldeneye_domain::LanguageIdError::Empty)
         ));
 
         let language = LanguageId::new("rust").expect("rust is a valid language id");
