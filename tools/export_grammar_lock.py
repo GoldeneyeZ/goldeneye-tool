@@ -413,7 +413,7 @@ def grammar_assets(snapshot: GitSnapshot, grammar_name: str) -> list[Path]:
 def parse_direct_parser(
     chunks: Iterable[bytes], parser_path: str, hasher: "hashlib._Hash"
 ) -> tuple[int, str, int]:
-    abi_pattern = re.compile(rb"#define\s+LANGUAGE_VERSION\s+(\d+)")
+    abi_pattern = re.compile(rb"#define\s+LANGUAGE_VERSION\s+(\d+)(?!\d)")
     symbol_pattern = re.compile(
         rb"(?:TS_PUBLIC\s+|extern\s+)?const\s+TSLanguage\s*\*\s*"
         rb"(tree_sitter_[A-Za-z0-9_]+)\s*\(\s*void\s*\)\s*\{"
@@ -422,18 +422,24 @@ def parse_direct_parser(
     symbols: set[str] = set()
     total = 0
     overlap = b""
-    for chunk in chunks:
+    chunk_iterator = iter(chunk for chunk in chunks if chunk)
+    chunk = next(chunk_iterator, None)
+    while chunk is not None:
+        next_chunk = next(chunk_iterator, None)
         total += len(chunk)
         hasher.update(chunk)
         window = overlap + chunk
         overlap_len = len(overlap)
+        physical_end = len(window)
+        search_window = window + (next_chunk[:1] if next_chunk is not None else b"")
         abi_values.extend(
             int(match.group(1))
-            for match in abi_pattern.finditer(window)
-            if match.end() > overlap_len
+            for match in abi_pattern.finditer(search_window)
+            if overlap_len < match.end(1) <= physical_end
         )
         symbols.update(value.decode("ascii") for value in symbol_pattern.findall(window))
         overlap = window[-1024:]
+        chunk = next_chunk
     if len(abi_values) != 1:
         fail(f"direct parser must contain exactly one ABI marker: {parser_path}")
     if len(symbols) != 1:

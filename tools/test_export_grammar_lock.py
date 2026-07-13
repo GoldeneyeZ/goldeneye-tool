@@ -94,11 +94,25 @@ class DirectParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "exactly one ABI marker"):
             parse_direct_parser([parser], "fixture/parser.c", hashlib.sha256())
 
-    def test_counts_boundary_crossing_abi_marker_once(self) -> None:
+    def test_counts_abi_marker_once_at_every_chunk_boundary(self) -> None:
+        marker = b"#define LANGUAGE_VERSION 14\n"
+        symbol = b"const TSLanguage *tree_sitter_fixture(void) {\n"
+
+        for split in range(1, len(marker)):
+            chunks = [marker[:split], marker[split:] + symbol]
+            with self.subTest(split=split):
+                abi, exported_symbol, total = parse_direct_parser(
+                    chunks, "fixture/parser.c", hashlib.sha256()
+                )
+
+                self.assertEqual(abi, 14)
+                self.assertEqual(exported_symbol, "tree_sitter_fixture")
+                self.assertEqual(total, sum(map(len, chunks)))
+
+    def test_accepts_abi_marker_at_eof_without_newline(self) -> None:
         chunks = [
-            b"x" * 1020 + b"#define LANG",
-            b"UAGE_VERSION 14\nconst TSLanguage *tree_sitter_fixture(void) {\n",
-            b"trailer",
+            b"const TSLanguage *tree_sitter_fixture(void) {\n",
+            b"#define LANGUAGE_VERSION 14",
         ]
 
         abi, symbol, total = parse_direct_parser(
