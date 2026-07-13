@@ -1,69 +1,69 @@
 # GS-5 Spec Review
 
-Result: failed (reopened by final integration review)
-
-Active finding: numeric ABI token split is double-counted across chunk overlap.
-Source: `../../final-review.md`
-
-## Prior Checked Review
-
 Result: checked
 
 - Reviewed: 2026-07-13 Europe/Paris
-- Reviewed range: `9feb49b..39ec323`
-- Repair commit: `39ec323`
-- Independent reviewer: `/root/gs5_git_repair_worker/gs5_spec_recheck`
+- Reviewed range: `bf6172d..cd44ef4`
+- Repair commit: `cd44ef4` (`[GS-5] fix: parse ABI across digit boundaries`)
+- Independent reviewer: `/root/gs5_abi_boundary_repair/gs5_repair_reviewer`
 - Verdict: CHECKED; no remaining GS-5 specification finding.
 
 ## Scope and Evidence
 
-- Reviewed the actual committed range (11 changed files, 1,251 insertions and
-  271 deletions), the GS plan Task 5 contract, GS-5 task/context/handoff, prior
-  spec review, progression, and the failed final-integration review.
-- Accepted the focused and real-pack command evidence already recorded in
-  `context.md:235-282`; this one-turn recheck did not rerun the long 1.29 GB
-  real-pack gates.
-- Confirmed the lock/export provenance update spans the raw pinned Git blobs,
-  regenerated 159 grammar hashes and core expectations, and updated commands
-  and attribution (`grammars/full-pack.toml:1`,
-  `tools/export_grammar_lock.py:1`, `THIRD_PARTY.md:1`, and
-  `tasks/GS-5/context.md:235`).
+- Read the GS-5 task, context, active implementer handoff, prior spec review,
+  plan progression, and goal-level failed final-integration review, then
+  inspected the actual committed range. The range changes only
+  `tools/export_grammar_lock.py` and `tools/test_export_grammar_lock.py` (28
+  insertions, 8 deletions); `git diff --check` exits 0.
+- Independently executed the `bf6172d` and `cd44ef4` exporter implementations
+  in memory against every interior split of
+  `b"#define LANGUAGE_VERSION 14\n"` plus a valid exported symbol. The marker
+  is 28 bytes, so the probe exercised all 27 interior split points. The base
+  failed only at split 26 (`LANGUAGE_VERSION 1 | 4`) with the expected
+  exactly-one-marker error; the repaired head passed all 27.
+- Fresh focused exporter tests pass 7/7 with no failures, errors, or skips.
+  The suite includes the exhaustive all-boundary regression, duplicate
+  identical-marker rejection, and marker-at-EOF/no-trailing-newline coverage
+  (`tools/test_export_grammar_lock.py:86`).
+- Additional head probes covered digit continuation over one and two chunk
+  boundaries, an intervening empty chunk, a non-digit next byte, and final EOF.
+  Continued `14 | 5` input was parsed as the complete numeric token `145` and
+  rejected as unsupported rather than prematurely accepting ABI 14; valid
+  three-chunk `1 | 4 | \n`, non-digit-lookahead, and EOF cases accepted ABI 14.
+  Every probe's digest equaled SHA-256 over the concatenated original chunks.
+- Accepted the recorded real exporter `--check` evidence in `context.md`: the
+  committed lock was reproduced byte-for-byte. Per review scope, the 1.29 GB
+  Git verify/sync gates were not repeated. A direct protected-surface diff
+  confirms `grammars/full-pack.toml`, Cargo files, all Rust, `crates/`, and
+  `xtask` are byte-identical between the review endpoints.
 
 ## Requirement Trace
 
-1. The original directory APIs remain, while Git verification/copy obtain the
-   commit only from `GrammarPackLock::upstream_commit`; both source kinds enter
-   the same private framed hash/copy loop (`crates/goldeneye-syntax/src/pack.rs:196`,
-   `crates/goldeneye-syntax/src/pack.rs:204`,
-   `crates/goldeneye-syntax/src/pack.rs:240`, and
-   `crates/goldeneye-syntax/src/pack.rs:520`).
-2. The CLI requires exactly one directory `--source` or the paired
-   `--git-repo`/`--git-prefix` form, and absent Git sync streams into an owned
-   temporary source before the existing destination-safe materialization path
-   (`xtask/src/main.rs:1` and `xtask/src/lib.rs:1`).
-3. Git access canonicalizes the repository, disables replacements and lazy
-   fetching, verifies the exact commit, parses NUL-delimited `ls-tree`, and
-   accepts only modes `100644`/`100755`
-   (`crates/goldeneye-syntax/src/pack/git_source.rs:1`).
-4. A persistent OID-only `cat-file --batch` session validates the object type,
-   declared size, exact byte count, and trailing delimiter; every error/drop
-   path closes stdin and kills/reaps the child
-   (`crates/goldeneye-syntax/src/pack/git_source.rs:80` and
-   `crates/goldeneye-syntax/src/pack/git_source.rs:300`).
-5. Directory traversal, atomic create-new writes, existing-pack no-op behavior,
-   mismatch rejection, overlap rejection, and partial-output cleanup remain in
-   the shared path (`crates/goldeneye-syntax/src/pack.rs:520` and
-   `xtask/src/lib.rs:1`). No archive/checkout/full-blob `Vec` path was added.
-6. The committed regressions cover CRLF/smudged worktrees, replacement refs,
-   non-regular modes, payloads larger than two stream buffers, mixed CLI forms,
-   duplicate identical ABI markers, and overlap-window boundary counting
-   (`tools/test_export_grammar_lock.py:1`,
-   `xtask/tests/grammar_sync.rs:1`, and
-   `crates/goldeneye-syntax/src/pack.rs:1`).
+1. The regression iterates `range(1, len(marker))`, which is exactly all 27
+   interior split points, and supplies a valid `tree_sitter_fixture` symbol.
+   Independent RED/GREEN evidence proves split 26 is the sole base failure and
+   is repaired at the reviewed head.
+2. `parse_direct_parser` now requires a non-digit after the captured ABI with
+   `(?!\d)`. It prefetches at most the next non-empty chunk and appends only its
+   first byte to the regex search window; EOF supplies no lookahead byte
+   (`tools/export_grammar_lock.py:416`, `tools/export_grammar_lock.py:425`).
+3. A match is counted only when the completed digit group's end satisfies
+   `overlap_len < match.end(1) <= physical_end`. Thus a partial token that
+   consumes digit lookahead is deferred, a completed token whose physical end
+   newly enters the current window is counted exactly once, and a match wholly
+   inside overlap is not recounted (`tools/export_grammar_lock.py:431`).
+4. Byte count and SHA-256 state are updated only from the current original
+   chunk. The lookahead byte participates solely in matching. The parser keeps
+   bounded overlap, the current chunk, and at most one prefetched chunk; it does
+   not load a full parser (`tools/export_grammar_lock.py:427`).
+5. Duplicate identical markers still produce two completed physical matches
+   and fail the exactly-one check. The parser's existing contract permits a
+   completed marker at final EOF, and the committed no-newline regression
+   verifies that behavior.
+6. The repair leaves exact Git-byte export/materialization, the generated lock,
+   Rust verification/locking, Cargo metadata, and `xtask` unchanged.
 
 ## Findings
 
-No active specification findings. The two final-integration failures recorded
-in `implementer-handoff.md:12-16` are closed by this range: raw Git-byte parity
-is restored and duplicate identical ABI markers no longer satisfy the
-exactly-one contract.
+No active specification findings. The final-integration ABI digit-boundary
+finding is closed by `cd44ef4`.

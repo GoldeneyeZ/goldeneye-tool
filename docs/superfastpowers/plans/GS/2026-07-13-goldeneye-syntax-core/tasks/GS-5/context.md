@@ -284,3 +284,38 @@ Files above are starting points only. Inspect any additional files needed to com
 - Final post-review gate exited 0: workspace format check, workspace clippy with
   `-D warnings`, all workspace tests (including xtask CLI 2/2 and sync 15/15),
   workspace release build, exporter tests 6/6, and `git diff --check`.
+
+## ABI Digit-Boundary Repair
+
+- Implementation commit: `cd44ef4` (`[GS-5] fix: parse ABI across digit
+  boundaries`); fresh review range: `bf6172d..cd44ef4`.
+- RED: after adding an exhaustive regression for all 27 interior split points
+  of `#define LANGUAGE_VERSION 14\n`, the 7-test exporter suite failed only at
+  split 26 (`LANGUAGE_VERSION 1 | 4`) with `direct parser must contain exactly
+  one ABI marker`.
+- GREEN: exporter tests passed 7/7, including the 27-split regression, the
+  preserved duplicate-identical-marker rejection, and an ABI marker at EOF
+  without a trailing newline. The isolated exhaustive regression passed 1/1.
+- The bounded parser now requires a non-digit after the ABI, prefetches only
+  one non-empty chunk (or the EOF sentinel), and accepts a match only when the
+  completed digit group's physical end enters the current window without
+  entering the lookahead. Only the current original chunk contributes to byte
+  count and SHA-256 state.
+- Real pinned exporter `--check` exited 0 and reported
+  `grammars/full-pack.toml` reproducible. A diff from `bf6172d` confirmed the
+  lock, every Rust source, and `xtask` byte-identical; the heavy Git
+  verify/sync gates were not repeated because no lock/hash bytes changed.
+- Fresh independent spec review: CHECKED for `bf6172d..cd44ef4`; the reviewer
+  independently reproduced the base split-26 RED, the repaired 27/27 GREEN,
+  continued-digit rejection, EOF acceptance, original-byte hash/count parity,
+  and an empty protected-file diff.
+- Fresh independent code-quality review: CHECKED in a separate explicit role;
+  no actionable correctness, performance, bounded-streaming, iterator,
+  hashing, test-quality, scope, or maintainability finding remains.
+- Fresh post-review gates all exited 0: exporter tests 7/7; isolated exhaustive
+  split regression 1/1 covering 27 interior splits; real exporter `--check`
+  reproducible; workspace format check; workspace clippy with 0 warnings and
+  0 errors; workspace tests across 31 result sets with 175 passed, 0 failed,
+  0 ignored, and 0 filtered out; workspace release build with 0 warnings and
+  0 errors; `git diff --check`; protected lock/Rust/Cargo/xtask diff; and
+  goal-level `final-review.md` untouched.
