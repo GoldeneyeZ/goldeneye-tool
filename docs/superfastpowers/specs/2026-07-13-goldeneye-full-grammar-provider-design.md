@@ -1,8 +1,8 @@
 # Goldeneye Full Grammar Provider Design
 
-**Status:** Approved by the parent Rust-port design and the user's instruction to proceed  
-**Date:** 2026-07-13  
-**Phase acronym:** GFP  
+**Status:** Approved by the parent Rust-port design and the user's instruction to proceed
+**Date:** 2026-07-13
+**Phase acronym:** GFP
 **Parent design:** `docs/superfastpowers/specs/2026-07-13-goldeneye-rust-port-design.md`
 
 ## Goal
