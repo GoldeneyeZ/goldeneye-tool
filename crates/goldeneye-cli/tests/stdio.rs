@@ -69,6 +69,30 @@ fn initialize_round_trip_returns_protocol_and_server_identity() {
 }
 
 #[test]
+fn initialize_round_trip_negotiates_supported_versions_and_falls_back() {
+    for (requested, expected) in [
+        ("2025-11-25", "2025-11-25"),
+        ("2025-06-18", "2025-06-18"),
+        ("2025-03-26", "2025-03-26"),
+        ("2024-11-05", "2024-11-05"),
+        ("unsupported", "2025-11-25"),
+    ] {
+        let input = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"initialize","params":{{"protocolVersion":"{requested}"}}}}
+"#
+        );
+        let output = run_server(input.as_bytes());
+        assert_clean_success(&output);
+
+        let responses = parse_json_lines(&output.stdout);
+        assert_eq!(
+            responses[0]["result"]["protocolVersion"], expected,
+            "requested {requested}"
+        );
+    }
+}
+
+#[test]
 fn ping_round_trip_preserves_string_id() {
     let output = run_server(b"{\"jsonrpc\":\"2.0\",\"id\":\"request-1\",\"method\":\"ping\"}\n");
     assert_clean_success(&output);
@@ -98,8 +122,29 @@ fn invalid_json_returns_parse_error_as_json() {
     let responses = parse_json_lines(&output.stdout);
     assert_eq!(responses.len(), 1);
     assert_eq!(responses[0]["jsonrpc"], "2.0");
-    assert_eq!(responses[0]["id"], Value::Null);
+    assert_eq!(responses[0]["id"], 0);
     assert_eq!(responses[0]["error"]["code"], -32700);
+    assert_eq!(responses[0]["error"]["message"], "Parse error");
+}
+
+#[test]
+fn invalid_utf8_returns_parse_error_then_processes_next_frame() {
+    let input = [
+        &[0xff, b'\n'][..],
+        b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n",
+    ]
+    .concat();
+
+    let output = run_server(&input);
+    assert_clean_success(&output);
+
+    let responses = parse_json_lines(&output.stdout);
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["id"], 0);
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    assert_eq!(responses[0]["error"]["message"], "Parse error");
+    assert_eq!(responses[1]["id"], 7);
+    assert_eq!(responses[1]["result"], json!({}));
 }
 
 #[test]

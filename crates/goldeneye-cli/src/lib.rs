@@ -6,8 +6,8 @@ use std::io::{BufReader, BufWriter, Read, Write};
 ///
 /// # Errors
 ///
-/// Returns an error when input framing, UTF-8 decoding, JSON serialization, or
-/// output writing fails.
+/// Returns an error when input framing, JSON serialization, or output writing
+/// fails.
 pub fn run_session<R: Read, W: Write>(
     reader: R,
     writer: W,
@@ -17,8 +17,11 @@ pub fn run_session<R: Read, W: Write>(
     let server = Server::default();
 
     while let Some(frame) = frames.next_frame()? {
-        let line = String::from_utf8(frame)?;
-        if let Some(response) = server.handle_line(&line) {
+        let response = match String::from_utf8(frame) {
+            Ok(line) => server.handle_line(&line),
+            Err(_) => Some(goldeneye_mcp::protocol::Response::parse_error()),
+        };
+        if let Some(response) = response {
             serde_json::to_writer(&mut output, &response)?;
             output.write_all(b"\n")?;
             output.flush()?;

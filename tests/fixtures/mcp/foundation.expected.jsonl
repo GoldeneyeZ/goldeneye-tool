@@ -1,9 +1,16 @@
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"codebase-memory-mcp","version":"<normalized>"}}}
-{"jsonrpc":"2.0","id":2,"result":{}}
-{"jsonrpc":"2.0","id":3,"result":{"resources":[]}}
-{"jsonrpc":"2.0","id":4,"result":{"resourceTemplates":[]}}
-{"jsonrpc":"2.0","id":5,"result":{"prompts":[]}}
-{"jsonrpc":"2.0","id":6,"result":{"tools":[]}}
-{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"Method not found"}}
+{"jsonrpc":"2.0","id":2,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"codebase-memory-mcp","version":"<normalized>"}}}
+{"jsonrpc":"2.0","id":3,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"codebase-memory-mcp","version":"<normalized>"}}}
+{"jsonrpc":"2.0","id":4,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"codebase-memory-mcp","version":"<normalized>"}}}
+{"jsonrpc":"2.0","id":5,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"codebase-memory-mcp","version":"<normalized>"}}}
+{"jsonrpc":"2.0","id":6,"result":{}}
+{"jsonrpc":"2.0","id":7,"result":{"resources":[]}}
+{"jsonrpc":"2.0","id":8,"result":{"resourceTemplates":[]}}
+{"jsonrpc":"2.0","id":9,"result":{"prompts":[]}}
+{"jsonrpc":"2.0","id":10,"result":{"tools":[]}}
+{"jsonrpc":"2.0","id":11,"error":{"code":-32601,"message":"Method not found"}}
 {"jsonrpc":"2.0","id":"string-id","result":{}}
-{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"EOF while parsing an object at line 1 column 1"}}
+{"jsonrpc":"2.0","id":12,"result":{}}
+{"jsonrpc":"2.0","id":0,"error":{"code":-32700,"message":"Parse error"}}
+{"jsonrpc":"2.0","id":0,"error":{"code":-32700,"message":"Parse error"}}
+{"jsonrpc":"2.0","id":0,"error":{"code":-32700,"message":"Parse error"}}

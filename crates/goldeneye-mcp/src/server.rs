@@ -2,7 +2,22 @@ use crate::protocol::{Request, Response};
 use crate::tools::{ToolCallResult, ToolRegistry};
 use serde_json::{Value, json};
 
-pub const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
+pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
+    ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+pub const LATEST_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
+
+fn negotiated_protocol_version(params: &Value) -> &'static str {
+    params
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .and_then(|requested| {
+            SUPPORTED_PROTOCOL_VERSIONS
+                .iter()
+                .copied()
+                .find(|supported| requested == *supported)
+        })
+        .unwrap_or(LATEST_PROTOCOL_VERSION)
+}
 
 #[derive(Default)]
 pub struct Server {
@@ -12,14 +27,13 @@ pub struct Server {
 impl Server {
     #[must_use]
     pub fn handle_line(&self, line: &str) -> Option<Response> {
-        let request = match Request::parse(line) {
-            Ok(request) => request,
-            Err(error) => return Some(Response::error(None, -32700, error.to_string())),
+        let Ok(request) = Request::parse(line) else {
+            return Some(Response::parse_error());
         };
         let id = request.id.clone()?;
         let result: Option<Value> = match request.method.as_str() {
             "initialize" => Some(json!({
-                "protocolVersion": LATEST_PROTOCOL_VERSION,
+                "protocolVersion": negotiated_protocol_version(&request.params),
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": {
                     "name": "codebase-memory-mcp",
@@ -68,7 +82,8 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use super::Server;
+    use super::{LATEST_PROTOCOL_VERSION, Server};
+    use crate::protocol::RequestId;
     use serde_json::json;
 
     #[test]
@@ -83,6 +98,51 @@ mod tests {
             value["result"]["capabilities"]["tools"]["listChanged"],
             false
         );
+    }
+
+    #[test]
+    fn initialize_echoes_every_supported_protocol_version() {
+        for version in ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] {
+            let request = format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{version}"}}}}"#
+            );
+            let response = Server::default()
+                .handle_line(&request)
+                .expect("request response");
+
+            assert_eq!(
+                response.result.expect("initialize result")["protocolVersion"],
+                version
+            );
+        }
+    }
+
+    #[test]
+    fn initialize_falls_back_to_latest_for_unsupported_version() {
+        let response = Server::default()
+            .handle_line(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"unsupported"}}"#,
+            )
+            .expect("request response");
+
+        assert_eq!(
+            response.result.expect("initialize result")["protocolVersion"],
+            LATEST_PROTOCOL_VERSION
+        );
+    }
+
+    #[test]
+    fn parse_failures_use_stable_upstream_error() {
+        for input in ["{", "[]", r#"{"jsonrpc":"2.0","id":1}"#] {
+            let response = Server::default()
+                .handle_line(input)
+                .expect("parse response");
+            let error = response.error.expect("parse error");
+
+            assert_eq!(response.id, Some(RequestId::Number(0)));
+            assert_eq!(error.code, -32700);
+            assert_eq!(error.message, "Parse error");
+        }
     }
 
     #[test]

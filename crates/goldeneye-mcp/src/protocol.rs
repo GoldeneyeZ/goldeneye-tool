@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+fn default_jsonrpc() -> String {
+    "2.0".to_owned()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum RequestId {
@@ -10,6 +14,7 @@ pub enum RequestId {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Request {
+    #[serde(default = "default_jsonrpc")]
     pub jsonrpc: String,
     #[serde(default)]
     pub id: Option<RequestId>,
@@ -72,6 +77,11 @@ impl Response {
             }),
         }
     }
+
+    #[must_use]
+    pub fn parse_error() -> Self {
+        Self::error(Some(RequestId::Number(0)), -32700, "Parse error")
+    }
 }
 
 #[cfg(test)]
@@ -87,6 +97,14 @@ mod tests {
             Request::parse(r#"{"jsonrpc":"2.0","id":"abc","method":"ping"}"#).expect("string ID");
         assert_eq!(numeric.id, Some(RequestId::Number(7)));
         assert_eq!(string.id, Some(RequestId::String("abc".into())));
+    }
+
+    #[test]
+    fn request_defaults_missing_jsonrpc_to_2_0() {
+        let request =
+            Request::parse(r#"{"id":7,"method":"ping"}"#).expect("upstream-compatible request");
+
+        assert_eq!(request.jsonrpc, "2.0");
     }
 
     #[test]
