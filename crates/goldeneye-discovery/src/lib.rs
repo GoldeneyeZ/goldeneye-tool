@@ -5,9 +5,13 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+mod ignore_rules;
 mod language;
+mod policy;
 
+pub use ignore_rules::IgnoreRules;
 pub use language::{LanguageRegistry, LanguageSpec};
+pub use policy::{directory_policy, file_policy};
 
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
