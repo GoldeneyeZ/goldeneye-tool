@@ -337,6 +337,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-index"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "goldeneye-discovery",
+ "goldeneye-domain",
+ "goldeneye-store",
+ "goldeneye-syntax",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+]
+
+[[package]]
 name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [

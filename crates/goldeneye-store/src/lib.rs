@@ -66,6 +66,8 @@ pub enum StoreError {
     MissingNode { node_id: NodeId },
     #[error("duplicate node ID in replacement: {0:?}")]
     DuplicateNodeId(NodeId),
+    #[error("duplicate file path in replacement: {0:?}")]
+    DuplicateFilePath(ProjectRelativePath),
     #[error("duplicate qualified name in replacement: {0:?}")]
     DuplicateQualifiedName(QualifiedName),
     #[error("duplicate edge identity in replacement")]
@@ -95,6 +97,14 @@ pub struct ConnectionSettings {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReplacementOutcome {
+    pub nodes: usize,
+    pub edges: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectReplacementOutcome {
+    pub generation: Generation,
+    pub files: usize,
     pub nodes: usize,
     pub edges: usize,
 }
@@ -288,6 +298,95 @@ impl Store {
             nodes: ordered_nodes.len(),
             edges: ordered_edges.len(),
         })
+    }
+
+    /// Atomically registers and replaces one project's complete graph.
+    ///
+    /// Input generations are placeholders. The committed files, nodes, and edges all receive
+    /// exactly one newly allocated project generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed validation or persistence error. Registration, generation advancement,
+    /// stale graph deletion, FTS maintenance, and insertion roll back together on failure.
+    pub fn replace_project_graph(
+        &mut self,
+        project: &ProjectRecord,
+        mut files: Vec<FileRecord>,
+        mut nodes: Vec<GraphNode>,
+        mut edges: Vec<GraphEdge>,
+    ) -> Result<ProjectReplacementOutcome, StoreError> {
+        validate_project_replacement(&project.id, &files, &nodes, &edges)?;
+        files.sort_by(|left, right| left.id.path.cmp(&right.id.path));
+        nodes.sort_by(|left, right| left.id.cmp(&right.id));
+        edges.sort_by(|left, right| {
+            (&left.source, &left.target, &left.kind, &left.discriminator).cmp(&(
+                &right.source,
+                &right.target,
+                &right.kind,
+                &right.discriminator,
+            ))
+        });
+
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let initial_generation = sqlite_integer("project generation", project.generation.value())?;
+        transaction.execute(
+            "INSERT INTO projects(id, root_path, current_generation) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(id) DO UPDATE SET root_path = excluded.root_path",
+            params![project.id.as_str(), project.root_path, initial_generation],
+        )?;
+        let current = project_generation(&transaction, &project.id)?;
+        let next_value = current
+            .value()
+            .checked_add(1)
+            .ok_or_else(|| StoreError::GenerationOverflow(project.id.clone()))?;
+        let generation = Generation::new(next_value);
+        let generation_sql = sqlite_integer("project generation", next_value)?;
+        transaction.execute(
+            "UPDATE projects SET current_generation = ?2 WHERE id = ?1",
+            params![project.id.as_str(), generation_sql],
+        )?;
+
+        for file in &mut files {
+            file.generation = generation;
+        }
+        for node in &mut nodes {
+            node.generation = generation;
+        }
+        for edge in &mut edges {
+            edge.generation = generation;
+        }
+
+        transaction.execute(
+            "DELETE FROM nodes WHERE project_id = ?1",
+            params![project.id.as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM files WHERE project_id = ?1",
+            params![project.id.as_str()],
+        )?;
+        for file in &files {
+            upsert_file_in(&transaction, file)?;
+        }
+        for node in &nodes {
+            insert_node(&transaction, node)?;
+        }
+        for edge in &edges {
+            ensure_node_exists(&transaction, &edge.project, &edge.source)?;
+            ensure_node_exists(&transaction, &edge.project, &edge.target)?;
+            insert_edge(&transaction, edge)?;
+        }
+
+        let outcome = ProjectReplacementOutcome {
+            generation,
+            files: files.len(),
+            nodes: nodes.len(),
+            edges: edges.len(),
+        };
+        transaction.commit()?;
+        Ok(outcome)
     }
 
     /// Reconciles the current project generation against its complete seen-path set.
@@ -623,6 +722,82 @@ fn validate_replacement(
             return Err(StoreError::GenerationMismatch {
                 expected: file.generation,
                 actual: edge.generation,
+            });
+        }
+        if !edge_ids.insert((
+            edge.source.clone(),
+            edge.target.clone(),
+            edge.kind.clone(),
+            edge.discriminator.clone(),
+        )) {
+            return Err(StoreError::DuplicateEdge);
+        }
+    }
+    Ok(())
+}
+
+fn validate_project_replacement(
+    project: &ProjectId,
+    files: &[FileRecord],
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+) -> Result<(), StoreError> {
+    let mut file_paths = BTreeSet::new();
+    for file in files {
+        if file.id.project != *project {
+            return Err(StoreError::ProjectMismatch {
+                expected: project.clone(),
+                actual: file.id.project.clone(),
+            });
+        }
+        if !file_paths.insert(file.id.path.clone()) {
+            return Err(StoreError::DuplicateFilePath(file.id.path.clone()));
+        }
+    }
+
+    let mut node_ids = BTreeSet::new();
+    let mut qualified_names = BTreeSet::new();
+    for node in nodes {
+        if node.project != *project {
+            return Err(StoreError::ProjectMismatch {
+                expected: project.clone(),
+                actual: node.project.clone(),
+            });
+        }
+        if let Some(path) = &node.file_path
+            && !file_paths.contains(path)
+        {
+            return Err(StoreError::FileNotFound(FileId::new(
+                project.clone(),
+                path.clone(),
+            )));
+        }
+        if !node_ids.insert(node.id.clone()) {
+            return Err(StoreError::DuplicateNodeId(node.id.clone()));
+        }
+        if !qualified_names.insert(node.qualified_name.clone()) {
+            return Err(StoreError::DuplicateQualifiedName(
+                node.qualified_name.clone(),
+            ));
+        }
+    }
+
+    let mut edge_ids = BTreeSet::new();
+    for edge in edges {
+        if edge.project != *project {
+            return Err(StoreError::ProjectMismatch {
+                expected: project.clone(),
+                actual: edge.project.clone(),
+            });
+        }
+        if !node_ids.contains(&edge.source) {
+            return Err(StoreError::MissingNode {
+                node_id: edge.source.clone(),
+            });
+        }
+        if !node_ids.contains(&edge.target) {
+            return Err(StoreError::MissingNode {
+                node_id: edge.target.clone(),
             });
         }
         if !edge_ids.insert((

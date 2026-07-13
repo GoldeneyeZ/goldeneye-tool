@@ -323,6 +323,166 @@ fn constraints_reject_cross_project_and_stale_generation_writes() {
 }
 
 #[test]
+fn complete_project_replacement_registers_and_swaps_one_generation_atomically() {
+    let mut store = Store::open_in_memory().expect("memory store");
+    let project = project("p", "/canonical/repo");
+    let pending = Generation::new(0);
+    let first_file = file(&project.id, "src/old.rs", pending, b"old");
+    let first_node = node(
+        &project.id,
+        "old",
+        "Function",
+        "old",
+        "p.src.old.old",
+        "src/old.rs",
+        pending,
+    );
+
+    let first = store
+        .replace_project_graph(
+            &project,
+            vec![first_file.clone()],
+            vec![first_node.clone()],
+            Vec::new(),
+        )
+        .expect("initial replacement");
+    assert_eq!(first.generation, Generation::new(1));
+    assert_eq!((first.files, first.nodes, first.edges), (1, 1, 0));
+    assert_eq!(
+        store.get_project(&project.id).expect("project"),
+        Some(ProjectRecord {
+            generation: Generation::new(1),
+            ..project.clone()
+        })
+    );
+
+    let second_file = file(&project.id, "src/new.rs", pending, b"new");
+    let second_node = node(
+        &project.id,
+        "new",
+        "Function",
+        "new",
+        "p.src.new.new",
+        "src/new.rs",
+        pending,
+    );
+    let second = store
+        .replace_project_graph(
+            &project,
+            vec![second_file.clone()],
+            vec![second_node.clone()],
+            Vec::new(),
+        )
+        .expect("second replacement");
+    assert_eq!(second.generation, Generation::new(2));
+    assert_eq!(store.get_file(&first_file.id).expect("old file"), None);
+    assert_eq!(
+        store.nodes_for_file(&second_file.id).expect("new nodes"),
+        vec![GraphNode {
+            generation: Generation::new(2),
+            ..second_node
+        }]
+    );
+    assert_eq!(
+        store.counts(&project.id).expect("counts"),
+        goldeneye_store::GraphCounts {
+            files: 1,
+            nodes: 1,
+            edges: 0,
+        }
+    );
+}
+
+#[test]
+fn failed_complete_project_replacement_rolls_back_registration_generation_and_graph() {
+    let mut store = Store::open_in_memory().expect("memory store");
+    let project = project("p", "/repo");
+    let pending = Generation::new(0);
+    let original_file = file(&project.id, "src/lib.rs", pending, b"old");
+    let original_node = node(
+        &project.id,
+        "old",
+        "Function",
+        "old",
+        "p.old",
+        "src/lib.rs",
+        pending,
+    );
+    store
+        .replace_project_graph(
+            &project,
+            vec![original_file.clone()],
+            vec![original_node.clone()],
+            Vec::new(),
+        )
+        .expect("seed graph");
+
+    let replacement_file = file(&project.id, "src/lib.rs", pending, b"new");
+    let replacement_node = node(
+        &project.id,
+        "new",
+        "Function",
+        "new",
+        "p.new",
+        "src/lib.rs",
+        pending,
+    );
+    let dangling = edge(&project.id, "new", "missing", "CALLS", pending);
+    assert!(matches!(
+        store.replace_project_graph(
+            &project,
+            vec![replacement_file],
+            vec![replacement_node],
+            vec![dangling],
+        ),
+        Err(StoreError::MissingNode { node_id })
+            if node_id == NodeId::new("missing").expect("node ID")
+    ));
+
+    assert_eq!(
+        store
+            .get_project(&project.id)
+            .expect("project")
+            .map(|value| value.generation),
+        Some(Generation::new(1))
+    );
+    assert_eq!(
+        store.get_file(&original_file.id).expect("file"),
+        Some(FileRecord {
+            generation: Generation::new(1),
+            ..original_file.clone()
+        })
+    );
+    assert_eq!(
+        store.nodes_for_file(&original_file.id).expect("nodes"),
+        vec![GraphNode {
+            generation: Generation::new(1),
+            ..original_node
+        }]
+    );
+
+    let unregistered =
+        ProjectRecord::new(ProjectId::new("bad").expect("project ID"), "/bad").expect("project");
+    let foreign = node(
+        &project.id,
+        "foreign",
+        "Function",
+        "foreign",
+        "bad.foreign",
+        "bad.rs",
+        pending,
+    );
+    assert!(matches!(
+        store.replace_project_graph(&unregistered, Vec::new(), vec![foreign], Vec::new()),
+        Err(StoreError::ProjectMismatch { .. })
+    ));
+    assert_eq!(
+        store.get_project(&unregistered.id).expect("bad project"),
+        None
+    );
+}
+
+#[test]
 fn reconcile_deletes_unseen_files_and_touches_retained_generation() {
     let mut store = Store::open_in_memory().expect("memory store");
     let project = project("p", "/repo");
