@@ -495,6 +495,24 @@ macro_rules! impl_read_api {
                 list_files(&self.connection, project)
             }
 
+            /// Lists all project nodes by qualified name and stable ID.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error when reading or decoding fails.
+            pub fn list_nodes(&self, project: &ProjectId) -> Result<Vec<GraphNode>, StoreError> {
+                list_nodes(&self.connection, project)
+            }
+
+            /// Lists all project edges in deterministic identity order.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error when reading or decoding fails.
+            pub fn list_edges(&self, project: &ProjectId) -> Result<Vec<GraphEdge>, StoreError> {
+                list_edges(&self.connection, project)
+            }
+
             /// Lists a file's nodes in deterministic node-ID order.
             ///
             /// # Errors
@@ -567,7 +585,35 @@ macro_rules! impl_read_api {
                 query: &str,
                 limit: usize,
             ) -> Result<Vec<SearchHit>, StoreError> {
-                search_nodes(&self.connection, project, query, limit)
+                search_nodes_page(&self.connection, project, query, limit, 0)
+            }
+
+            /// Runs a deterministic project-scoped `FTS5` page.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error for invalid `FTS5` syntax, numeric overflow, or decode failure.
+            pub fn search_nodes_page(
+                &self,
+                project: &ProjectId,
+                query: &str,
+                limit: usize,
+                offset: usize,
+            ) -> Result<Vec<SearchHit>, StoreError> {
+                search_nodes_page(&self.connection, project, query, limit, offset)
+            }
+
+            /// Counts project-scoped `FTS5` matches without materializing nodes.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error for invalid `FTS5` syntax or read failure.
+            pub fn count_search_nodes(
+                &self,
+                project: &ProjectId,
+                query: &str,
+            ) -> Result<u64, StoreError> {
+                count_search_nodes(&self.connection, project, query)
             }
 
             /// Counts normalized graph records for a project.
@@ -973,6 +1019,27 @@ fn list_files(connection: &Connection, project: &ProjectId) -> Result<Vec<FileRe
     rows.map(|row| file_from_raw(row?)).collect()
 }
 
+fn list_nodes(connection: &Connection, project: &ProjectId) -> Result<Vec<GraphNode>, StoreError> {
+    let sql = format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE project_id = ?1 \
+         ORDER BY qualified_name COLLATE BINARY, node_id COLLATE BINARY"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![project.as_str()], raw_node)?;
+    rows.map(|row| node_from_raw(row?)).collect()
+}
+
+fn list_edges(connection: &Connection, project: &ProjectId) -> Result<Vec<GraphEdge>, StoreError> {
+    let sql = format!(
+        "SELECT {EDGE_COLUMNS} FROM edges WHERE project_id = ?1 \
+         ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, \
+         kind COLLATE BINARY, discriminator COLLATE BINARY"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![project.as_str()], raw_edge)?;
+    rows.map(|row| edge_from_raw(row?)).collect()
+}
+
 fn raw_file(row: &Row<'_>) -> rusqlite::Result<RawFile> {
     Ok(RawFile {
         project: row.get(0)?,
@@ -1173,11 +1240,12 @@ fn edges_where(
     rows.map(|row| edge_from_raw(row?)).collect()
 }
 
-fn search_nodes(
+fn search_nodes_page(
     connection: &Connection,
     project: &ProjectId,
     query: &str,
     limit: usize,
+    offset: usize,
 ) -> Result<Vec<SearchHit>, StoreError> {
     if limit == 0 || query.is_empty() {
         return Ok(Vec::new());
@@ -1186,14 +1254,19 @@ fn search_nodes(
         field: "search limit",
         value: u64::MAX,
     })?;
+    let offset = i64::try_from(offset).map_err(|_| StoreError::NumericOverflow {
+        field: "search offset",
+        value: u64::MAX,
+    })?;
     let sql = format!(
         "SELECT {QUALIFIED_NODE_COLUMNS}, bm25(nodes_fts) \
          FROM nodes_fts JOIN nodes ON nodes.row_id = nodes_fts.rowid \
          WHERE nodes_fts MATCH ?1 AND nodes.project_id = ?2 \
-         ORDER BY bm25(nodes_fts), nodes.node_id COLLATE BINARY LIMIT ?3"
+         ORDER BY bm25(nodes_fts), nodes.qualified_name COLLATE BINARY, \
+         nodes.node_id COLLATE BINARY LIMIT ?3 OFFSET ?4"
     );
     let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(params![query, project.as_str(), limit], |row| {
+    let rows = statement.query_map(params![query, project.as_str(), limit, offset], |row| {
         Ok((raw_node(row)?, row.get::<_, f64>(14)?))
     })?;
     rows.map(|row| {
@@ -1204,6 +1277,24 @@ fn search_nodes(
         })
     })
     .collect()
+}
+
+fn count_search_nodes(
+    connection: &Connection,
+    project: &ProjectId,
+    query: &str,
+) -> Result<u64, StoreError> {
+    if query.is_empty() {
+        return Ok(0);
+    }
+    let value = connection.query_row(
+        "SELECT count(*) FROM nodes_fts \
+         JOIN nodes ON nodes.row_id = nodes_fts.rowid \
+         WHERE nodes_fts MATCH ?1 AND nodes.project_id = ?2",
+        params![query, project.as_str()],
+        |row| row.get::<_, i64>(0),
+    )?;
+    sqlite_u64("FTS match count", value)
 }
 
 fn counts(connection: &Connection, project: &ProjectId) -> Result<GraphCounts, StoreError> {

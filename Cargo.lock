@@ -361,6 +361,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-query"
+version = "0.1.0"
+dependencies = [
+ "goldeneye-domain",
+ "goldeneye-store",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "goldeneye-store"
 version = "0.1.0"
 dependencies = [

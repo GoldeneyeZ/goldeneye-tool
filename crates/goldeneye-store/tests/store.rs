@@ -681,3 +681,100 @@ fn project_delete_cascades_files_nodes_edges_and_fts_rows() {
             .is_empty()
     );
 }
+
+#[test]
+fn query_read_api_enumerates_graph_and_paginates_fts_deterministically() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("query-read", "/repo/query-read");
+    let generation = Generation::new(0);
+    let source_file = file(&project.id, "src/lib.rs", generation, b"current_token");
+    let alpha = node(
+        &project.id,
+        "alpha",
+        "Function",
+        "current_token_alpha",
+        "query_read.alpha",
+        "src/lib.rs",
+        generation,
+    );
+    let beta = node(
+        &project.id,
+        "beta",
+        "Function",
+        "current_token_beta",
+        "query_read.beta",
+        "src/lib.rs",
+        generation,
+    );
+    let call = edge(&project.id, "beta", "alpha", "CALLS", generation);
+    store
+        .replace_project_graph(&project, vec![source_file], vec![beta, alpha], vec![call])
+        .expect("replace graph");
+
+    let nodes = store.list_nodes(&project.id).expect("list nodes");
+    assert_eq!(
+        nodes
+            .iter()
+            .map(|node| node.qualified_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["query_read.alpha", "query_read.beta"]
+    );
+    let edges = store.list_edges(&project.id).expect("list edges");
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].source.as_str(), "beta");
+    assert_eq!(edges[0].target.as_str(), "alpha");
+
+    assert_eq!(
+        store
+            .count_search_nodes(&project.id, "current_token")
+            .expect("count FTS"),
+        2
+    );
+    let first = store
+        .search_nodes_page(&project.id, "current_token", 1, 0)
+        .expect("first page");
+    let second = store
+        .search_nodes_page(&project.id, "current_token", 1, 1)
+        .expect("second page");
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].node.id, second[0].node.id);
+    assert_eq!(
+        store
+            .search_nodes_page(&project.id, "current_token", 1, 1)
+            .expect("repeat second page"),
+        second
+    );
+}
+
+#[test]
+fn duplicate_qualified_names_are_rejected_without_writing_partial_graph() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("duplicate-qn", "/repo/duplicate-qn");
+    let generation = Generation::new(0);
+    let source_file = file(&project.id, "src/lib.rs", generation, b"source");
+    let first = node(
+        &project.id,
+        "first",
+        "Function",
+        "first",
+        "duplicate.same",
+        "src/lib.rs",
+        generation,
+    );
+    let second = node(
+        &project.id,
+        "second",
+        "Function",
+        "second",
+        "duplicate.same",
+        "src/lib.rs",
+        generation,
+    );
+
+    assert!(matches!(
+        store.replace_project_graph(&project, vec![source_file], vec![first, second], vec![]),
+        Err(StoreError::DuplicateQualifiedName(_))
+    ));
+    assert_eq!(store.counts(&project.id).expect("empty counts").nodes, 0);
+}
