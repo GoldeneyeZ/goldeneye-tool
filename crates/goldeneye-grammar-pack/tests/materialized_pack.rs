@@ -150,6 +150,40 @@ fn intermediate_directory_symlink_is_rejected() {
     assert!(fixture.verify().is_err());
 }
 
+#[cfg(windows)]
+#[test]
+fn directory_junction_treats_shell_metacharacters_as_path_data() {
+    let temporary = tempfile::tempdir().unwrap();
+    let target = temporary.path().join("junction-target");
+    let link = temporary.path().join("junction&probe");
+    fs::create_dir(&target).unwrap();
+
+    create_directory_junction(&target, &link)
+        .expect("junction path containing '&' must be treated as path data");
+    assert!(is_link_or_reparse(&link));
+
+    fs::remove_dir(&link).expect("junction cleanup must remove only the junction");
+    assert!(!link.exists());
+    assert!(target.is_dir());
+    fs::remove_dir(&target).expect("target cleanup must succeed after junction removal");
+    assert!(!target.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn failed_directory_junction_creation_cleans_partial_link() {
+    let temporary = tempfile::tempdir().unwrap();
+    let target = temporary.path().join("x".repeat(5_000));
+    let link = temporary.path().join("partial-junction");
+
+    let error = create_directory_junction(&target, &link)
+        .expect_err("an overlong junction target must be rejected");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(!link.exists(), "failed creation must not leave a link path");
+    assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 0);
+}
+
 #[test]
 fn same_size_modified_asset_is_rejected() {
     let fixture = Fixture::new();
@@ -320,18 +354,18 @@ fn is_link_or_reparse(path: &Path) -> bool {
 
 #[cfg(windows)]
 fn create_directory_junction(target: &Path, link: &Path) -> std::io::Result<()> {
-    let output = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(link)
-        .arg(target)
-        .output()?;
-    if output.status.success() {
-        return Ok(());
-    }
+    let link_was_absent = matches!(
+        fs::symlink_metadata(link),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    );
 
-    Err(std::io::Error::other(format!(
-        "mklink /J failed: {}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )))
+    match junction::create(target, link) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if link_was_absent {
+                let _ = fs::remove_dir(link);
+            }
+            Err(error)
+        }
+    }
 }
