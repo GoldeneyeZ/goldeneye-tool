@@ -1,4 +1,6 @@
-use goldeneye_domain::LanguageId;
+use goldeneye_domain::{
+    Generation, GrammarFingerprint, LanguageId, SourcePoint, SyntaxIdentityError,
+};
 use thiserror::Error;
 use tree_sitter::Language;
 
@@ -29,6 +31,104 @@ pub enum SyntaxError {
 
     #[error("Tree-sitter grammar ABI {abi} for language {language_id:?} exceeds u32")]
     GrammarAbiOverflow { language_id: LanguageId, abi: usize },
+
+    #[error("Tree-sitter rejected the grammar for language {language_id:?}")]
+    IncompatibleGrammar { language_id: LanguageId },
+
+    #[error("grammar provider returned language {returned:?} for requested language {requested:?}")]
+    ProviderLanguageMismatch {
+        requested: LanguageId,
+        returned: LanguageId,
+    },
+
+    #[error("Tree-sitter cancelled parsing language {language_id:?}")]
+    ParseCancelled { language_id: LanguageId },
+
+    #[error("invalid grammar fingerprint for language {language_id:?}: {source}")]
+    InvalidGrammarFingerprint {
+        language_id: LanguageId,
+        source: SyntaxIdentityError,
+    },
+
+    #[error("Tree-sitter coordinate {field} cannot be represented as u64")]
+    TreeSitterCoordinateOverflow { field: &'static str },
+
+    #[error("offset {value} for {field} cannot be represented as usize")]
+    OffsetConversionOverflow { field: &'static str, value: u64 },
+
+    #[error("source length for {field} cannot be represented as u64")]
+    SourceLengthOverflow { field: &'static str },
+
+    #[error("diagnostic count overflowed usize")]
+    DiagnosticCountOverflow,
+
+    #[error("Tree-sitter produced an invalid source span: {source}")]
+    InvalidTreeSitterSpan { source: SyntaxIdentityError },
+
+    #[error(
+        "invalid edit bounds: start {start_byte}, old end {old_end_byte}, new end {new_end_byte}"
+    )]
+    InvalidEditBounds {
+        start_byte: u64,
+        old_end_byte: u64,
+        new_end_byte: u64,
+    },
+
+    #[error("edit {field} offset {offset} exceeds source length {source_len}")]
+    EditOffsetOutOfBounds {
+        field: &'static str,
+        offset: u64,
+        source_len: u64,
+    },
+
+    #[error("edit length arithmetic overflowed")]
+    EditLengthOverflow,
+
+    #[error("edit predicts new length {expected}, but source length is {actual}")]
+    EditLengthMismatch { expected: u64, actual: u64 },
+
+    #[error("edit {point:?} point mismatch: expected {expected:?}, got {actual:?}")]
+    EditPointMismatch {
+        point: EditPointKind,
+        expected: SourcePoint,
+        actual: SourcePoint,
+    },
+
+    #[error("edit {region:?} bytes do not match between old and new source")]
+    EditContentMismatch { region: EditContentRegion },
+
+    #[error("cannot reparse language {actual:?} from snapshot language {expected:?}")]
+    LanguageChanged {
+        expected: LanguageId,
+        actual: LanguageId,
+    },
+
+    #[error("cannot reparse with changed grammar metadata")]
+    GrammarChanged {
+        expected: Box<GrammarFingerprint>,
+        actual: Box<GrammarFingerprint>,
+    },
+
+    #[error(
+        "generation must increase when reparsing: previous {previous:?}, requested {requested:?}"
+    )]
+    NonIncreasingGeneration {
+        previous: Generation,
+        requested: Generation,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditPointKind {
+    Start,
+    OldEnd,
+    NewEnd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditContentRegion {
+    Prefix,
+    Suffix,
 }
 
 pub trait GrammarProvider: Send + Sync {
