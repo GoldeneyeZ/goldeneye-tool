@@ -174,7 +174,7 @@ git diff --check
 
 Expected: all commands exit 0; focused negotiation, parse, UTF-8 continuity, process, and frozen tests pass.
 
-- [ ] **Step 8: Update final review and commit**
+- [x] **Step 8: Update final review and commit**
 
 Replace prior final-review verdict with a repair record mapping each Important finding to exact tests and results. Commit implementation and task evidence:
 

@@ -2,7 +2,7 @@
 
 **Plan:** `docs/superfastpowers/plans/GF/2026-07-13-goldeneye-foundation.md`
 **Task:** `GF-8`
-**Commit SHA:** Pending initial GF-8 task commit; update after review-ready commit.
+**Commit SHA:** `34ec076` (review-ready implementation; final evidence will amend this task commit)
 
 ## Starting Context
 
@@ -19,8 +19,8 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Final task commit: pending review-ready commit and review evidence amend
-- Reviewed commit range: `81c7eb4..GF-8 task commit`
+- Final task commit: `34ec076` before review-evidence amend
+- Reviewed commit range: `81c7eb4..34ec076`
 - Files created: `task.md`, `context.md`; review files added during review phases
 - Files modified: `crates/goldeneye-mcp/src/protocol.rs`, `crates/goldeneye-mcp/src/server.rs`, `crates/goldeneye-cli/src/lib.rs`, `crates/goldeneye-cli/tests/stdio.rs`, both `tests/fixtures/mcp/foundation*.jsonl`, foundation plan, GF-8 progression, and goal-level final review
 - Additional relevant files inspected: upstream `.upstream/codebase-memory-mcp/src/mcp/mcp.c` at `2469ecc` (`cbm_mcp_initialize_response`, `cbm_jsonrpc_parse`, `cbm_mcp_server_handle`); compatibility runner/normalizer; MCP crate exports
@@ -39,3 +39,5 @@ Files above are starting points only. Inspect any additional files needed to com
   - `cargo build --workspace --release`: exit 0
   - `git diff --check`: exit 0; Windows LF/CRLF conversion notices only
 - Implementation notes: supported-version selection is newest-first; unsupported/non-string/missing requested versions fall back to latest. All request parse failures use stable upstream ID/code/message. Invalid UTF-8 produces the same parse error without ending the session. Fixture normalization remains limited to string `/result/serverInfo/version`.
+- Spec review: checked against committed range, audited upstream functions, and fresh focused tests.
+- Code quality: checked; no findings or active implementer handoff.
