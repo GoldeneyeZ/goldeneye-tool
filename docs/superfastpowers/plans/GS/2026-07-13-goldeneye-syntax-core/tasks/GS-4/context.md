@@ -154,4 +154,16 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Pending implementation, review evidence, final commit, and controller verification.
+- Implementation commit: `49d6fd4` (`[GS-4] feat: inspect syntax with bounded context`).
+- Reviewed range: `1e82f0f..49d6fd4`.
+- Created: `crates/goldeneye-syntax/src/inspect.rs`, `crates/goldeneye-syntax/tests/inspect.rs`, and `tests/fixtures/compact-inspection.json`.
+- Modified: `crates/goldeneye-syntax/src/lib.rs`.
+- RED: the initial focused test failed with E0432 because the inspection API did not exist. The quality-repair regression then failed by selecting the preceding `block` at a zero-width sibling boundary.
+- GREEN: focused inspection passed 9/9; the syntax crate passed 44 integration tests with zero failures.
+- Compactness: the default 200-node fixture serializes to 31,643 bytes, below the 32,768-byte gate.
+- Quality gates: `cargo fmt --all --check`, workspace clippy with `-D warnings`, and `git diff --check` passed.
+- Final integration gates: `cargo test --workspace` passed 148 tests across 26 suites with zero failures; `cargo build --workspace --release` passed.
+- Independent spec review: checked against final commit `49d6fd4` with no findings (`spec-review.md`).
+- Independent code quality review: one Medium half-open range finding was repaired under TDD; independent recheck is checked with no remaining finding (`code-quality.md`).
+- No recursion, `unsafe`, fuzzy relocation, repeated scope, or repeated ancestor prefixes were introduced.
+- No active implementer handoff.
