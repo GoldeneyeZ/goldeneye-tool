@@ -452,6 +452,30 @@ fn service_error_message(error: ServiceError) -> String {
         ServiceError::Query(QueryError::ProjectNotFound(project)) => {
             format!("project not found or not indexed: {}", project.as_str())
         }
+        ServiceError::Query(QueryError::AmbiguousSymbol {
+            query,
+            mut candidates,
+        }) => {
+            candidates.sort_by(|left, right| left.qualified_name.cmp(&right.qualified_name));
+            let names = candidates
+                .into_iter()
+                .map(|candidate| candidate.qualified_name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("symbol is ambiguous: {query}; candidates: {names}")
+        }
+        ServiceError::Query(QueryError::SymbolNotFound {
+            query,
+            mut suggestions,
+        }) => {
+            suggestions.sort_by(|left, right| left.qualified_name.cmp(&right.qualified_name));
+            let names = suggestions
+                .into_iter()
+                .map(|suggestion| suggestion.qualified_name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("symbol was not found: {query}; suggestions: {names}")
+        }
         ServiceError::OutsideAllowedRoot => "repo_path is outside the allowed root".to_owned(),
         ServiceError::Cancelled => "Request cancelled".to_owned(),
         other => other.to_string(),

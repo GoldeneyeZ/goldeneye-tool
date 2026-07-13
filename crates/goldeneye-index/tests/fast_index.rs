@@ -114,6 +114,38 @@ fn seed_multilang(root: &Path) {
 }
 
 #[test]
+fn unsupported_discovered_languages_do_not_abort_core_indexing() {
+    let temp = TempDir::new().expect("temp repo");
+    write(
+        temp.path(),
+        "Cargo.toml",
+        "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    );
+    write(
+        temp.path(),
+        "src/lib.rs",
+        "pub fn helper() -> usize { 1 }\n",
+    );
+    let mut index = service(IndexOptions::default());
+
+    let result = index
+        .index_repository(temp.path())
+        .expect("unsupported TOML is skipped");
+
+    assert_eq!(result.status, IndexStatus::Indexed);
+    assert_eq!(result.discovered_files, 1);
+    assert_eq!(result.new_files, 1);
+    assert_eq!(
+        index
+            .store()
+            .list_files(&result.project.id)
+            .expect("stored files")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn initial_index_extracts_stable_multilanguage_graph() {
     let temp = TempDir::new().expect("temp repo");
     seed_multilang(temp.path());

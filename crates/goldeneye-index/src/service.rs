@@ -383,8 +383,10 @@ where
         files: &[DiscoveredFile],
         project: &ProjectId,
     ) -> Result<Vec<Candidate>, IndexError> {
+        let supported_ids = self.provider.supported_ids();
         files
             .iter()
+            .filter(|file| supported_ids.contains(&file.language))
             .map(|file| {
                 self.ensure_not_cancelled()?;
                 Self::read_candidate(file, project)

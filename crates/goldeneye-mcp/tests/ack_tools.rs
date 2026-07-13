@@ -13,6 +13,16 @@ fn fixture(root: &Path) {
         "pub fn helper() -> usize { 1 }\npub fn entry() -> usize { helper() }\n",
     )
     .expect("write fixture");
+    fs::write(
+        root.join("src/left.rs"),
+        "pub fn duplicate() -> usize { 1 }\n",
+    )
+    .expect("write left duplicate");
+    fs::write(
+        root.join("src/right.rs"),
+        "pub fn duplicate() -> usize { 2 }\n",
+    )
+    .expect("write right duplicate");
 }
 
 fn server(temp: &TempDir, allowed: &Path) -> Server {
@@ -209,6 +219,39 @@ fn index_then_all_ack_read_tools_return_stable_structured_json() {
         .to_owned();
 
     assert_query_trace_snippet_architecture(&server, &project, &qualified_name);
+
+    let ambiguous = call(
+        &server,
+        11,
+        "get_code_snippet",
+        json!({"project": project, "qualified_name": "duplicate"}),
+    );
+    assert_eq!(ambiguous["isError"], true);
+    let ambiguous_text = ambiguous["content"][0]["text"]
+        .as_str()
+        .expect("ambiguity text");
+    assert!(ambiguous_text.contains("candidates:"), "{ambiguous_text}");
+    assert!(
+        ambiguous_text.contains(".src.left.duplicate"),
+        "{ambiguous_text}"
+    );
+    assert!(
+        ambiguous_text.contains(".src.right.duplicate"),
+        "{ambiguous_text}"
+    );
+
+    let missing = call(
+        &server,
+        12,
+        "get_code_snippet",
+        json!({"project": project, "qualified_name": "helpe"}),
+    );
+    assert_eq!(missing["isError"], true);
+    let missing_text = missing["content"][0]["text"]
+        .as_str()
+        .expect("suggestion text");
+    assert!(missing_text.contains("suggestions:"), "{missing_text}");
+    assert!(missing_text.contains(".src.lib.helper"), "{missing_text}");
 }
 
 #[test]

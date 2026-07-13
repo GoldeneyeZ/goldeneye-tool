@@ -1,0 +1,76 @@
+{
+  "index": {
+    "changed_files": 0,
+    "deleted_files": 0,
+    "diagnostics": 0,
+    "discovered_files": 3,
+    "edges": 16,
+    "files": 3,
+    "generation": 1,
+    "new_files": 3,
+    "nodes": 14,
+    "parsed_files": 3,
+    "project": "<project>",
+    "reused_files": 0,
+    "root_path": "<root>",
+    "status": "indexed",
+    "unchanged_files": 0,
+    "warnings": []
+  },
+  "status": {
+    "edges": 16,
+    "files": 3,
+    "generation": 1,
+    "nodes": 14,
+    "project": "<project>",
+    "query_only": true,
+    "root_path": "<root>",
+    "status": "ready"
+  },
+  "search": "<project>.src.lib.helper\tFunction\tsrc/lib.rs\t4",
+  "symbol": "<project>.src.billing.duplicate\tFunction\tsrc/billing.rs\t1\t\n<project>.src.shipping.duplicate\tFunction\tsrc/shipping.rs\t1",
+  "inspect": "# selected\nqualified_name=<project>.src.lib.helper\nkind=Function\nfile=src/lib.rs\nline=4\nend_line=6\nlines=\ncomplexity=\ncognitive=\nvisibility=\nsignature=\nreturn_type=\ndecorators=\ncallers=\ncallees=\nwarnings=\n\n# inbound\n<project>.src.lib.entry\t1\tsrc/lib.rs\t8\n\n# outbound",
+  "source": "pub fn helper() -> usize {\n    1\n}",
+  "callers": "<project>.src.lib.entry\t1\tsrc/lib.rs\t8",
+  "callees": "<project>.src.lib.helper\t1\tsrc/lib.rs\t4",
+  "architecture": {
+    "project": "<project>",
+    "total_nodes": 14,
+    "total_edges": 16,
+    "languages": [
+      {
+        "count": 3,
+        "name": "rust"
+      }
+    ],
+    "packages": [
+      {
+        "defined_symbols": 2,
+        "file_path": "src/billing.rs",
+        "name": "billing",
+        "qualified_name": "<project>.src.billing"
+      },
+      {
+        "defined_symbols": 2,
+        "file_path": "src/lib.rs",
+        "name": "lib",
+        "qualified_name": "<project>.src.lib"
+      },
+      {
+        "defined_symbols": 2,
+        "file_path": "src/shipping.rs",
+        "name": "shipping",
+        "qualified_name": "<project>.src.shipping"
+      }
+    ],
+    "entry_points": [],
+    "hotspots": [],
+    "boundaries": [],
+    "layers": [],
+    "clusters": []
+  },
+  "ambiguity_error": "MCP tool error: symbol is ambiguous: duplicate; candidates: <project>.src.billing.duplicate, <project>.src.shipping.duplicate",
+  "suggestion_error": "MCP tool error: symbol was not found: helpe; suggestions: <project>.src.lib.helper",
+  "missing_project_error": "MCP tool error: project not found or not indexed: missing-project",
+  "unselected_project_error": "ACK_PROJECT is required for codebase-memory commands"
+}
