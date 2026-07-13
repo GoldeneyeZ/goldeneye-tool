@@ -72,8 +72,20 @@ Tree-sitter       SQLite/FTS5
 `goldeneye-syntax`
 
 - Owns language detection, grammar registry, parser reuse, syntax-tree inspection, generic named-node locators, source extraction, and post-edit parse validation.
-- Initially compiles upstream vendored C parsers and scanners through Rust build scripts. Grammar replacement is not required for initial Rust runtime completion.
+- Uses a provider boundary. Core development provider links maintained Rust grammar crates; full release provider compiles pinned upstream parser/scanner assets through Rust build scripts.
 - Supports malformed pre-edit files for inspection, but successful structural mutations must satisfy configured parse-error policy.
+
+### Grammar Asset Strategy
+
+Audited upstream grammar sources occupy approximately 1.24 GiB, including generated parsers over 100 MiB each. Goldeneye will not duplicate this source bulk in its main repository.
+
+- `GrammarProvider` is the runtime boundary from a language ID to a Tree-sitter language and grammar metadata.
+- Core provider supplies Rust, Python, JavaScript, TypeScript, TSX, and Go for fast local development and syntax-contract tests.
+- Full provider is generated from a checked-in lock manifest pinning all 160 language IDs, upstream grammar commits, ABI versions, source hashes, scanner types, and licenses.
+- `cargo xtask grammars sync --source <pinned-upstream-checkout>` materializes parser/scanner sources into an ignored local cache. Builds never silently fetch network resources.
+- CI full-pack jobs obtain the pinned source checkout explicitly, verify hashes/notices, compile every grammar, and test registry completeness.
+- Release binaries embed the compiled full provider. Core-only provider is an intermediate development slice, not completion evidence for 160-language parity.
+- Upstream application C code is never linked. Only independently licensed generated grammar/parser assets and Tree-sitter runtime interfaces remain permitted native build inputs.
 
 `goldeneye-store`
 
@@ -346,4 +358,3 @@ Goldeneye is complete when:
 4. Generic named-node edits and file creation work across supported grammars, reject stale state, preserve unrelated bytes, validate syntax, recover from interruption, and refresh graph facts.
 5. Cross-platform release, packaging, security, durability, and license tests pass.
 6. Completion audit maps every stated requirement to current authoritative evidence.
-
