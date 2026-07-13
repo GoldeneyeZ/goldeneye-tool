@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "goldeneye"
+version = "0.1.0"
+dependencies = [
+ "goldeneye-mcp",
+ "serde_json",
+]
+
+[[package]]
 name = "goldeneye-domain"
 version = "0.1.0"
 dependencies = [
