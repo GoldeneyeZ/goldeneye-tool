@@ -112,6 +112,18 @@ fn checked_in_registry_records_upstream_provenance() {
 }
 
 #[test]
+fn generated_language_data_has_no_trailing_whitespace() {
+    for (index, line) in include_str!("../data/languages.tsv").lines().enumerate() {
+        assert_eq!(
+            line.trim_end(),
+            line,
+            "trailing whitespace on TSV line {}",
+            index + 1
+        );
+    }
+}
+
+#[test]
 fn checked_in_registry_has_a_stable_git_lf_policy() {
     let attributes = fs::read_to_string(repository_root().join(".gitattributes"))
         .expect("repository must define line-ending attributes");

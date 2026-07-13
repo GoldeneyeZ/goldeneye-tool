@@ -2,163 +2,163 @@
 # Upstream commit: 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c
 # License: MIT; derived data preserves upstream provenance and notice.
 id	display_name	extensions	filenames	compound_extensions
-go	Go	.go		
-python	Python	.py		
-javascript	JavaScript	.js,.jsx,.mjs,.cjs		
-typescript	TypeScript	.ts,.mts,.cts		
-tsx	TSX	.tsx		
-rust	Rust	.rs		
-java	Java	.java		
-cpp	C++	.cc,.ccm,.cpp,.cppm,.cxx,.h,.hh,.hpp,.hxx,.ixx		
-csharp	C#	.cs		
-php	PHP	.php		
-lua	Lua	.lua		
-scala	Scala	.sc,.scala		
-kotlin	Kotlin	.kt,.kts		
-ruby	Ruby	.gemspec,.rake,.rb		
-c	C	.c		
-bash	Bash	.bash,.sh		
-zig	Zig	.zig		
-elixir	Elixir	.ex,.exs		
-haskell	Haskell	.hs		
-ocaml	OCaml	.ml,.mli		
-objc	Objective-C			
-swift	Swift	.swift		
-dart	Dart	.dart		
-perl	Perl	.pl,.pm		
-groovy	Groovy	.gradle,.groovy		
-erlang	Erlang	.erl		
-r	R	.R,.r		
-html	HTML	.htm,.html		
-css	CSS	.css		
-scss	SCSS	.scss		
-yaml	YAML	.yaml,.yml		
-toml	TOML	.toml		
-hcl	HCL	.hcl,.tf		
-sql	SQL	.sql		
-dockerfile	Dockerfile	.dockerfile	Dockerfile	
-clojure	Clojure	.clj,.cljc,.cljs		
-fsharp	F#	.fs,.fsi,.fsx		
-julia	Julia	.jl		
-vimscript	VimScript	.vim,.vimrc	.vimrc	
-nix	Nix	.nix		
-commonlisp	Common Lisp	.cl,.lisp,.lsp		
-elm	Elm	.elm		
-fortran	Fortran	.f03,.f08,.f90,.f95		
-cuda	CUDA	.cu,.cuh		
-cobol	COBOL	.cbl,.cob		
-verilog	Verilog	.sv,.v		
-emacslisp	Emacs Lisp	.el		
-json	JSON	.json		
-xml	XML	.xml,.xsd,.xsl,.svg		
-markdown	Markdown	.md,.mdx		
-makefile	Makefile	.mk	GNUmakefile,Makefile,makefile	
-cmake	CMake	.cmake	CMakeLists.txt	
-protobuf	Protobuf	.proto		
-graphql	GraphQL	.gql,.graphql		
-vue	Vue	.vue		
-svelte	Svelte	.svelte		
-meson	Meson	.meson	meson.build,meson.options,meson_options.txt	
-glsl	GLSL	.frag,.glsl,.vert		
-ini	INI	.cfg,.conf,.ini		
-matlab	MATLAB	.m,.matlab,.mlx		
-lean	Lean	.lean		
-form	FORM	.frm,.prc		
-magma	Magma	.mag,.magma		
-wolfram	Wolfram	.wl,.wls		
-solidity	Solidity	.sol		
-typst	Typst	.typ		
-gdscript	GDScript	.gd		
-gleam	Gleam	.gleam		
-powershell	PowerShell	.ps1,.psd1,.psm1		
-pascal	Pascal	.dpr,.lpr,.pas		
-dlang	D	.d		
-nim	Nim			
-scheme	Scheme	.scm,.ss		
-fennel	Fennel	.fnl		
-fish	Fish	.fish		
-awk	AWK	.awk		
-zsh	Zsh	.zsh	.zshrc,.zshenv,.zprofile	
-tcl	Tcl	.tcl		
-ada	Ada	.adb,.ads		
-agda	Agda	.agda		
-racket	Racket	.rkt		
-odin	Odin	.odin		
-rescript	ReScript	.res,.resi		
-purescript	PureScript	.purs		
-nickel	Nickel	.ncl		
-crystal	Crystal	.cr		
-teal	Teal	.tl		
-hare	Hare	.ha		
-pony	Pony	.pony		
-luau	Luau	.luau		
-janet	Janet	.janet		
-sway	Sway	.sw		
-nasm	NASM	.nasm		
-assembly	Assembly	.s,.S		
-astro	Astro	.astro		
-blade	Blade			.blade.php
-just	Just	justfile,Justfile,.justfile,.just	justfile,Justfile,.justfile	
-gotemplate	Go Template	.gotmpl,.tpl,.tmpl		
-templ	Templ	.templ		
-liquid	Liquid	.liquid		
-jinja2	Jinja2	.j2,.jinja,.jinja2		
-prisma	Prisma	.prisma		
-hyprlang	Hyprlang	hyprland.conf,.hl	hyprland.conf	
-dotenv	DotEnv	.env	.env,.env.local	
-diff	Diff	.diff,.patch		
-wgsl	WGSL	.wgsl		
-kdl	KDL	.kdl		
-json5	JSON5	.json5		
-jsonnet	Jsonnet	.jsonnet,.libsonnet		
-ron	RON	.ron		
-thrift	Thrift	.thrift		
-capnp	Cap'n Proto	.capnp		
-properties	Properties	.properties		
-sshconfig	SSH Config	ssh_config,sshd_config	ssh_config,sshd_config,.ssh/config	
-bibtex	BibTeX	.bib		
-starlark	Starlark	BUILD,BUILD.bazel,WORKSPACE,WORKSPACE.bazel,.bzl,.star	BUILD,BUILD.bazel,WORKSPACE,WORKSPACE.bazel	
-bicep	Bicep	.bicep		
-csv	CSV	.csv		
-requirements	Requirements		requirements.txt,requirements-dev.txt,requirements-test.txt	
-hlsl	HLSL	.fx,.hlsl,.hlsli		
-vhdl	VHDL	.vhd,.vhdl		
-systemverilog	SystemVerilog			
-devicetree	DeviceTree	.dts,.dtsi,.overlay		
-linkerscript	Linker Script	.ld,.lds		
-gn	GN	.gn,.gni		
-kconfig	Kconfig		Kconfig	
-bitbake	BitBake	.inc,.bb,.bbappend,.bbclass		
-smali	Smali	.smali		
-tablegen	TableGen	.td		
-ispc	ISPC	.ispc		
-cairo	Cairo	.cairo		
-move	Move	.move		
-squirrel	Squirrel	.nut		
-func	FunC	.fc		
-regex	Regex	.re		
-jsdoc	JSDoc			
-rst	reStructuredText	.rst		
-beancount	Beancount	.beancount		
-mermaid	Mermaid	.mermaid,.mmd		
-puppet	Puppet	.pp		
-po	PO	.po,.pot		
-gitattributes	gitattributes		.gitattributes	
-gitignore	gitignore			
-slang	Slang	.slang		
-llvm_ir	LLVM IR	.ll		
-smithy	Smithy	.smithy		
-wit	WIT	.wit		
-tlaplus	TLA+	.tla		
-pkl	Pkl	.pkl		
-gomod	Go Mod		go.mod	
-apex	Apex	.cls,.trigger		
-soql	SOQL	.soql		
-sosl	SOSL	.sosl		
-kustomize	Kustomize		kustomization.yaml,kustomization.yml	
-k8s	Kubernetes			
-pine	PineScript	.pine		
-qml	QML	.qml		
-cfscript	CFML	.cfc		
-cfml	CFML	.cfm		
-mojo	Mojo	.mojo		
+go	Go	.go	-	-
+python	Python	.py	-	-
+javascript	JavaScript	.js,.jsx,.mjs,.cjs	-	-
+typescript	TypeScript	.ts,.mts,.cts	-	-
+tsx	TSX	.tsx	-	-
+rust	Rust	.rs	-	-
+java	Java	.java	-	-
+cpp	C++	.cc,.ccm,.cpp,.cppm,.cxx,.h,.hh,.hpp,.hxx,.ixx	-	-
+csharp	C#	.cs	-	-
+php	PHP	.php	-	-
+lua	Lua	.lua	-	-
+scala	Scala	.sc,.scala	-	-
+kotlin	Kotlin	.kt,.kts	-	-
+ruby	Ruby	.gemspec,.rake,.rb	-	-
+c	C	.c	-	-
+bash	Bash	.bash,.sh	-	-
+zig	Zig	.zig	-	-
+elixir	Elixir	.ex,.exs	-	-
+haskell	Haskell	.hs	-	-
+ocaml	OCaml	.ml,.mli	-	-
+objc	Objective-C	-	-	-
+swift	Swift	.swift	-	-
+dart	Dart	.dart	-	-
+perl	Perl	.pl,.pm	-	-
+groovy	Groovy	.gradle,.groovy	-	-
+erlang	Erlang	.erl	-	-
+r	R	.R,.r	-	-
+html	HTML	.htm,.html	-	-
+css	CSS	.css	-	-
+scss	SCSS	.scss	-	-
+yaml	YAML	.yaml,.yml	-	-
+toml	TOML	.toml	-	-
+hcl	HCL	.hcl,.tf	-	-
+sql	SQL	.sql	-	-
+dockerfile	Dockerfile	.dockerfile	Dockerfile	-
+clojure	Clojure	.clj,.cljc,.cljs	-	-
+fsharp	F#	.fs,.fsi,.fsx	-	-
+julia	Julia	.jl	-	-
+vimscript	VimScript	.vim,.vimrc	.vimrc	-
+nix	Nix	.nix	-	-
+commonlisp	Common Lisp	.cl,.lisp,.lsp	-	-
+elm	Elm	.elm	-	-
+fortran	Fortran	.f03,.f08,.f90,.f95	-	-
+cuda	CUDA	.cu,.cuh	-	-
+cobol	COBOL	.cbl,.cob	-	-
+verilog	Verilog	.sv,.v	-	-
+emacslisp	Emacs Lisp	.el	-	-
+json	JSON	.json	-	-
+xml	XML	.xml,.xsd,.xsl,.svg	-	-
+markdown	Markdown	.md,.mdx	-	-
+makefile	Makefile	.mk	GNUmakefile,Makefile,makefile	-
+cmake	CMake	.cmake	CMakeLists.txt	-
+protobuf	Protobuf	.proto	-	-
+graphql	GraphQL	.gql,.graphql	-	-
+vue	Vue	.vue	-	-
+svelte	Svelte	.svelte	-	-
+meson	Meson	.meson	meson.build,meson.options,meson_options.txt	-
+glsl	GLSL	.frag,.glsl,.vert	-	-
+ini	INI	.cfg,.conf,.ini	-	-
+matlab	MATLAB	.m,.matlab,.mlx	-	-
+lean	Lean	.lean	-	-
+form	FORM	.frm,.prc	-	-
+magma	Magma	.mag,.magma	-	-
+wolfram	Wolfram	.wl,.wls	-	-
+solidity	Solidity	.sol	-	-
+typst	Typst	.typ	-	-
+gdscript	GDScript	.gd	-	-
+gleam	Gleam	.gleam	-	-
+powershell	PowerShell	.ps1,.psd1,.psm1	-	-
+pascal	Pascal	.dpr,.lpr,.pas	-	-
+dlang	D	.d	-	-
+nim	Nim	-	-	-
+scheme	Scheme	.scm,.ss	-	-
+fennel	Fennel	.fnl	-	-
+fish	Fish	.fish	-	-
+awk	AWK	.awk	-	-
+zsh	Zsh	.zsh	.zshrc,.zshenv,.zprofile	-
+tcl	Tcl	.tcl	-	-
+ada	Ada	.adb,.ads	-	-
+agda	Agda	.agda	-	-
+racket	Racket	.rkt	-	-
+odin	Odin	.odin	-	-
+rescript	ReScript	.res,.resi	-	-
+purescript	PureScript	.purs	-	-
+nickel	Nickel	.ncl	-	-
+crystal	Crystal	.cr	-	-
+teal	Teal	.tl	-	-
+hare	Hare	.ha	-	-
+pony	Pony	.pony	-	-
+luau	Luau	.luau	-	-
+janet	Janet	.janet	-	-
+sway	Sway	.sw	-	-
+nasm	NASM	.nasm	-	-
+assembly	Assembly	.s,.S	-	-
+astro	Astro	.astro	-	-
+blade	Blade	-	-	.blade.php
+just	Just	justfile,Justfile,.justfile,.just	justfile,Justfile,.justfile	-
+gotemplate	Go Template	.gotmpl,.tpl,.tmpl	-	-
+templ	Templ	.templ	-	-
+liquid	Liquid	.liquid	-	-
+jinja2	Jinja2	.j2,.jinja,.jinja2	-	-
+prisma	Prisma	.prisma	-	-
+hyprlang	Hyprlang	hyprland.conf,.hl	hyprland.conf	-
+dotenv	DotEnv	.env	.env,.env.local	-
+diff	Diff	.diff,.patch	-	-
+wgsl	WGSL	.wgsl	-	-
+kdl	KDL	.kdl	-	-
+json5	JSON5	.json5	-	-
+jsonnet	Jsonnet	.jsonnet,.libsonnet	-	-
+ron	RON	.ron	-	-
+thrift	Thrift	.thrift	-	-
+capnp	Cap'n Proto	.capnp	-	-
+properties	Properties	.properties	-	-
+sshconfig	SSH Config	ssh_config,sshd_config	ssh_config,sshd_config,.ssh/config	-
+bibtex	BibTeX	.bib	-	-
+starlark	Starlark	BUILD,BUILD.bazel,WORKSPACE,WORKSPACE.bazel,.bzl,.star	BUILD,BUILD.bazel,WORKSPACE,WORKSPACE.bazel	-
+bicep	Bicep	.bicep	-	-
+csv	CSV	.csv	-	-
+requirements	Requirements	-	requirements.txt,requirements-dev.txt,requirements-test.txt	-
+hlsl	HLSL	.fx,.hlsl,.hlsli	-	-
+vhdl	VHDL	.vhd,.vhdl	-	-
+systemverilog	SystemVerilog	-	-	-
+devicetree	DeviceTree	.dts,.dtsi,.overlay	-	-
+linkerscript	Linker Script	.ld,.lds	-	-
+gn	GN	.gn,.gni	-	-
+kconfig	Kconfig	-	Kconfig	-
+bitbake	BitBake	.inc,.bb,.bbappend,.bbclass	-	-
+smali	Smali	.smali	-	-
+tablegen	TableGen	.td	-	-
+ispc	ISPC	.ispc	-	-
+cairo	Cairo	.cairo	-	-
+move	Move	.move	-	-
+squirrel	Squirrel	.nut	-	-
+func	FunC	.fc	-	-
+regex	Regex	.re	-	-
+jsdoc	JSDoc	-	-	-
+rst	reStructuredText	.rst	-	-
+beancount	Beancount	.beancount	-	-
+mermaid	Mermaid	.mermaid,.mmd	-	-
+puppet	Puppet	.pp	-	-
+po	PO	.po,.pot	-	-
+gitattributes	gitattributes	-	.gitattributes	-
+gitignore	gitignore	-	-	-
+slang	Slang	.slang	-	-
+llvm_ir	LLVM IR	.ll	-	-
+smithy	Smithy	.smithy	-	-
+wit	WIT	.wit	-	-
+tlaplus	TLA+	.tla	-	-
+pkl	Pkl	.pkl	-	-
+gomod	Go Mod	-	go.mod	-
+apex	Apex	.cls,.trigger	-	-
+soql	SOQL	.soql	-	-
+sosl	SOSL	.sosl	-	-
+kustomize	Kustomize	-	kustomization.yaml,kustomization.yml	-
+k8s	Kubernetes	-	-	-
+pine	PineScript	.pine	-	-
+qml	QML	.qml	-	-
+cfscript	CFML	.cfc	-	-
+cfml	CFML	.cfm	-	-
+mojo	Mojo	.mojo	-	-

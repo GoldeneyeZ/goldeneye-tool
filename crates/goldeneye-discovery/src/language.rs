@@ -167,7 +167,7 @@ impl LanguageRegistry {
 
             insert_mappings(&mut extensions, columns[2], &id, line_number, "extension")?;
             insert_mappings(&mut filenames, columns[3], &id, line_number, "filename")?;
-            for extension in split_values(columns[4]) {
+            for extension in split_values(columns[4], line_number, "compound extension")? {
                 compound_extensions.push((OsString::from(extension), id.clone()));
             }
         }
@@ -214,8 +214,24 @@ impl LanguageRegistry {
     }
 }
 
-fn split_values(values: &str) -> impl Iterator<Item = &str> {
-    values.split(',').filter(|value| !value.is_empty())
+fn split_values<'a>(
+    values: &'a str,
+    line: usize,
+    kind: &str,
+) -> Result<Vec<&'a str>, DiscoveryError> {
+    if values == "-" {
+        return Ok(Vec::new());
+    }
+    if values.split(',').any(|value| value == "-") {
+        return Err(invalid_data(
+            line,
+            format!("{kind} list cannot mix '-' with values"),
+        ));
+    }
+    Ok(values
+        .split(',')
+        .filter(|value| !value.is_empty())
+        .collect())
 }
 
 fn insert_mappings(
@@ -225,7 +241,7 @@ fn insert_mappings(
     line: usize,
     kind: &str,
 ) -> Result<(), DiscoveryError> {
-    for value in split_values(values) {
+    for value in split_values(values, line, kind)? {
         if mappings
             .insert(OsString::from(value), language.clone())
             .is_some()
@@ -247,5 +263,37 @@ fn invalid_data(line: usize, detail: impl Into<String>) -> DiscoveryError {
     DiscoveryError::InvalidLanguageData {
         line,
         detail: detail.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DiscoveryError, LanguageRegistry};
+
+    const HEADER: &str = "id\tdisplay_name\textensions\tfilenames\tcompound_extensions\n";
+
+    #[test]
+    fn exact_empty_field_sentinel_decodes_as_empty_list() {
+        let registry = LanguageRegistry::parse(&format!("{HEADER}rust\tRust\t-\t-\t-\n"))
+            .expect("exact sentinel is valid");
+
+        assert_eq!(registry.language_count(), 1);
+        assert_eq!(registry.extension_count(), 0);
+        assert_eq!(registry.filename_count(), 0);
+        assert_eq!(registry.compound_extension_count(), 0);
+    }
+
+    #[test]
+    fn empty_field_sentinel_cannot_be_mixed_with_data() {
+        let error = LanguageRegistry::parse(&format!("{HEADER}rust\tRust\t.rs,-\t-\t-\n"))
+            .expect_err("mixed sentinel and extension must fail");
+
+        match error {
+            DiscoveryError::InvalidLanguageData { line, detail } => {
+                assert_eq!(line, 2);
+                assert_eq!(detail, "extension list cannot mix '-' with values");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 }

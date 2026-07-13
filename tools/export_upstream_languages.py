@@ -137,9 +137,9 @@ def render(
                 [
                     normalized_id(language),
                     display_names[language],
-                    ",".join(extensions_by_language[language]),
-                    ",".join(filenames_by_language[language]),
-                    ",".join(compounds_by_language[language]),
+                    ",".join(extensions_by_language[language]) or "-",
+                    ",".join(filenames_by_language[language]) or "-",
+                    ",".join(compounds_by_language[language]) or "-",
                 ]
             )
         )

@@ -47,3 +47,12 @@ Last updated: 2026-07-13 06:03
 - Code quality: checked
 - Next action: Task complete; continue to next task.
 
+## Task 6: Repair Generated Language TSV Whitespace
+
+- Path: `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-6/`
+- Task status: spec-checking
+- Implementer: checked
+- Spec review: unchecked
+- Code quality: unchecked
+- Next action: Run strict GD-6 spec review.
+
