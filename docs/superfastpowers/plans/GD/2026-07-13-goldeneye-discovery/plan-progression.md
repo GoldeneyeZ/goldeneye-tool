@@ -14,11 +14,11 @@ Last updated: 2026-07-13 05:30
 ## Task 2: Port Complete Language Registry
 
 - Path: `docs/superfastpowers/plans/GD/2026-07-13-goldeneye-discovery/tasks/GD-2/`
-- Task status: pending
-- Implementer: unchecked
+- Task status: spec-checking
+- Implementer: checked
 - Spec review: unchecked
 - Code quality: unchecked
-- Next action: Start implementation.
+- Next action: Run GD-2 spec review.
 
 ## Task 3: Implement Ignore Precedence and Policy Matchers
 

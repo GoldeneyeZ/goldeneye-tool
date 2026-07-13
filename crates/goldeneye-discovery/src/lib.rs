@@ -5,6 +5,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+mod language;
+
+pub use language::{LanguageRegistry, LanguageSpec};
+
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
