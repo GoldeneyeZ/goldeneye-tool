@@ -411,10 +411,13 @@ git commit -m "feat: implement MCP lifecycle routing"
 
 ```rust
 #[test]
-fn registry_pages_eight_tools_and_emits_cursor() {
+fn registry_returns_all_without_cursor_and_pages_when_cursor_present() {
     let tools = (0..10).map(|index| ToolDefinition::test(format!("tool-{index}"))).collect();
     let registry = ToolRegistry::new(tools);
-    let first = registry.page(None).expect("first page");
+    let all = registry.page(None).expect("unpaginated list");
+    assert_eq!(all.tools.len(), 10);
+    assert!(all.next_cursor.is_none());
+    let first = registry.page(Some("0")).expect("first page");
     assert_eq!(first.tools.len(), 8);
     assert_eq!(first.next_cursor.as_deref(), Some("8"));
     let second = registry.page(first.next_cursor.as_deref()).expect("second page");
@@ -450,12 +453,19 @@ pub struct ToolDefinition {
     pub title: String,
     pub description: String,
     pub input_schema: Value,
+    pub output_schema: Value,
 }
 
 impl ToolDefinition {
     #[cfg(test)]
     pub fn test(name: String) -> Self {
-        Self { title: name.clone(), description: name.clone(), name, input_schema: json!({"type":"object"}) }
+        Self {
+            title: name.clone(),
+            description: name.clone(),
+            name,
+            input_schema: json!({"type":"object"}),
+            output_schema: json!({"type":"object", "additionalProperties": true}),
+        }
     }
 }
 
@@ -477,7 +487,10 @@ impl ToolRegistry {
     pub const fn new(tools: Vec<ToolDefinition>) -> Self { Self { tools } }
 
     pub fn page(&self, cursor: Option<&str>) -> Result<ToolPage, &'static str> {
-        let offset = cursor.unwrap_or("0").parse::<usize>().map_err(|_| "invalid cursor")?;
+        let Some(cursor) = cursor else {
+            return Ok(ToolPage { tools: self.tools.clone(), next_cursor: None });
+        };
+        let offset = cursor.parse::<usize>().map_err(|_| "invalid cursor")?;
         if offset > self.tools.len() { return Err("invalid cursor"); }
         let end = (offset + PAGE_SIZE).min(self.tools.len());
         Ok(ToolPage {

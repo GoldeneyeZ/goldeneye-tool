@@ -1,10 +1,13 @@
 use crate::protocol::{Request, Response};
+use crate::tools::{ToolCallResult, ToolRegistry};
 use serde_json::{Value, json};
 
 pub const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
 
 #[derive(Default)]
-pub struct Server {}
+pub struct Server {
+    tools: ToolRegistry,
+}
 
 impl Server {
     #[must_use]
@@ -27,6 +30,33 @@ impl Server {
             "resources/list" => Some(json!({ "resources": [] })),
             "resources/templates/list" => Some(json!({ "resourceTemplates": [] })),
             "prompts/list" => Some(json!({ "prompts": [] })),
+            "tools/list" => {
+                let cursor = request.params.get("cursor").and_then(Value::as_str);
+                match self.tools.page(cursor) {
+                    Ok(page) => match serde_json::to_value(page) {
+                        Ok(value) => Some(value),
+                        Err(error) => {
+                            return Some(Response::error(Some(id), -32603, error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        return Some(Response::error(Some(id), -32602, error));
+                    }
+                }
+            }
+            "tools/call" => {
+                let name = request
+                    .params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("missing");
+                match serde_json::to_value(ToolCallResult::error(format!("Unknown tool: {name}"))) {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        return Some(Response::error(Some(id), -32603, error.to_string()));
+                    }
+                }
+            }
             _ => None,
         };
         Some(match result {
@@ -39,6 +69,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::Server;
+    use serde_json::json;
 
     #[test]
     fn initialize_returns_upstream_identity_and_latest_protocol() {
@@ -92,5 +123,34 @@ mod tests {
             let value = serde_json::to_value(response).expect("serialize response");
             assert_eq!(value["result"], expected, "method {method}");
         }
+    }
+
+    #[test]
+    fn tools_list_truthfully_advertises_no_unimplemented_tools() {
+        let response = Server::default()
+            .handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+            .expect("request response");
+        let value = serde_json::to_value(response).expect("serialize response");
+
+        assert_eq!(value["result"], json!({"tools": []}));
+    }
+
+    #[test]
+    fn unknown_tool_call_returns_mcp_error_result_envelope() {
+        let response = Server::default()
+            .handle_line(
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"missing","arguments":{}}}"#,
+            )
+            .expect("request response");
+        let value = serde_json::to_value(response).expect("serialize response");
+
+        assert_eq!(
+            value["result"],
+            json!({
+                "content": [{"type": "text", "text": "Unknown tool: missing"}],
+                "isError": true
+            })
+        );
+        assert!(value.get("error").is_none());
     }
 }
