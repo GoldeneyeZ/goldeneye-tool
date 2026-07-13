@@ -1,13 +1,13 @@
 # Goldeneye Full Grammar Provider Plan Progression
 
-Last updated: 2026-07-13 22:13 Europe/Paris
+Last updated: 2026-07-13 22:42 Europe/Paris
 
 - Plan: `docs/superfastpowers/plans/GFP/2026-07-13-goldeneye-full-grammar-provider.md`
 - Design: `docs/superfastpowers/specs/2026-07-13-goldeneye-full-grammar-provider-design.md`
 - Plan baseline commit: `6e2b800`
 - Design whitespace follow-up: `023837d`
-- Overall status: in_progress
-- Next action: Implement GFP-5 under TDD in bypass mode.
+- Overall status: implementation_complete
+- Next action: Continue the Rust port; run one combined audit after all port/edit tasks.
 
 ## GFP-1: Extract Grammar-Pack Integrity into a Build-Safe Crate
 
@@ -48,13 +48,13 @@ Last updated: 2026-07-13 22:13 Europe/Paris
 ## GFP-5: Add Offline Full-Pack CI, Operator Documentation, and Claim Guards
 
 - Path: `tasks/GFP-5`
-- Task status: in_progress
-- Implementer: in_progress
+- Task status: complete
+- Implementer: complete (`b2ccf4a`)
 - Spec review: bypassed (single final audit after all tasks)
 - Code quality: bypassed (single final audit after all tasks)
-- Next action: Complete the GFP-5 implementation and focused gates.
+- Next action: None; GFP-5 implementation is complete.
 
 ## Goal-Level Final Integration Review
 
-- Status: pending
-- Next action: Complete GFP-1 through GFP-5 first.
+- Status: deferred by bypass
+- Next action: Run once after the complete Rust port and edit/create tool implementation.
