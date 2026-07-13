@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use goldeneye_grammar_pack::GrammarPackLock as PackCrateGrammarPackLock;
 use goldeneye_syntax::GrammarPackLock;
 
 const MINIMAL_LOCK: &str = r#"
@@ -38,6 +39,15 @@ fn workspace_root() -> PathBuf {
         .and_then(|path| path.parent())
         .expect("syntax crate is inside the workspace")
         .to_path_buf()
+}
+
+#[test]
+fn syntax_reexport_is_the_pack_crate_type() {
+    fn accepts(_: goldeneye_syntax::GrammarPackLock) {}
+
+    let lock =
+        PackCrateGrammarPackLock::load(workspace_root().join("grammars/full-pack.toml")).unwrap();
+    accepts(lock);
 }
 
 #[test]

@@ -1,3 +1,5 @@
+//! Exact-Git object verification for grammar-pack assets.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufReader, Read, Write};

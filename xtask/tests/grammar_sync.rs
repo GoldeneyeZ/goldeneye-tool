@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use goldeneye_syntax::{GrammarRecord, hash_grammar_assets, lock_file_hash};
+use goldeneye_grammar_pack::{GrammarRecord, hash_grammar_assets, lock_file_hash};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;

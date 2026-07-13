@@ -1,16 +1,17 @@
 //! Workspace maintenance commands.
 
-use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use goldeneye_syntax::{GrammarPackLock, PackError, VerifiedPack, lock_file_hash};
+use goldeneye_grammar_pack::{
+    GrammarPackLock, GrammarPackState, PACK_STATE_FILE, PackError, VerifiedPack,
+    verify_materialized_pack,
+};
 use serde::{Deserialize, Serialize};
 use tempfile::Builder;
 use thiserror::Error;
 
-const PACK_STATE_FILE: &str = "pack-state.json";
 const TEMP_MARKER_FILE: &str = ".goldeneye-owned-temp.json";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -37,16 +38,6 @@ pub enum XtaskError {
         #[source]
         source: serde_json::Error,
     },
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct PackState {
-    schema_version: u32,
-    lock_hash: String,
-    upstream_commit: String,
-    grammar_count: usize,
-    asset_count: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -170,23 +161,16 @@ fn sync_grammar_source(
     destination_root: &Path,
 ) -> Result<SyncOutcome, XtaskError> {
     let lock = GrammarPackLock::load(lock_path)?;
-    let lock_hash = lock_file_hash(lock_path)?;
+    let expected_state = GrammarPackState::expected(lock_path, &lock)?;
+    let lock_hash = expected_state.lock_hash().to_owned();
     let destination = prepare_destination(destination_root)?;
     reject_overlap(source.safety_root(), &destination.path)?;
-
-    let expected_state = PackState {
-        schema_version: 1,
-        lock_hash: lock_hash.clone(),
-        upstream_commit: lock.upstream_commit().to_owned(),
-        grammar_count: lock.grammars.len(),
-        asset_count: lock.locked_asset_paths().count(),
-    };
 
     if destination.exists {
         // A no-op remains source-driven: both the requested source and the
         // already-materialized destination are independently rehashed.
         source.verify(&lock)?;
-        verify_existing_pack(&lock, &destination.path, &expected_state)?;
+        verify_existing_pack(lock_path, &lock, &destination.path)?;
         return Ok(SyncOutcome::AlreadyCurrent);
     }
 
@@ -216,7 +200,7 @@ fn sync_grammar_source(
         source.copy_to(&lock, temporary.path())?;
         write_json_new(&temporary.path().join(PACK_STATE_FILE), &expected_state)?;
         remove_regular_file(&temporary.path().join(TEMP_MARKER_FILE))?;
-        verify_materialized_layout(&lock, temporary.path())?;
+        verify_materialized_pack(lock_path, &lock, temporary.path())?;
         Ok::<(), XtaskError>(())
     })();
     if let Err(error) = result {
@@ -292,97 +276,17 @@ fn prepare_destination(path: &Path) -> Result<Destination, XtaskError> {
 }
 
 fn verify_existing_pack(
+    lock_path: &Path,
     lock: &GrammarPackLock,
     destination: &Path,
-    expected_state: &PackState,
 ) -> Result<(), XtaskError> {
-    let state_path = destination.join(PACK_STATE_FILE);
-    let state: PackState = match read_json_regular(&state_path) {
-        Ok(state) => state,
-        Err(error) => {
-            return invalid(format!(
+    verify_materialized_pack(lock_path, lock, destination)
+        .map(|_| ())
+        .map_err(|error| {
+            XtaskError::Invalid(format!(
                 "existing destination is not a verified Goldeneye pack: {error}"
-            ));
-        }
-    };
-    if state != *expected_state {
-        return invalid("existing destination pack-state.json does not match the requested lock");
-    }
-    verify_materialized_layout(lock, destination)?;
-    lock.verify_source(destination)?;
-    Ok(())
-}
-
-fn verify_materialized_layout(
-    lock: &GrammarPackLock,
-    destination: &Path,
-) -> Result<(), XtaskError> {
-    let mut expected_files = lock.locked_asset_paths().collect::<BTreeSet<_>>();
-    expected_files.insert(PACK_STATE_FILE.to_owned());
-    let mut expected_directories = BTreeSet::from([String::new()]);
-    for file in &expected_files {
-        let path = Path::new(file);
-        let mut parent = path.parent();
-        while let Some(directory) = parent {
-            let normalized = slash_path(directory)?;
-            expected_directories.insert(normalized);
-            parent = directory.parent();
-        }
-    }
-
-    let (actual_files, actual_directories) = collect_layout(destination)?;
-    if actual_files != expected_files {
-        return invalid(format!(
-            "materialized pack file set differs: expected {}, found {}",
-            expected_files.len(),
-            actual_files.len()
-        ));
-    }
-    if actual_directories != expected_directories {
-        return invalid("materialized pack contains an unexpected directory");
-    }
-    Ok(())
-}
-
-fn collect_layout(root: &Path) -> Result<(BTreeSet<String>, BTreeSet<String>), XtaskError> {
-    let mut files = BTreeSet::new();
-    let mut directories = BTreeSet::from([String::new()]);
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(directory) = stack.pop() {
-        let mut entries = fs::read_dir(&directory)
-            .map_err(|source| XtaskError::Io {
-                path: directory.clone(),
-                source,
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| XtaskError::Io {
-                path: directory.clone(),
-                source,
-            })?;
-        entries.sort_by_key(fs::DirEntry::file_name);
-        for entry in entries {
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|source| XtaskError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            if is_reparse_or_symlink(&metadata) {
-                return invalid(format!("symlink/reparse entry in pack: {}", path.display()));
-            }
-            let relative = slash_path(path.strip_prefix(root).map_err(|_| {
-                XtaskError::Invalid(format!("pack path escaped root: {}", path.display()))
-            })?)?;
-            if metadata.is_dir() {
-                directories.insert(relative);
-                stack.push(path);
-            } else if metadata.is_file() {
-                files.insert(relative);
-            } else {
-                return invalid(format!("non-regular entry in pack: {}", path.display()));
-            }
-        }
-    }
-    Ok((files, directories))
+            ))
+        })
 }
 
 fn cleanup_owned_stale_temps(parent: &Path, destination_name: &str) -> Result<(), XtaskError> {
@@ -658,12 +562,6 @@ fn validate_destination_component(component: &str) -> Result<(), XtaskError> {
         return invalid(format!("reserved destination component: {component:?}"));
     }
     Ok(())
-}
-
-fn slash_path(path: &Path) -> Result<String, XtaskError> {
-    path.to_str()
-        .map(|value| value.replace('\\', "/"))
-        .ok_or_else(|| XtaskError::Invalid(format!("non-UTF-8 path: {}", path.display())))
 }
 
 fn is_lower_hex_hash(value: &str) -> bool {

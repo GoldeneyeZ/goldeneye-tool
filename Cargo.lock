@@ -281,6 +281,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-grammar-pack"
+version = "0.1.0"
+dependencies = [
+ "cap-primitives",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [
@@ -293,11 +306,10 @@ dependencies = [
 name = "goldeneye-syntax"
 version = "0.1.0"
 dependencies = [
- "cap-primitives",
  "goldeneye-domain",
+ "goldeneye-grammar-pack",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror",
  "toml",
@@ -950,7 +962,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "goldeneye-syntax",
+ "goldeneye-grammar-pack",
  "rustix",
  "serde",
  "serde_json",

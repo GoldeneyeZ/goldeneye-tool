@@ -1,10 +1,12 @@
+//! Verified grammar-pack lock, source, and materialized-cache integrity.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -16,6 +18,8 @@ const ASSET_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-assets-v1\0";
 const LOCK_HASH_DOMAIN: &[u8] = b"goldeneye-grammar-lock-v1\0";
 const BUFFER_SIZE: usize = 1024 * 1024;
 
+pub const PACK_STATE_FILE: &str = "pack-state.json";
+
 #[derive(Debug, Error)]
 pub enum PackError {
     #[error("failed to read {path}: {source}")]
@@ -26,6 +30,12 @@ pub enum PackError {
     },
     #[error("invalid grammar lock TOML: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("invalid JSON in {path}: {source}")]
+    Json {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("invalid grammar lock: {0}")]
     Invalid(String),
     #[error("grammar asset hash mismatch for {grammar}: expected {expected}, got {actual}")]
@@ -90,6 +100,41 @@ pub struct LanguageMapping {
 pub struct VerifiedPack {
     pub grammar_count: usize,
     pub asset_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrammarPackState {
+    schema_version: u32,
+    lock_hash: String,
+    upstream_commit: String,
+    grammar_count: usize,
+    asset_count: usize,
+}
+
+impl GrammarPackState {
+    /// Compute the state expected for a validated lock file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackError`] when the lock file cannot be opened or hashed.
+    pub fn expected(
+        lock_path: impl AsRef<Path>,
+        lock: &GrammarPackLock,
+    ) -> Result<Self, PackError> {
+        Ok(Self {
+            schema_version: 1,
+            lock_hash: lock_file_hash(lock_path)?,
+            upstream_commit: lock.upstream_commit().to_owned(),
+            grammar_count: lock.grammars.len(),
+            asset_count: lock.locked_asset_paths().count(),
+        })
+    }
+
+    #[must_use]
+    pub fn lock_hash(&self) -> &str {
+        &self.lock_hash
+    }
 }
 
 impl GrammarPackLock {
@@ -513,6 +558,108 @@ pub fn lock_file_hash(path: impl AsRef<Path>) -> Result<String, PackError> {
         hasher.update(&buffer[..read]);
     }
     Ok(hex_digest(hasher.finalize()))
+}
+
+/// Verify a materialized grammar pack's state, exact layout, and asset hashes.
+///
+/// # Errors
+///
+/// Returns [`PackError`] when the state file is missing, unsafe, malformed, or
+/// stale; when the materialized layout differs from the lock; or when any
+/// locked asset is missing, unsafe, or has drifted.
+pub fn verify_materialized_pack(
+    lock_path: impl AsRef<Path>,
+    lock: &GrammarPackLock,
+    root: impl AsRef<Path>,
+) -> Result<VerifiedPack, PackError> {
+    let root = root.as_ref();
+    let state_path = root.join(PACK_STATE_FILE);
+    let state_file = open_regular_file(&state_path)?;
+    let state: GrammarPackState =
+        serde_json::from_reader(BufReader::new(state_file)).map_err(|source| PackError::Json {
+            path: state_path,
+            source,
+        })?;
+    let expected = GrammarPackState::expected(lock_path, lock)?;
+    if state != expected {
+        return invalid("pack-state.json does not match the requested lock");
+    }
+
+    verify_materialized_layout(lock, root)?;
+    lock.verify_source(root)
+}
+
+fn verify_materialized_layout(lock: &GrammarPackLock, root: &Path) -> Result<(), PackError> {
+    let mut expected_files = lock.locked_asset_paths().collect::<BTreeSet<_>>();
+    expected_files.insert(PACK_STATE_FILE.to_owned());
+    let mut expected_directories = BTreeSet::from([String::new()]);
+    for file in &expected_files {
+        let mut parent = Path::new(file).parent();
+        while let Some(directory) = parent {
+            expected_directories.insert(slash_path(directory)?);
+            parent = directory.parent();
+        }
+    }
+
+    let (actual_files, actual_directories) = collect_layout(root)?;
+    if actual_files != expected_files {
+        return invalid(format!(
+            "materialized pack file set differs: expected {}, found {}",
+            expected_files.len(),
+            actual_files.len()
+        ));
+    }
+    if actual_directories != expected_directories {
+        return invalid("materialized pack contains an unexpected directory");
+    }
+    Ok(())
+}
+
+fn collect_layout(root: &Path) -> Result<(BTreeSet<String>, BTreeSet<String>), PackError> {
+    let mut files = BTreeSet::new();
+    let mut directories = BTreeSet::from([String::new()]);
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|source| PackError::Io {
+                path: directory.clone(),
+                source,
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| PackError::Io {
+                path: directory.clone(),
+                source,
+            })?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|source| PackError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            if is_reparse_or_symlink(&metadata) {
+                return invalid(format!("symlink/reparse entry in pack: {}", path.display()));
+            }
+            let relative = slash_path(path.strip_prefix(root).map_err(|_| {
+                PackError::Invalid(format!("pack path escaped root: {}", path.display()))
+            })?)?;
+            if metadata.is_dir() {
+                directories.insert(relative);
+                stack.push(path);
+            } else if metadata.is_file() {
+                files.insert(relative);
+            } else {
+                return invalid(format!("non-regular entry in pack: {}", path.display()));
+            }
+        }
+    }
+    Ok((files, directories))
+}
+
+fn slash_path(path: &Path) -> Result<String, PackError> {
+    path.to_str()
+        .map(|path| path.replace('\\', "/"))
+        .ok_or_else(|| PackError::Invalid(format!("path is not UTF-8: {}", path.display())))
 }
 
 fn stream_grammar_assets(

@@ -4,11 +4,14 @@ mod engine;
 mod grammar;
 mod inspect;
 mod locator;
-mod pack;
 
 pub use engine::{
     DiagnosticKind, MAX_DIAGNOSTIC_DETAILS, ReparseResult, SyntaxDiagnostic, SyntaxEdit,
     SyntaxEngine, SyntaxSnapshot,
+};
+pub use goldeneye_grammar_pack::{
+    GrammarPackLock, GrammarPackState, GrammarRecord, LanguageBindingStatus, LanguageMapping,
+    PackError, VerifiedPack, hash_grammar_assets, lock_file_hash, verify_materialized_pack,
 };
 pub use grammar::{
     CoreGrammarProvider, EditContentRegion, EditPointKind, Grammar, GrammarProvider, GrammarSource,
@@ -20,7 +23,3 @@ pub use inspect::{
     inspect_syntax,
 };
 pub use locator::{LocatorError, all_named_locators, locator_scope, resolve_locator};
-pub use pack::{
-    GrammarPackLock, GrammarRecord, LanguageBindingStatus, LanguageMapping, PackError,
-    VerifiedPack, hash_grammar_assets, lock_file_hash,
-};
