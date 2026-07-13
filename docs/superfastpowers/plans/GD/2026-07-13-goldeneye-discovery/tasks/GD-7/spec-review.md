@@ -2,7 +2,8 @@
 
 - Result: checked
 - Reviewer: task-worker self-audit after isolated reviewer timed out without producing artifacts
-- Reviewed range: `c7a8f41..working-tree`
+- Reviewed commit: `24c027f`
+- Reviewed range: `c7a8f41..24c027f`
 
 ## Evidence Reviewed
 

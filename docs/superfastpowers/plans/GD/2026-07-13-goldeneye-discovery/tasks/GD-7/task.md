@@ -116,4 +116,3 @@ Expected: every command exits 0; all new safety/parity tests pass.
 git add crates/goldeneye-discovery docs/superfastpowers/plans/GD
 git commit -m "[GD-7] fix: enforce discovery safety precedence"
 ```
-
