@@ -1,0 +1,10 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"goldeneye-compat-tests","version":"0.1.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"ping"}
+{"jsonrpc":"2.0","id":3,"method":"resources/list"}
+{"jsonrpc":"2.0","id":4,"method":"resources/templates/list"}
+{"jsonrpc":"2.0","id":5,"method":"prompts/list"}
+{"jsonrpc":"2.0","id":6,"method":"tools/list"}
+{"jsonrpc":"2.0","id":7,"method":"goldeneye/missing"}
+{"jsonrpc":"2.0","id":"string-id","method":"ping"}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{

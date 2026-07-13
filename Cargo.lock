@@ -11,6 +11,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-compat-tests"
+version = "0.1.0"
+dependencies = [
+ "goldeneye",
+ "serde_json",
+]
+
+[[package]]
 name = "goldeneye-domain"
 version = "0.1.0"
 dependencies = [
