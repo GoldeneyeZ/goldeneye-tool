@@ -1,116 +1,97 @@
 # Goldeneye Syntax Core Final Integration Review
 
-**Reviewed range:** `9c0cee8..6853e056ecf4ea21d369b54fd526c75d021e3e3f`  
-**Reviewed head:** `6853e056ecf4ea21d369b54fd526c75d021e3e3f`  
-**Result:** **failed**
+- Result: failed
+- Reviewed range: `9c0cee8..52cb046`
+- Reviewed head: `52cb046e8403c9d810d4e965087f060e35d6eeb9`
+- Review date: 2026-07-13
 
-The five task packages and their spec/code-quality records are administratively
-complete, but fresh inspection of the combined code and required real-source
-gate found two Important defects and one Minor contract gap. The plan is not
-ready to advance.
+## Important Finding
 
-## Important Findings
+### A chunk boundary inside the ABI digits rejects one valid marker
 
-### 1. Export, verification, and synchronization do not agree on the bytes being locked
+`tools/export_grammar_lock.py:416` scans each chunk plus a 1024-byte overlap.
+The filter at `tools/export_grammar_lock.py:430-434` counts any regex match
+whose end enters the new chunk. If a boundary splits `LANGUAGE_VERSION 14`
+as `LANGUAGE_VERSION 1 | 4`, the first window records ABI `1` and the next
+window records ABI `14`. The exact-one check at
+`tools/export_grammar_lock.py:437` then rejects a parser containing only one
+marker.
 
-- `tools/export_grammar_lock.py:441` hashes immutable bytes read from the pinned
-  Git objects, as required by the exact-commit/raw-content contract.
-- `tools/export_grammar_lock.py:30` still pins core hashes produced from a
-  Windows checkout after `core.autocrlf=true` expanded LF to CRLF.
-  `grammars/full-pack.toml:18` and all other committed `source_hash` values were
-  generated from those transformed worktree bytes.
-- `crates/goldeneye-syntax/src/pack.rs:195` and `xtask/src/lib.rs:70` verify and
-  synchronize filesystem bytes, so they accept this CRLF checkout while the
-  hardened exporter rejects the committed lock.
+The regression at `tools/test_export_grammar_lock.py:97` splits inside the
+`LANGUAGE_VERSION` identifier, so it does not cover this numeric-token split.
+An independent probe exercised all 27 split points in
+`#define LANGUAGE_VERSION 14\n`; split 26 alone failed with
+`ExportError: direct parser must contain exactly one ABI marker`.
 
-The upstream checkout was clean at the exact declared commit
-`2469ecc3a7a2f80debe296e1f17a1efcfdb9450c`; no content change explains the
-difference. All 907 assets differ from their Git blobs solely by LF-to-CRLF
-expansion. All 159 committed grammar hashes match the Windows worktree and zero
-match the pinned Git tree. For Ada, the framed Git-object hash is
-`fe745430ec54b5c325ce94f94473855fdedde38d9f98e4cd01d5431ef438ff0e`, while
-the committed/worktree hash is
-`c37ebf2b1ac15bdedd2978396864f54dd268dc047ecdb8c34c1222b9b918c3b9`.
+This violates the explicit requirement to reject duplicate identical markers
+without double-counting a single boundary-crossing marker. Defer a match that
+ends at a non-final window boundary until the next chunk (or EOF), retain exact
+occurrence counting across the overlap, and add a digit-split regression
+(preferably an all-split-points regression).
 
-Consequently the required command
-`python tools/export_grammar_lock.py --check ...` exits 1 with an Ada source
-hash mismatch, while `cargo xtask grammars verify ...` exits 0 against the same
-checkout. The deterministic exact-commit provenance claim in
-`THIRD_PARTY.md:36` is therefore not currently true.
+## Prior Failed-Review Closure History
 
-Acceptance criteria for repair:
-
-1. Define and enforce one cross-platform byte source consistent with the task:
-   raw bytes from the pinned Git commit, without line-ending normalization.
-2. Regenerate all 159 lock hashes and the exporter core-hash expectations from
-   that source.
-3. Make exporter check, verify, and sync consume or require the same byte-stable
-   input (for example, an explicitly validated `core.autocrlf=false` checkout
-   or exact Git-object materialization).
-4. Add a regression covering an `autocrlf` checkout, then rerun exporter
-   `--check`, verify, and sync against the same pinned input; every command in
-   the plan's metadata/materialization gate must exit 0.
-
-Merely updating `EXPECTED_CORE_HASHES` and `full-pack.toml` is insufficient:
-the current filesystem verifier would then reject the CRLF checkout and the
-three operations would still disagree.
-
-### 2. Core grammar metadata tests do not check the dependency manifest
-
-`crates/goldeneye-syntax/tests/core_grammars.rs:45` hardcodes the same package
-and version strings as `crates/goldeneye-syntax/src/grammar.rs:152`, but neither
-copy is checked against the exact dependency declarations at
-`crates/goldeneye-syntax/Cargo.toml:15`. A future grammar dependency bump could
-leave snapshots advertising the old revision while every existing metadata
-test remains green, weakening the grammar-drift guard used by reparsing and
-locators.
-
-Repair by parsing/checking the exact manifest pins in the test or generating
-provider metadata and assertions from one source of truth. Retain explicit
-assertions for all five packages and six runtime grammar IDs.
-
-## Minor Finding
-
-### Duplicate identical ABI markers are accepted
-
-`tools/export_grammar_lock.py:420` stores `LANGUAGE_VERSION` matches in a set,
-so two identical markers collapse to one value and pass the `len(...) == 1`
-check at line 431. Direct invocation with two `LANGUAGE_VERSION 14` definitions
-was accepted, contrary to the Task 5 requirement for exactly one marker.
-
-Count marker occurrences rather than distinct values, without double-counting
-matches in the 1024-byte streaming overlap, and add an exporter regression.
+1. **Exact Git bytes versus CRLF checkout — closed.** Commit `39ec323`
+   regenerated all 159 hashes from the pinned commit's Git blobs and added a
+   shared Git source session. Export, verify, and sync now use the lock's sole
+   revision, disable replacement objects and lazy fetches, accept only
+   `100644`/`100755` blobs, validate the persistent `cat-file --batch`
+   protocol, and stream absent-destination sync directly into an owned
+   temporary pack. Directory mode and its existing safety behavior remain.
+2. **Five manifest pins versus six provider IDs — closed.** Commit `be307f2`
+   parses the five exact `=version` dependencies, checks all six runtime IDs
+   (including TypeScript and TSX sharing one package), and rejects synthetic
+   drift independently for every pin.
+3. **Duplicate identical ABI markers — partially closed, then reopened by this
+   review.** Two identical markers are now rejected and the existing
+   identifier-split boundary fixture passes, but the digit-split probe above
+   proves the full boundary requirement is not met.
 
 ## Integration Audit
 
-- Progression records GS-1 through GS-5 as complete, with implementer, spec,
-  and code-quality status checked. Every required `context.md`,
-  `spec-review.md`, and `code-quality.md` was present and reviewed.
-- Implementation commits remain task-scoped. Later tasks did not overwrite the
-  earlier engine/locator/inspection implementations; public exports and
-  dependencies compose as planned. The full pack remains explicitly pre-GFP
-  metadata/materialization, not an unimplemented claim of 160-language runtime
-  support.
-- Fresh GS-1--GS-4 focused verification passed 53/53 tests: domain 7,
-  discovery 2, and syntax grammar/diagnostic/locator/inspection suites 44.
-- GS-5 focused tests passed: exporter 3/3, grammar-lock 7/7, grammar-sync 11/11,
-  and xtask library 1/1. These suites do not catch the real-checkout byte-source
-  disagreement above.
-- Independent lock inspection otherwise confirmed 159 grammars, 160 language
-  bindings, 907 assets, ABI histogram `13=9, 14=78, 15=72`, 159 available IDs,
-  Nim explicitly unavailable, 157 unique bound grammars, and the two explicit
-  ObjectScript orphans. Every grammar has a direct `LICENSE` and `parser.c`, and
-  the asset allowlist is limited to `LICENSE`, `*.c`, `*.h`, and `*.inc`.
-- Cargo dependency closure and `THIRD_PARTY.md` entries agree on package
-  versions/licenses; no separate dependency or license omission was found.
-  Provenance remains blocked by Important finding 1.
-- `git diff --check 9c0cee8..6853e056e` passed. The worktree was clean and HEAD
-  equaled the reviewed commit before this requested review artifact was added;
-  no unreviewed implementation change was present.
+- `plan-progression.md` records GS-1 through GS-5 complete with implementer,
+  specification, and code-quality checks. Every task context/review was read;
+  GS-1, GS-2, and GS-5 handoffs are resolved and no current failed or unchecked
+  task-local review remains.
+- The actual combined diff and both repair ranges were inspected. Changes after
+  `821a0d9` do not modify provider, snapshot/diagnostic, locator, inspection,
+  domain, discovery, or public runtime source, so the GS-1 through GS-4 runtime
+  implementations were not overwritten by the pack repair.
+- The pack repair otherwise fails closed for exact commit/object identity,
+  replacement refs, lazy fetches, non-regular Git modes, malformed/truncated
+  batch protocol, path overlap, mismatched existing packs, and owned temporary
+  cleanup. Absent Git sync hashes and copies each blob through one stream and
+  creates no intermediate checkout/archive.
+- CLI parsing rejects mixed and incomplete directory/Git modes. The real lock,
+  Cargo dependency closure, `THIRD_PARTY.md`, retained per-grammar licenses,
+  and pre-GFP metadata/materialization claim are coherent.
+- Before this required review artifact was edited, HEAD was exactly
+  `52cb046e8403c9d810d4e965087f060e35d6eeb9` and the worktree had zero
+  staged, unstaged, or untracked entries.
+
+## Verification Evidence
+
+Fresh focused checks run during this review:
+
+- `cargo test -p goldeneye-syntax --test core_grammars`: 6 passed.
+- `python -m unittest tools.test_export_grammar_lock`: 6 passed.
+- `cargo test -p goldeneye-syntax --test grammar_lock`: 7 passed.
+- `cargo test -p xtask --bin xtask`: 2 passed.
+- `cargo test -p xtask --test grammar_sync git_source_`: 4 passed.
+- Runtime provider/diagnostic/locator/inspection focus: 46 passed; later repair
+  ranges contain no changes to those implementations.
+- Exhaustive ABI split probe: 27 split points checked, one failure at
+  `LANGUAGE_VERSION 1 | 4`.
+
+The controller's fresh full HEAD gate also reported format, clippy, release
+build, and 175 workspace tests passing; exporter `--check` reproducible; Git
+verification at 159 grammars / 907 assets; existing-pack sync current; the
+CRLF-smudged directory rejected; and raw Git materialization containing LF
+bytes. Those broad gates do not exercise the failing digit split above.
 
 ## Final Decision
 
-**Failed.** Close both Important findings, add the ABI-marker regression, rerun
-the real pinned-checkout metadata/materialization gate and controller gates, and
-obtain fresh independent spec/code-quality review before repeating final
-integration review.
+**FAILED.** The Git-byte and manifest-pin repairs are integrated, and no other
+Critical or Important finding remains, but the ABI streaming scanner still
+violates one explicit repaired requirement. Fix the Important finding and run a
+fresh final integration review before marking GS checked.

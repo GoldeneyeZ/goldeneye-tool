@@ -1,5 +1,12 @@
 # GS-5 Spec Review
 
+Result: failed (reopened by final integration review)
+
+Active finding: numeric ABI token split is double-counted across chunk overlap.
+Source: `../../final-review.md`
+
+## Prior Checked Review
+
 Result: checked
 
 - Reviewed: 2026-07-13 Europe/Paris

@@ -1,5 +1,11 @@
 # GS-5 Code-Quality Review
 
+Result: unchecked after final integration reopen
+
+Source: `../../final-review.md`
+
+## Prior Checked Review
+
 Result: checked
 
 - Reviewed: 2026-07-13 Europe/Paris
