@@ -1,6 +1,6 @@
 # Goldeneye Full Grammar Provider Plan Progression
 
-Last updated: 2026-07-13 18:24 Europe/Paris
+Last updated: 2026-07-13 18:25 Europe/Paris
 
 - Plan: `docs/superfastpowers/plans/GFP/2026-07-13-goldeneye-full-grammar-provider.md`
 - Design: `docs/superfastpowers/specs/2026-07-13-goldeneye-full-grammar-provider-design.md`
@@ -21,11 +21,11 @@ Last updated: 2026-07-13 18:24 Europe/Paris
 ## GFP-2: Persist Factory Symbols and Generate the Exact Registry
 
 - Path: `tasks/GFP-2`
-- Task status: pending
-- Implementer: unchecked
+- Task status: in_progress
+- Implementer: in_progress
 - Spec review: unchecked
 - Code quality: unchecked
-- Next action: Wait for GFP-1 to complete.
+- Next action: Complete the GFP-2 implementation handoff and task gates.
 
 ## GFP-3: Compile the Verified Native Grammar Pack Behind an Opt-In Feature
 
