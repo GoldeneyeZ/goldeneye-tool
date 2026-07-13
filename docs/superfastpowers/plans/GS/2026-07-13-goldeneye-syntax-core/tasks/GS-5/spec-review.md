@@ -1,50 +1,62 @@
 # GS-5 Spec Review
 
-Result: failed (reopened by final integration review)
+Result: checked
 
-Active findings: raw Git-byte parity and duplicate identical ABI marker acceptance.
-Source: `../../final-review.md`
+- Reviewed: 2026-07-13 Europe/Paris
+- Reviewed range: `9feb49b..39ec323`
+- Repair commit: `39ec323`
+- Independent reviewer: `/root/gs5_git_repair_worker/gs5_spec_recheck`
+- Verdict: CHECKED; no remaining GS-5 specification finding.
 
-## Prior Checked Review
+## Scope and Evidence
 
-Result: checked after repair
+- Reviewed the actual committed range (11 changed files, 1,251 insertions and
+  271 deletions), the GS plan Task 5 contract, GS-5 task/context/handoff, prior
+  spec review, progression, and the failed final-integration review.
+- Accepted the focused and real-pack command evidence already recorded in
+  `context.md:235-282`; this one-turn recheck did not rerun the long 1.29 GB
+  real-pack gates.
+- Confirmed the lock/export provenance update spans the raw pinned Git blobs,
+  regenerated 159 grammar hashes and core expectations, and updated commands
+  and attribution (`grammars/full-pack.toml:1`,
+  `tools/export_grammar_lock.py:1`, `THIRD_PARTY.md:1`, and
+  `tasks/GS-5/context.md:235`).
 
-Reviewed: 2026-07-13 12:41 Europe/Paris
-Reviewed range: `76b618b..4b02e99`
-Implementation commit: `4b02e9962a089e1b44bc8471d323f522d517ee77`
-Independent reviewer: `/root/gs_5_worker/gs5_independent_review`
-Independent final verdict: PASS; no remaining GS-5 specification finding.
+## Requirement Trace
 
-## Evidence Reviewed
+1. The original directory APIs remain, while Git verification/copy obtain the
+   commit only from `GrammarPackLock::upstream_commit`; both source kinds enter
+   the same private framed hash/copy loop (`crates/goldeneye-syntax/src/pack.rs:196`,
+   `crates/goldeneye-syntax/src/pack.rs:204`,
+   `crates/goldeneye-syntax/src/pack.rs:240`, and
+   `crates/goldeneye-syntax/src/pack.rs:520`).
+2. The CLI requires exactly one directory `--source` or the paired
+   `--git-repo`/`--git-prefix` form, and absent Git sync streams into an owned
+   temporary source before the existing destination-safe materialization path
+   (`xtask/src/main.rs:1` and `xtask/src/lib.rs:1`).
+3. Git access canonicalizes the repository, disables replacements and lazy
+   fetching, verifies the exact commit, parses NUL-delimited `ls-tree`, and
+   accepts only modes `100644`/`100755`
+   (`crates/goldeneye-syntax/src/pack/git_source.rs:1`).
+4. A persistent OID-only `cat-file --batch` session validates the object type,
+   declared size, exact byte count, and trailing delimiter; every error/drop
+   path closes stdin and kills/reaps the child
+   (`crates/goldeneye-syntax/src/pack/git_source.rs:80` and
+   `crates/goldeneye-syntax/src/pack/git_source.rs:300`).
+5. Directory traversal, atomic create-new writes, existing-pack no-op behavior,
+   mismatch rejection, overlap rejection, and partial-output cleanup remain in
+   the shared path (`crates/goldeneye-syntax/src/pack.rs:520` and
+   `xtask/src/lib.rs:1`). No archive/checkout/full-blob `Vec` path was added.
+6. The committed regressions cover CRLF/smudged worktrees, replacement refs,
+   non-regular modes, payloads larger than two stream buffers, mixed CLI forms,
+   duplicate identical ABI markers, and overlap-window boundary counting
+   (`tools/test_export_grammar_lock.py:1`,
+   `xtask/tests/grammar_sync.rs:1`, and
+   `crates/goldeneye-syntax/src/pack.rs:1`).
 
-- GS-5 task contract, shared lock schema, deterministic exporter/full lock,
-  verify/sync implementation, legal ledger, and focused tests.
-- Exporter `--check`, real 159-grammar/907-asset verification, existing-pack
-  no-op sync, workspace clippy with `-D warnings`, workspace tests, and release
-  build all exited successfully.
-- The final replacement-object regression suite ran 3 tests and passed.
-- The actual `pack.rs` and `grammar_lock.rs` Unix paths typechecked for
-  `x86_64-unknown-linux-gnu` through an isolated manifest; the full workspace
-  cross-check requires a Linux C cross-compiler for existing Tree-sitter crates.
+## Findings
 
-## Findings and Repairs
-
-1. Important, closed: lock validation originally accepted arbitrary asset types
-   and non-direct licenses. It now allows only nested `*.c`, `*.h`, `*.inc`,
-   exactly one direct `LICENSE`, and requires direct `parser.c` plus license
-   membership. Regressions cover `README.md`, nested license, and missing parser.
-2. Important, closed: source validation originally separated pathname checks
-   from ordinary opens. The final implementation anchors at the stable
-   filesystem/volume root, traverses every source-root and asset directory with
-   capability-relative no-follow opens, opens the final asset no-follow, and
-   hashes/copies from that same handle. Regressions cover final and intermediate
-   symlinks, including the Windows build.
-3. Important, closed: exact-commit export originally allowed Git replacement
-   refs to substitute another commit tree while preserving the requested SHA.
-   Every exporter Git subprocess (`run_git`, `ls-tree`, and persistent
-   `cat-file --batch`) now receives `GIT_NO_REPLACE_OBJECTS=1`. The regression
-   installs `refs/replace` between distinct commits and proves export still
-   reads the original commit's blob bytes.
-
-The independent final recheck confirmed all repairs, ran the 3-test exporter
-suite, and found no missing, extra, or misunderstood GS-5 requirement.
+No active specification findings. The two final-integration failures recorded
+in `implementer-handoff.md:12-16` are closed by this range: raw Git-byte parity
+is restored and duplicate identical ABI markers no longer satisfy the
+exactly-one contract.

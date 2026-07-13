@@ -167,9 +167,13 @@ Files above are starting points only. Inspect any additional files needed to com
 
 ## Completion Updates
 
-- Implementation state: committed at
-  `4b02e9962a089e1b44bc8471d323f522d517ee77`; independent spec and code-quality
-  reviews are checked after their repair loops.
+- Original implementation state: committed at
+  `4b02e9962a089e1b44bc8471d323f522d517ee77`; its prior independent reviews were
+  later reopened by the final integration audit.
+- Final-integration repair commit:
+  `39ec323` (`[GS-5] fix: materialize exact Git grammar blobs`).
+- Repair review range: `9feb49b..39ec323`; fresh independent spec and
+  code-quality phases are checked with no remaining finding.
 - Files created: `.cargo/config.toml`;
   `crates/goldeneye-syntax/src/pack.rs`;
   `crates/goldeneye-syntax/tests/grammar_lock.rs`;
@@ -227,3 +231,56 @@ Files above are starting points only. Inspect any additional files needed to com
   each direct parser (`13=9`, `14=78`, `15=72`); the nested RST helper remains a
   copied asset. Materialization is offline metadata/tooling and does not claim a
   full runtime `GrammarProvider`.
+
+## Final-Integration Repair
+
+- Added a private Git source session in
+  `crates/goldeneye-syntax/src/pack/git_source.rs`. It canonicalizes the Git
+  worktree root, resolves only the lock's exact `upstream_commit`, disables
+  replacement objects and lazy fetches, inventories NUL-delimited `ls-tree`
+  records, accepts only modes `100644`/`100755`, and reads all locked OIDs from
+  one persistent checked `cat-file --batch` process with kill/reap cleanup.
+- Directory and Git sessions now feed one private framed hash/copy loop. An
+  absent-destination Git sync streams each blob once into the owned temporary
+  pack while hashing; it creates no archive, checkout, or whole-blob buffer.
+  Existing directory no-follow traversal, overlap checks, atomic publication,
+  no-op re-verification, mismatch rejection, and owned-temp cleanup remain.
+- `cargo xtask grammars verify|sync` accepts exactly one source mode:
+  `--source <dir>` or paired `--git-repo <dir> --git-prefix <path>`. Git mode
+  has no revision flag; `grammars/full-pack.toml` is the sole commit authority.
+- Regenerated all 159 `source_hash` values from raw Git blobs. Pinned core
+  hashes are Ada `fe745430...38ff0e`, YAML `cf48df79...421a95`, and RST
+  `c676d084...b9da7`.
+- Repair RED evidence:
+  - duplicate identical ABI markers were accepted while a marker split across
+    the 1024-byte overlap was correctly found;
+  - the mixed CLI case reported an unknown option instead of rejecting mixed
+    source modes;
+  - Git integration initially failed to compile because
+    `verify_git_grammars`/`sync_git_grammars` did not exist;
+  - exporter `--check` failed on Ada with Git hash `fe745430...38ff0e` versus
+    the committed CRLF hash `c37ebf2b...c3b9`;
+  - lazy-fetch environment coverage failed because `GIT_NO_LAZY_FETCH` was
+    absent;
+  - replacement, non-regular-mode, and greater-than-two-buffer regressions each
+    failed when their corresponding guard was removed/capped, then passed with
+    the guard restored.
+- Focused GREEN evidence: exporter tests 6/6; xtask library 1/1, CLI 2/2, and
+  sync integration 15/15; focused formatting and clippy with `-D warnings`.
+- Real pinned Git evidence:
+  - exporter `--check` reported the lock byte-for-byte reproducible;
+  - Git verify reported 159 grammars / 907 assets;
+  - directory verify against the still-smudged checkout failed on Ada as
+    intended;
+  - absent-destination Git sync materialized successfully, and a second sync
+    returned `grammar pack already current`;
+  - the checkout Ada parser remained 71,023 CRLF sequences while the
+    materialized parser contains 71,023 LF and zero CRLF sequences.
+- Fresh spec review: checked by
+  `/root/gs5_git_repair_worker/gs5_spec_recheck` for `9feb49b..39ec323`.
+- Fresh code-quality phase: checked by the same isolated independent reviewer
+  in an explicit follow-up role; no actionable correctness, security,
+  lifecycle, streaming, path-safety, or maintainability finding remains.
+- Final post-review gate exited 0: workspace format check, workspace clippy with
+  `-D warnings`, all workspace tests (including xtask CLI 2/2 and sync 15/15),
+  workspace release build, exporter tests 6/6, and `git diff --check`.
