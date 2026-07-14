@@ -28,9 +28,63 @@ pub(crate) fn execute(
     }
     let tokens = lex(&request.query)?;
     reject_mutations(&tokens)?;
-    let mut query = Parser::new(tokens, request.query.len()).parse()?;
+    let (branches, union_all) = split_union_tokens(tokens)?;
+    if union_all.is_empty() {
+        let query = Parser::new(
+            branches.into_iter().next().expect("query has one branch"),
+            request.query.len(),
+        )
+        .parse()?;
+        return execute_parsed(request, query, nodes, edges, request.max_rows);
+    }
+    let mut results = branches
+        .into_iter()
+        .map(|tokens| {
+            Parser::new(tokens, request.query.len())
+                .parse()
+                .and_then(|query| execute_parsed(request, query, nodes, edges, MAX_QUERY_ROWS))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let first = results
+        .first()
+        .ok_or_else(|| unsupported("UNION requires at least one query"))?;
+    let columns = first.columns.clone();
+    if results.iter().any(|result| result.columns != columns) {
+        return Err(unsupported("UNION branches must return identical columns"));
+    }
+    let first_result = results.remove(0);
+    let mut source_truncated = first_result.truncated;
+    let mut rows = first_result.rows;
+    for (all, result) in union_all.into_iter().zip(results) {
+        source_truncated |= result.truncated;
+        rows.extend(result.rows);
+        if !all {
+            let mut seen = BTreeSet::new();
+            rows.retain(|row| seen.insert(row_key(row)));
+        }
+    }
+    let total = rows.len();
+    let truncated = source_truncated || total > request.max_rows;
+    rows.truncate(request.max_rows);
+    Ok(QueryGraphResult {
+        project: request.project.as_str().to_owned(),
+        columns,
+        rows,
+        total,
+        truncated,
+    })
+}
+
+fn execute_parsed(
+    request: &QueryGraphRequest,
+    mut query: ParsedQuery,
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    row_cap: usize,
+) -> Result<QueryGraphResult, QueryError> {
     let degrees = graph_degrees(edges);
-    let mut bindings = execute_match_clauses(&query.matches, nodes, edges, &degrees)?;
+    let initial = execute_unwind(query.unwind.as_ref(), &degrees)?;
+    let mut bindings = execute_match_clauses(&query.matches, initial, nodes, edges, &degrees)?;
     if let Some(with_clause) = &query.with_clause {
         bindings = execute_with_clause(with_clause, bindings, &degrees)?;
     }
@@ -52,7 +106,7 @@ pub(crate) fn execute(
     rows.drain(..skipped);
     let total = rows.len();
     let query_limit = query.limit.unwrap_or(usize::MAX);
-    let materialized_limit = request.max_rows.min(query_limit);
+    let materialized_limit = row_cap.min(query_limit);
     let truncated = total > materialized_limit;
     rows.truncate(materialized_limit);
 
@@ -297,8 +351,65 @@ fn reject_mutations(tokens: &[Token]) -> Result<(), QueryError> {
     Ok(())
 }
 
+fn split_union_tokens(tokens: Vec<Token>) -> Result<(Vec<Vec<Token>>, Vec<bool>), QueryError> {
+    let mut branches = Vec::new();
+    let mut modes = Vec::new();
+    let mut current = Vec::new();
+    let mut parentheses = 0usize;
+    let mut brackets = 0usize;
+    let mut braces = 0usize;
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        let at_top_level = parentheses == 0 && brackets == 0 && braces == 0;
+        if at_top_level
+            && matches!(
+                &token.kind,
+                TokenKind::Identifier(identifier) if identifier.eq_ignore_ascii_case("UNION")
+            )
+        {
+            if current.is_empty() {
+                return Err(syntax(token.position, "UNION is missing its left query"));
+            }
+            branches.push(std::mem::take(&mut current));
+            index += 1;
+            let all = tokens.get(index).is_some_and(|token| {
+                matches!(
+                    &token.kind,
+                    TokenKind::Identifier(identifier) if identifier.eq_ignore_ascii_case("ALL")
+                )
+            });
+            if all {
+                index += 1;
+            }
+            modes.push(all);
+            continue;
+        }
+        if let TokenKind::Symbol(symbol) = token.kind {
+            match symbol {
+                Symbol::LeftParen => parentheses = parentheses.saturating_add(1),
+                Symbol::RightParen => parentheses = parentheses.saturating_sub(1),
+                Symbol::LeftBracket => brackets = brackets.saturating_add(1),
+                Symbol::RightBracket => brackets = brackets.saturating_sub(1),
+                Symbol::LeftBrace => braces = braces.saturating_add(1),
+                Symbol::RightBrace => braces = braces.saturating_sub(1),
+                _ => {}
+            }
+        }
+        current.push(token.clone());
+        index += 1;
+    }
+    if current.is_empty() {
+        let position = tokens.last().map_or(0, |token| token.position);
+        return Err(syntax(position, "UNION is missing its right query"));
+    }
+    branches.push(current);
+    Ok((branches, modes))
+}
+
 #[derive(Debug)]
 struct ParsedQuery {
+    unwind: Option<UnwindClause>,
     matches: Vec<MatchClause>,
     with_clause: Option<WithClause>,
     distinct: bool,
@@ -307,6 +418,12 @@ struct ParsedQuery {
     order: Vec<OrderClause>,
     skip: usize,
     limit: Option<usize>,
+}
+
+#[derive(Debug)]
+struct UnwindClause {
+    expression: Operand,
+    alias: String,
 }
 
 #[derive(Debug)]
@@ -486,6 +603,14 @@ impl Parser {
     }
 
     fn parse(mut self) -> Result<ParsedQuery, QueryError> {
+        let unwind = if self.consume_keyword("UNWIND") {
+            let expression = self.parse_operand()?;
+            self.expect_keyword("AS")?;
+            let alias = self.parse_identifier("UNWIND alias")?;
+            Some(UnwindClause { expression, alias })
+        } else {
+            None
+        };
         self.expect_keyword("MATCH")?;
         let matches = self.parse_match_clauses()?;
         let with_clause = if self.consume_keyword("WITH") {
@@ -528,6 +653,7 @@ impl Parser {
             return Err(self.error("unsupported trailing clause"));
         }
         Ok(ParsedQuery {
+            unwind,
             matches,
             with_clause,
             distinct,
@@ -1263,13 +1389,44 @@ struct Binding<'a> {
     values: BTreeMap<String, QueryValue>,
 }
 
+fn execute_unwind<'a>(
+    clause: Option<&UnwindClause>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<Vec<Binding<'a>>, QueryError> {
+    let Some(clause) = clause else {
+        return Ok(vec![Binding::default()]);
+    };
+    let seed = Binding::default();
+    let value = evaluate_operand(&clause.expression, &seed, degrees)?;
+    let values = match value {
+        QueryValue::Json(serde_json::Value::Array(values)) => {
+            values.iter().map(json_value).collect::<Vec<_>>()
+        }
+        QueryValue::Null => Vec::new(),
+        _ => return Err(unsupported("UNWIND expression must evaluate to a list")),
+    };
+    if values.len() > MAX_INTERMEDIATE_BINDINGS {
+        return Err(unsupported(
+            "UNWIND exceeds intermediate binding safety cap",
+        ));
+    }
+    Ok(values
+        .into_iter()
+        .map(|value| Binding {
+            nodes: BTreeMap::new(),
+            edges: BTreeMap::new(),
+            values: BTreeMap::from([(clause.alias.clone(), value)]),
+        })
+        .collect())
+}
+
 fn execute_match_clauses<'a>(
     clauses: &[MatchClause],
+    mut bindings: Vec<Binding<'a>>,
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<Binding<'a>>, QueryError> {
-    let mut bindings = vec![Binding::default()];
     for clause in clauses {
         let candidate_sets = clause
             .patterns
