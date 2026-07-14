@@ -30,19 +30,13 @@ pub(crate) fn execute(
     reject_mutations(&tokens)?;
     let mut query = Parser::new(tokens, request.query.len()).parse()?;
     let degrees = graph_degrees(edges);
-    let mut bindings = build_bindings_bounded(&query.pattern, nodes, edges, &degrees)?;
-    if let Some(expression) = &query.filter {
-        let mut retained = Vec::with_capacity(bindings.len());
-        for binding in bindings {
-            if evaluate_expression(expression, &binding, &degrees)? {
-                retained.push(binding);
-            }
-        }
-        bindings = retained;
+    let mut bindings = execute_match_clauses(&query.matches, nodes, edges, &degrees)?;
+    if let Some(with_clause) = &query.with_clause {
+        bindings = execute_with_clause(with_clause, bindings, &degrees)?;
     }
 
     if query.star {
-        query.projections = expand_star_projections(&query.pattern);
+        query.projections = expand_star_projections(&query.matches);
     }
     let columns = query
         .projections
@@ -305,11 +299,28 @@ fn reject_mutations(tokens: &[Token]) -> Result<(), QueryError> {
 
 #[derive(Debug)]
 struct ParsedQuery {
-    pattern: MatchPattern,
-    filter: Option<Expression>,
+    matches: Vec<MatchClause>,
+    with_clause: Option<WithClause>,
     distinct: bool,
     star: bool,
     projections: Vec<Projection>,
+    order: Vec<OrderClause>,
+    skip: usize,
+    limit: Option<usize>,
+}
+
+#[derive(Debug)]
+struct MatchClause {
+    pattern: MatchPattern,
+    filter: Option<Expression>,
+    optional: bool,
+}
+
+#[derive(Debug)]
+struct WithClause {
+    distinct: bool,
+    projections: Vec<Projection>,
+    filter: Option<Expression>,
     order: Vec<OrderClause>,
     skip: usize,
     limit: Option<usize>,
@@ -473,9 +484,9 @@ impl Parser {
 
     fn parse(mut self) -> Result<ParsedQuery, QueryError> {
         self.expect_keyword("MATCH")?;
-        let pattern = self.parse_pattern()?;
-        let filter = if self.consume_keyword("WHERE") {
-            Some(self.parse_or_expression()?)
+        let matches = self.parse_match_clauses()?;
+        let with_clause = if self.consume_keyword("WITH") {
+            Some(self.parse_with_clause()?)
         } else {
             None
         };
@@ -514,11 +525,83 @@ impl Parser {
             return Err(self.error("unsupported trailing clause"));
         }
         Ok(ParsedQuery {
-            pattern,
-            filter,
+            matches,
+            with_clause,
             distinct,
             star,
             projections,
+            order,
+            skip,
+            limit,
+        })
+    }
+
+    fn parse_match_clauses(&mut self) -> Result<Vec<MatchClause>, QueryError> {
+        let mut clauses = Vec::new();
+        let mut optional = false;
+        loop {
+            let pattern = self.parse_pattern()?;
+            let filter = if self.consume_keyword("WHERE") {
+                Some(self.parse_or_expression()?)
+            } else {
+                None
+            };
+            clauses.push(MatchClause {
+                pattern,
+                filter,
+                optional,
+            });
+            if self.consume_symbol(Symbol::Comma) {
+                optional = false;
+            } else if self.consume_keyword("OPTIONAL") {
+                self.expect_keyword("MATCH")?;
+                optional = true;
+            } else if self.consume_keyword("MATCH") {
+                optional = false;
+            } else {
+                break;
+            }
+        }
+        Ok(clauses)
+    }
+
+    fn parse_with_clause(&mut self) -> Result<WithClause, QueryError> {
+        let distinct = self.consume_keyword("DISTINCT");
+        let projections = self.parse_projections()?;
+        let mut filter = None;
+        let mut order = Vec::new();
+        let mut skip = 0;
+        let mut limit = None;
+        loop {
+            if self.consume_keyword("WHERE") {
+                if filter.is_some() {
+                    return Err(self.error("duplicate WHERE after WITH"));
+                }
+                filter = Some(self.parse_or_expression()?);
+            } else if self.consume_keyword("ORDER") {
+                if !order.is_empty() {
+                    return Err(self.error("duplicate ORDER BY after WITH"));
+                }
+                self.expect_keyword("BY")?;
+                order = self.parse_order_clauses()?;
+            } else if self.consume_keyword("SKIP") {
+                if skip != 0 {
+                    return Err(self.error("duplicate SKIP after WITH"));
+                }
+                skip = self.parse_usize("SKIP")?;
+            } else if self.consume_keyword("LIMIT") {
+                if limit.is_some() {
+                    return Err(self.error("duplicate LIMIT after WITH"));
+                }
+                limit = Some(self.parse_usize("LIMIT")?);
+            } else {
+                break;
+            }
+        }
+        Ok(WithClause {
+            distinct,
+            projections,
+            filter,
             order,
             skip,
             limit,
@@ -1047,11 +1130,13 @@ fn parse_number(value: &str, negative: bool) -> Result<QueryValue, QueryError> {
         .map_err(|_| syntax(0, "invalid integer literal"))
 }
 
-fn expand_star_projections(pattern: &MatchPattern) -> Vec<Projection> {
-    let aliases: Vec<&str> = match pattern {
-        MatchPattern::Node(node) => vec![node.alias.as_str()],
-        MatchPattern::Edge(edge) => vec![edge.left.alias.as_str(), edge.right.alias.as_str()],
-    };
+fn expand_star_projections(matches: &[MatchClause]) -> Vec<Projection> {
+    let mut seen = BTreeSet::new();
+    let aliases: Vec<&str> = matches
+        .iter()
+        .flat_map(|clause| pattern_node_aliases(&clause.pattern))
+        .filter(|alias| seen.insert((*alias).to_owned()))
+        .collect();
     aliases
         .into_iter()
         .flat_map(|alias| {
@@ -1067,6 +1152,13 @@ fn expand_star_projections(pattern: &MatchPattern) -> Vec<Projection> {
             })
         })
         .collect()
+}
+
+fn pattern_node_aliases(pattern: &MatchPattern) -> Vec<&str> {
+    match pattern {
+        MatchPattern::Node(node) => vec![node.alias.as_str()],
+        MatchPattern::Edge(edge) => vec![edge.left.alias.as_str(), edge.right.alias.as_str()],
+    }
 }
 
 fn reference_column(reference: &Reference) -> String {
@@ -1126,10 +1218,111 @@ fn unsupported(message: &str) -> QueryError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Binding<'a> {
     nodes: BTreeMap<String, &'a GraphNode>,
     edges: BTreeMap<String, &'a GraphEdge>,
+    values: BTreeMap<String, QueryValue>,
+}
+
+fn execute_match_clauses<'a>(
+    clauses: &[MatchClause],
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<Vec<Binding<'a>>, QueryError> {
+    let mut bindings = vec![Binding::default()];
+    for clause in clauses {
+        let candidates = build_bindings_bounded(&clause.pattern, nodes, edges, degrees)?;
+        let mut joined = Vec::new();
+        for binding in &bindings {
+            let start = joined.len();
+            for candidate in &candidates {
+                if let Some(merged) = merge_bindings(binding, candidate) {
+                    joined.push(merged);
+                    if joined.len() > MAX_INTERMEDIATE_BINDINGS {
+                        return Err(unsupported("query exceeds intermediate binding safety cap"));
+                    }
+                }
+            }
+            if clause.optional && joined.len() == start {
+                let mut unmatched = binding.clone();
+                mark_pattern_aliases_null(&mut unmatched, &clause.pattern);
+                joined.push(unmatched);
+            }
+        }
+        if let Some(filter) = &clause.filter {
+            let mut retained = Vec::with_capacity(joined.len());
+            for binding in joined {
+                if evaluate_expression(filter, &binding, degrees)? {
+                    retained.push(binding);
+                }
+            }
+            joined = retained;
+        }
+        bindings = joined;
+    }
+    Ok(bindings)
+}
+
+fn merge_bindings<'a>(base: &Binding<'a>, candidate: &Binding<'a>) -> Option<Binding<'a>> {
+    let mut merged = base.clone();
+    for (alias, node) in &candidate.nodes {
+        if merged
+            .nodes
+            .get(alias)
+            .is_some_and(|existing| existing.id != node.id)
+            || merged.edges.get(alias).is_some_and(|_| true)
+            || merged
+                .values
+                .get(alias)
+                .is_some_and(|value| !matches!(value, QueryValue::Null))
+        {
+            return None;
+        }
+        merged.values.remove(alias);
+        merged.nodes.insert(alias.clone(), node);
+    }
+    for (alias, edge) in &candidate.edges {
+        if merged.edges.get(alias).is_some_and(|existing| {
+            existing.source != edge.source
+                || existing.target != edge.target
+                || existing.kind != edge.kind
+                || existing.discriminator != edge.discriminator
+        }) || merged.nodes.get(alias).is_some_and(|_| true)
+            || merged
+                .values
+                .get(alias)
+                .is_some_and(|value| !matches!(value, QueryValue::Null))
+        {
+            return None;
+        }
+        merged.values.remove(alias);
+        merged.edges.insert(alias.clone(), edge);
+    }
+    for (alias, value) in &candidate.values {
+        if let Some(existing) = merged.values.get(alias)
+            && !values_equal(existing, value)
+        {
+            return None;
+        }
+        merged.values.insert(alias.clone(), value.clone());
+    }
+    Some(merged)
+}
+
+fn mark_pattern_aliases_null(binding: &mut Binding<'_>, pattern: &MatchPattern) {
+    let mut aliases: Vec<&str> = pattern_node_aliases(pattern);
+    if let MatchPattern::Edge(edge) = pattern
+        && let Some(alias) = edge.edge.alias.as_deref()
+    {
+        aliases.push(alias);
+    }
+    for alias in aliases {
+        if !binding.nodes.contains_key(alias) && !binding.edges.contains_key(alias) {
+            binding.values.insert(alias.to_owned(), QueryValue::Null);
+        }
+    }
 }
 
 fn build_bindings_bounded<'a>(
@@ -1145,6 +1338,7 @@ fn build_bindings_bounded<'a>(
             .map(|node| Binding {
                 nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
                 edges: BTreeMap::new(),
+                values: BTreeMap::new(),
             })
             .collect(),
         MatchPattern::Edge(pattern) => {
@@ -1247,6 +1441,7 @@ fn push_edge_binding<'a>(
             (right_pattern.alias.clone(), right),
         ]),
         edges,
+        values: BTreeMap::new(),
     });
 }
 
@@ -1292,6 +1487,7 @@ fn build_variable_bindings<'a>(
                         (pattern.right.alias.clone(), frame.current),
                     ]),
                     edges: bound_edges,
+                    values: BTreeMap::new(),
                 });
                 if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
                     return Err(unsupported("query exceeds intermediate binding safety cap"));
@@ -1752,6 +1948,9 @@ fn evaluate_reference(
 ) -> Result<QueryValue, QueryError> {
     match reference {
         Reference::Alias(alias) => {
+            if let Some(value) = binding.values.get(alias) {
+                return Ok(value.clone());
+            }
             if let Some(node) = binding.nodes.get(alias) {
                 return Ok(QueryValue::Node(node_summary(
                     node,
@@ -1766,6 +1965,9 @@ fn evaluate_reference(
             Err(unsupported(&format!("unknown alias {alias}")))
         }
         Reference::Property { alias, path } => {
+            if let Some(value) = binding.values.get(alias) {
+                return Ok(value_property(value, path));
+            }
             if let Some(node) = binding.nodes.get(alias) {
                 return Ok(node_property(node, path, degrees));
             }
@@ -1774,12 +1976,73 @@ fn evaluate_reference(
             }
             Err(unsupported(&format!("unknown alias {alias}")))
         }
-        Reference::EdgeType(alias) => binding
-            .edges
-            .get(alias)
-            .map(|edge| QueryValue::String(edge.kind.as_str().to_owned()))
-            .ok_or_else(|| unsupported(&format!("unknown relationship alias {alias}"))),
+        Reference::EdgeType(alias) => {
+            if let Some(QueryValue::Edge(edge)) = binding.values.get(alias) {
+                return Ok(QueryValue::String(edge.kind.clone()));
+            }
+            binding
+                .edges
+                .get(alias)
+                .map(|edge| QueryValue::String(edge.kind.as_str().to_owned()))
+                .ok_or_else(|| unsupported(&format!("unknown relationship alias {alias}")))
+        }
     }
+}
+
+fn value_property(value: &QueryValue, path: &[String]) -> QueryValue {
+    let Some((first, rest)) = path.split_first() else {
+        return value.clone();
+    };
+    let json = match value {
+        QueryValue::Json(value) => value,
+        QueryValue::Node(node) => {
+            return match first.as_str() {
+                "id" | "node_id" if rest.is_empty() => QueryValue::String(node.id.clone()),
+                "name" if rest.is_empty() => QueryValue::String(node.name.clone()),
+                "qualified_name" | "qn" if rest.is_empty() => {
+                    QueryValue::String(node.qualified_name.clone())
+                }
+                "label" if rest.is_empty() => QueryValue::String(node.label.clone()),
+                "file" | "file_path" if rest.is_empty() => node
+                    .file_path
+                    .clone()
+                    .map_or(QueryValue::Null, QueryValue::String),
+                property if rest.is_empty() => node
+                    .properties
+                    .get(property)
+                    .map_or(QueryValue::Null, json_value),
+                _ => QueryValue::Null,
+            };
+        }
+        QueryValue::Edge(edge) => {
+            return match first.as_str() {
+                "source" | "source_id" if rest.is_empty() => {
+                    QueryValue::String(edge.source_id.clone())
+                }
+                "target" | "target_id" if rest.is_empty() => {
+                    QueryValue::String(edge.target_id.clone())
+                }
+                "kind" | "type" if rest.is_empty() => QueryValue::String(edge.kind.clone()),
+                "discriminator" if rest.is_empty() => {
+                    QueryValue::String(edge.discriminator.clone())
+                }
+                property if rest.is_empty() => edge
+                    .properties
+                    .get(property)
+                    .map_or(QueryValue::Null, json_value),
+                _ => QueryValue::Null,
+            };
+        }
+        _ => return QueryValue::Null,
+    };
+    let mut current = json;
+    for segment in std::iter::once(first).chain(rest) {
+        let Some(next) = current.as_object().and_then(|object| object.get(segment)) else {
+            return QueryValue::Null;
+        };
+        current = next;
+    }
+    json_value(current)
 }
 
 fn node_property(
@@ -2052,6 +2315,150 @@ fn string_pair(
         (QueryValue::String(left), QueryValue::String(right)) => predicate(left, right),
         _ => false,
     }
+}
+
+fn execute_with_clause<'a>(
+    clause: &WithClause,
+    bindings: Vec<Binding<'a>>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<Vec<Binding<'a>>, QueryError> {
+    let has_aggregate = clause.projections.iter().any(|projection| {
+        matches!(
+            projection.expression,
+            ProjectionExpression::Aggregate { .. }
+        )
+    });
+    let mut projected = Vec::new();
+    if has_aggregate {
+        let grouping: Vec<&ProjectionExpression> = clause
+            .projections
+            .iter()
+            .filter_map(|projection| match &projection.expression {
+                ProjectionExpression::Aggregate { .. } => None,
+                expression => Some(expression),
+            })
+            .collect();
+        let mut groups: BTreeMap<String, Vec<Binding<'a>>> = BTreeMap::new();
+        for binding in bindings {
+            let key = grouping
+                .iter()
+                .map(|expression| evaluate_projection_expression(expression, &binding, degrees))
+                .collect::<Result<Vec<_>, _>>()?;
+            groups.entry(row_key(&key)).or_default().push(binding);
+        }
+        if groups.is_empty() && grouping.is_empty() {
+            groups.insert(String::new(), Vec::new());
+        }
+        for group in groups.into_values() {
+            let first = group.first();
+            let values = clause
+                .projections
+                .iter()
+                .map(|projection| match &projection.expression {
+                    ProjectionExpression::Aggregate {
+                        kind,
+                        target,
+                        distinct,
+                    } => evaluate_aggregate(*kind, target.as_ref(), *distinct, &group, degrees),
+                    expression => first.map_or_else(
+                        || Ok(QueryValue::Null),
+                        |binding| evaluate_projection_expression(expression, binding, degrees),
+                    ),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            projected.push((
+                binding_from_with(&clause.projections, &values, first),
+                values,
+            ));
+        }
+    } else {
+        for binding in bindings {
+            let values = clause
+                .projections
+                .iter()
+                .map(|projection| {
+                    evaluate_projection_expression(&projection.expression, &binding, degrees)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            projected.push((
+                binding_from_with(&clause.projections, &values, Some(&binding)),
+                values,
+            ));
+        }
+    }
+    if clause.distinct {
+        let mut seen = BTreeSet::new();
+        projected.retain(|(_, values)| seen.insert(row_key(values)));
+    }
+    if let Some(filter) = &clause.filter {
+        let mut retained = Vec::with_capacity(projected.len());
+        for (binding, values) in projected {
+            if evaluate_expression(filter, &binding, degrees)? {
+                retained.push((binding, values));
+            }
+        }
+        projected = retained;
+    }
+    let mut ordered = projected
+        .into_iter()
+        .map(|(binding, values)| {
+            let order = clause
+                .order
+                .iter()
+                .map(|order| evaluate_reference(&order.reference, &binding, degrees))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<_, QueryError>((order, values, binding))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    ordered.sort_by(
+        |(left_order, left_values, _), (right_order, right_values, _)| {
+            for (index, order) in clause.order.iter().enumerate() {
+                let mut ordering = compare_values(&left_order[index], &right_order[index]);
+                if order.descending {
+                    ordering = ordering.reverse();
+                }
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            row_key(left_values).cmp(&row_key(right_values))
+        },
+    );
+    let skipped = clause.skip.min(ordered.len());
+    ordered.drain(..skipped);
+    if let Some(limit) = clause.limit {
+        ordered.truncate(limit);
+    }
+    if ordered.len() > MAX_INTERMEDIATE_BINDINGS {
+        return Err(unsupported("WITH exceeds intermediate binding safety cap"));
+    }
+    Ok(ordered.into_iter().map(|(_, _, binding)| binding).collect())
+}
+
+fn binding_from_with<'a>(
+    projections: &[Projection],
+    values: &[QueryValue],
+    source: Option<&Binding<'a>>,
+) -> Binding<'a> {
+    let mut binding = Binding::default();
+    for (projection, value) in projections.iter().zip(values) {
+        if let ProjectionExpression::Reference(Reference::Alias(alias)) = &projection.expression
+            && let Some(source) = source
+        {
+            if let Some(node) = source.nodes.get(alias) {
+                binding.nodes.insert(projection.column.clone(), node);
+                continue;
+            }
+            if let Some(edge) = source.edges.get(alias) {
+                binding.edges.insert(projection.column.clone(), edge);
+                continue;
+            }
+        }
+        binding
+            .values
+            .insert(projection.column.clone(), value.clone());
+    }
+    binding
 }
 
 fn materialize_rows(
