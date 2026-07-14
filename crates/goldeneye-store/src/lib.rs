@@ -1627,7 +1627,7 @@ fn list_node_vectors(
     rows.map(|row| {
         let (node_id, vector) = row?;
         Ok(NodeVectorRecord {
-            node_id: NodeId::new(node_id).map_err(corrupt_domain("node vector ID"))?,
+            node_id: NodeId::new(node_id).map_err(corrupt_graph("node vector ID"))?,
             vector: StoredVector::from_blob(vector, "node vector")?,
         })
     })
@@ -1649,7 +1649,7 @@ fn get_node_vector(
         .optional()?;
     raw.map(|(node_id, vector)| {
         Ok(NodeVectorRecord {
-            node_id: NodeId::new(node_id).map_err(corrupt_domain("node vector ID"))?,
+            node_id: NodeId::new(node_id).map_err(corrupt_graph("node vector ID"))?,
             vector: StoredVector::from_blob(vector, "node vector")?,
         })
     })
@@ -1708,7 +1708,7 @@ fn list_node_signatures(
     rows.map(|row| {
         let (node_id, minhash_hex, ast_profile) = row?;
         Ok(NodeSignatureRecord {
-            node_id: NodeId::new(node_id).map_err(corrupt_domain("node signature ID"))?,
+            node_id: NodeId::new(node_id).map_err(corrupt_graph("node signature ID"))?,
             minhash_hex,
             ast_profile,
         })
@@ -1737,7 +1737,7 @@ fn get_node_signature(
         .optional()?;
     raw.map(|(node_id, minhash_hex, ast_profile)| {
         Ok(NodeSignatureRecord {
-            node_id: NodeId::new(node_id).map_err(corrupt_domain("node signature ID"))?,
+            node_id: NodeId::new(node_id).map_err(corrupt_graph("node signature ID"))?,
             minhash_hex,
             ast_profile,
         })
