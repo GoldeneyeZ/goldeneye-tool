@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod durable;
 pub mod path_auth;
+
+pub use durable::{
+    DurableCreateRequest, DurableEditError, DurableEditRequest, DurableEditService, FaultInjector,
+    FaultPoint, GraphChanges, MutationResult, RecoveryAction, RecoveryEntry, RecoveryReport,
+};
 
 use std::sync::Arc;
 

@@ -310,8 +310,11 @@ name = "goldeneye-edit"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-index",
+ "goldeneye-store",
  "goldeneye-syntax",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
