@@ -119,3 +119,41 @@ fn upstream_repeated_match_clauses_join_shared_aliases_and_cross_products() {
         .expect("independent MATCH cross product");
     assert_eq!(product.rows.len(), 2);
 }
+
+#[test]
+fn upstream_chained_and_comma_separated_patterns_join_atomically() {
+    let fixture = Fixture::seeded();
+    let chained = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (m:Module)-[:DEFINES]->(f:Function)-[:CALLS]->(g:Function) RETURN f.name, g.name",
+        ))
+        .expect("chained relationship pattern");
+    assert_eq!(chained.rows.len(), 3);
+
+    let comma = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (m:Module), (f:Function {name: 'Alpha'}) RETURN m.name, f.name",
+        ))
+        .expect("comma-separated patterns");
+    assert_eq!(comma.rows.len(), 1);
+
+    let optional_chain = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function {name: 'run'}) OPTIONAL MATCH (f)-[:CALLS]->(g:Function)-[:CALLS]->(h:Function) RETURN f.name, g.name, h.name",
+        ))
+        .expect("atomic optional chain");
+    assert_eq!(
+        optional_chain.rows,
+        vec![vec![
+            QueryValue::String("run".to_owned()),
+            QueryValue::Null,
+            QueryValue::Null,
+        ]]
+    );
+}

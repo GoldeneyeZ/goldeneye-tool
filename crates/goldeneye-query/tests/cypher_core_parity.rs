@@ -150,6 +150,28 @@ fn upstream_generalized_aggregates_group_and_count_distinct() {
     assert_ne!(grouped.rows[0][1], QueryValue::Json(json!([])));
 }
 
+#[test]
+fn upstream_anonymous_nodes_and_label_predicates_are_supported() {
+    let fixture = Fixture::seeded();
+    let result = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (:Function|Method) RETURN count(*) AS entities",
+        ))
+        .expect("anonymous node with label alternation");
+    assert_eq!(result.rows, vec![vec![QueryValue::Integer(5)]]);
+
+    let predicate = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (n) WHERE n:Function|Method RETURN count(n) AS entities",
+        ))
+        .expect("label predicate");
+    assert_eq!(predicate.rows, vec![vec![QueryValue::Integer(5)]]);
+}
+
 fn text(value: &str) -> QueryValue {
     QueryValue::String(value.to_owned())
 }

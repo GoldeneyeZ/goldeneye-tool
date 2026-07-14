@@ -311,7 +311,7 @@ struct ParsedQuery {
 
 #[derive(Debug)]
 struct MatchClause {
-    pattern: MatchPattern,
+    patterns: Vec<MatchPattern>,
     filter: Option<Expression>,
     optional: bool,
 }
@@ -339,10 +339,10 @@ struct EdgeMatch {
     right: NodePattern,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct NodePattern {
     alias: String,
-    label: Option<String>,
+    labels: Vec<String>,
     properties: Vec<(String, QueryValue)>,
 }
 
@@ -392,6 +392,7 @@ enum PredicateOperator {
     Contains,
     StartsWith,
     EndsWith,
+    HasLabel(Vec<String>),
     IsNull,
     IsNotNull,
 }
@@ -471,6 +472,7 @@ struct Parser {
     tokens: Vec<Token>,
     index: usize,
     end_position: usize,
+    anonymous_nodes: usize,
 }
 
 impl Parser {
@@ -479,6 +481,7 @@ impl Parser {
             tokens,
             index: 0,
             end_position,
+            anonymous_nodes: 0,
         }
     }
 
@@ -540,20 +543,21 @@ impl Parser {
         let mut clauses = Vec::new();
         let mut optional = false;
         loop {
-            let pattern = self.parse_pattern()?;
+            let mut patterns = self.parse_pattern_chain()?;
+            while self.consume_symbol(Symbol::Comma) {
+                patterns.extend(self.parse_pattern_chain()?);
+            }
             let filter = if self.consume_keyword("WHERE") {
                 Some(self.parse_or_expression()?)
             } else {
                 None
             };
             clauses.push(MatchClause {
-                pattern,
+                patterns,
                 filter,
                 optional,
             });
-            if self.consume_symbol(Symbol::Comma) {
-                optional = false;
-            } else if self.consume_keyword("OPTIONAL") {
+            if self.consume_keyword("OPTIONAL") {
                 self.expect_keyword("MATCH")?;
                 optional = true;
             } else if self.consume_keyword("MATCH") {
@@ -608,8 +612,37 @@ impl Parser {
         })
     }
 
-    fn parse_pattern(&mut self) -> Result<MatchPattern, QueryError> {
-        let left = self.parse_node_pattern()?;
+    fn parse_pattern_chain(&mut self) -> Result<Vec<MatchPattern>, QueryError> {
+        let mut left = self.parse_node_pattern()?;
+        let mut patterns = Vec::new();
+        loop {
+            let Some((edge, right)) = self.parse_pattern_relationship()? else {
+                break;
+            };
+            if left.alias == right.alias
+                || edge
+                    .alias
+                    .as_deref()
+                    .is_some_and(|alias| alias == left.alias || alias == right.alias)
+            {
+                return Err(unsupported("aliases in a relationship must be distinct"));
+            }
+            patterns.push(MatchPattern::Edge(Box::new(EdgeMatch {
+                left: left.clone(),
+                edge,
+                right: right.clone(),
+            })));
+            left = right;
+        }
+        if patterns.is_empty() {
+            patterns.push(MatchPattern::Node(left));
+        }
+        Ok(patterns)
+    }
+
+    fn parse_pattern_relationship(
+        &mut self,
+    ) -> Result<Option<(EdgePattern, NodePattern)>, QueryError> {
         let (edge, right) = if self.consume_symbol(Symbol::Dash) {
             let mut edge = self.parse_edge_pattern()?;
             edge.direction = if self.consume_symbol(Symbol::ArrowRight) {
@@ -626,31 +659,28 @@ impl Parser {
             edge.direction = EdgeDirection::Inbound;
             (edge, self.parse_node_pattern()?)
         } else {
-            return Ok(MatchPattern::Node(left));
+            return Ok(None);
         };
-        if left.alias == right.alias
-            || edge
-                .alias
-                .as_deref()
-                .is_some_and(|alias| alias == left.alias || alias == right.alias)
-        {
-            return Err(unsupported("aliases in a one-hop pattern must be distinct"));
-        }
-        Ok(MatchPattern::Edge(Box::new(EdgeMatch {
-            left,
-            edge,
-            right,
-        })))
+        Ok(Some((edge, right)))
     }
 
     fn parse_node_pattern(&mut self) -> Result<NodePattern, QueryError> {
         self.expect_symbol(Symbol::LeftParen)?;
-        let alias = self.parse_identifier("node alias")?;
-        let label = if self.consume_symbol(Symbol::Colon) {
-            Some(self.parse_identifier("node label")?)
+        let alias = if matches!(self.peek(), Some(TokenKind::Identifier(_))) {
+            self.parse_identifier("node alias")?
         } else {
-            None
+            let alias = format!("__anon_node_{}", self.anonymous_nodes);
+            self.anonymous_nodes = self.anonymous_nodes.saturating_add(1);
+            alias
         };
+        let mut labels = Vec::new();
+        if self.consume_symbol(Symbol::Colon) {
+            labels.push(self.parse_identifier("node label")?);
+            while self.consume_symbol(Symbol::Pipe) {
+                self.consume_symbol(Symbol::Colon);
+                labels.push(self.parse_identifier("node label")?);
+            }
+        }
         let mut properties = Vec::new();
         if self.consume_symbol(Symbol::LeftBrace) {
             if !self.consume_symbol(Symbol::RightBrace) {
@@ -671,7 +701,7 @@ impl Parser {
         self.expect_symbol(Symbol::RightParen)?;
         Ok(NodePattern {
             alias,
-            label,
+            labels,
             properties,
         })
     }
@@ -772,7 +802,14 @@ impl Parser {
 
     fn parse_predicate(&mut self) -> Result<Predicate, QueryError> {
         let left = self.parse_operand()?;
-        let (operator, right) = if self.consume_keyword("IS") {
+        let (operator, right) = if self.consume_symbol(Symbol::Colon) {
+            let mut labels = vec![self.parse_identifier("node label")?];
+            while self.consume_symbol(Symbol::Pipe) {
+                self.consume_symbol(Symbol::Colon);
+                labels.push(self.parse_identifier("node label")?);
+            }
+            (PredicateOperator::HasLabel(labels), None)
+        } else if self.consume_keyword("IS") {
             let negated = self.consume_keyword("NOT");
             self.expect_keyword("NULL")?;
             (
@@ -1134,7 +1171,8 @@ fn expand_star_projections(matches: &[MatchClause]) -> Vec<Projection> {
     let mut seen = BTreeSet::new();
     let aliases: Vec<&str> = matches
         .iter()
-        .flat_map(|clause| pattern_node_aliases(&clause.pattern))
+        .flat_map(|clause| clause.patterns.iter().flat_map(pattern_node_aliases))
+        .filter(|alias| !alias.starts_with("__anon_node_"))
         .filter(|alias| seen.insert((*alias).to_owned()))
         .collect();
     aliases
@@ -1233,22 +1271,41 @@ fn execute_match_clauses<'a>(
 ) -> Result<Vec<Binding<'a>>, QueryError> {
     let mut bindings = vec![Binding::default()];
     for clause in clauses {
-        let candidates = build_bindings_bounded(&clause.pattern, nodes, edges, degrees)?;
+        let candidate_sets = clause
+            .patterns
+            .iter()
+            .map(|pattern| build_bindings_bounded(pattern, nodes, edges, degrees))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut joined = Vec::new();
         for binding in &bindings {
-            let start = joined.len();
-            for candidate in &candidates {
-                if let Some(merged) = merge_bindings(binding, candidate) {
-                    joined.push(merged);
-                    if joined.len() > MAX_INTERMEDIATE_BINDINGS {
-                        return Err(unsupported("query exceeds intermediate binding safety cap"));
+            let mut partial = vec![binding.clone()];
+            for candidates in &candidate_sets {
+                let mut next = Vec::new();
+                for binding in &partial {
+                    for candidate in candidates {
+                        if let Some(merged) = merge_bindings(binding, candidate) {
+                            next.push(merged);
+                            if next.len() > MAX_INTERMEDIATE_BINDINGS {
+                                return Err(unsupported(
+                                    "query exceeds intermediate binding safety cap",
+                                ));
+                            }
+                        }
                     }
                 }
+                partial = next;
+                if partial.is_empty() {
+                    break;
+                }
             }
-            if clause.optional && joined.len() == start {
+            if clause.optional && partial.is_empty() {
                 let mut unmatched = binding.clone();
-                mark_pattern_aliases_null(&mut unmatched, &clause.pattern);
+                for pattern in &clause.patterns {
+                    mark_pattern_aliases_null(&mut unmatched, pattern);
+                }
                 joined.push(unmatched);
+            } else {
+                joined.extend(partial);
             }
         }
         if let Some(filter) = &clause.filter {
@@ -1272,7 +1329,7 @@ fn merge_bindings<'a>(base: &Binding<'a>, candidate: &Binding<'a>) -> Option<Bin
             .nodes
             .get(alias)
             .is_some_and(|existing| existing.id != node.id)
-            || merged.edges.get(alias).is_some_and(|_| true)
+            || merged.edges.contains_key(alias)
             || merged
                 .values
                 .get(alias)
@@ -1289,7 +1346,7 @@ fn merge_bindings<'a>(base: &Binding<'a>, candidate: &Binding<'a>) -> Option<Bin
                 || existing.target != edge.target
                 || existing.kind != edge.kind
                 || existing.discriminator != edge.discriminator
-        }) || merged.nodes.get(alias).is_some_and(|_| true)
+        }) || merged.nodes.contains_key(alias)
             || merged
                 .values
                 .get(alias)
@@ -1547,10 +1604,11 @@ fn node_matches(
     pattern: &NodePattern,
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> bool {
-    pattern
-        .label
-        .as_deref()
-        .is_none_or(|label| node.label.as_str() == label)
+    (pattern.labels.is_empty()
+        || pattern
+            .labels
+            .iter()
+            .any(|label| node.label.as_str() == label))
         && pattern.properties.iter().all(|(property, expected)| {
             values_equal(
                 &node_property(node, std::slice::from_ref(property), degrees),
@@ -1591,10 +1649,16 @@ fn evaluate_predicate(
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<bool, QueryError> {
     let left = evaluate_operand(&predicate.left, binding, degrees)?;
-    if matches!(predicate.operator, PredicateOperator::IsNull) {
+    if let PredicateOperator::HasLabel(labels) = &predicate.operator {
+        return Ok(matches!(
+            left,
+            QueryValue::Node(ref node) if labels.iter().any(|label| node.label == *label)
+        ));
+    }
+    if matches!(&predicate.operator, PredicateOperator::IsNull) {
         return Ok(matches!(left, QueryValue::Null));
     }
-    if matches!(predicate.operator, PredicateOperator::IsNotNull) {
+    if matches!(&predicate.operator, PredicateOperator::IsNotNull) {
         return Ok(!matches!(left, QueryValue::Null));
     }
     let right = evaluate_operand(
@@ -1608,7 +1672,7 @@ fn evaluate_predicate(
     if matches!(left, QueryValue::Null) || matches!(right, QueryValue::Null) {
         return Ok(false);
     }
-    Ok(match predicate.operator {
+    Ok(match &predicate.operator {
         PredicateOperator::Equal => values_equal(&left, &right),
         PredicateOperator::NotEqual => !values_equal(&left, &right),
         PredicateOperator::Less => compare_values(&left, &right) == Ordering::Less,
@@ -1631,7 +1695,7 @@ fn evaluate_predicate(
                     matched || values_equal(&left, &evaluate_operand(item, binding, degrees)?),
                 )
             })?;
-            if matches!(predicate.operator, PredicateOperator::NotIn) {
+            if matches!(&predicate.operator, PredicateOperator::NotIn) {
                 !contains
             } else {
                 contains
@@ -1646,7 +1710,9 @@ fn evaluate_predicate(
         PredicateOperator::EndsWith => {
             string_pair(&left, &right, |left, right| left.ends_with(right))
         }
-        PredicateOperator::IsNull | PredicateOperator::IsNotNull => unreachable!(),
+        PredicateOperator::HasLabel(_)
+        | PredicateOperator::IsNull
+        | PredicateOperator::IsNotNull => unreachable!(),
     })
 }
 
