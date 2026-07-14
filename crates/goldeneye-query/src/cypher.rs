@@ -390,6 +390,7 @@ enum Operand {
     Literal(Box<QueryValue>),
     List(Vec<Self>),
     Reference(Reference),
+    Function { name: String, arguments: Vec<Self> },
 }
 
 #[derive(Debug, Clone)]
@@ -408,11 +409,35 @@ struct Projection {
 #[derive(Debug)]
 enum ProjectionExpression {
     Reference(Reference),
+    Function {
+        name: String,
+        arguments: Vec<Operand>,
+    },
+    Case(CaseExpression),
     Aggregate {
         kind: AggregateKind,
         target: Option<Reference>,
         distinct: bool,
     },
+}
+
+#[derive(Debug)]
+struct CaseExpression {
+    subject: Option<Operand>,
+    branches: Vec<CaseBranch>,
+    fallback: Option<Operand>,
+}
+
+#[derive(Debug)]
+struct CaseBranch {
+    when: CaseWhen,
+    then: Operand,
+}
+
+#[derive(Debug)]
+enum CaseWhen {
+    Predicate(Expression),
+    Value(Operand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -719,6 +744,9 @@ impl Parser {
         if matches!(self.peek(), Some(TokenKind::Symbol(Symbol::LeftBracket))) {
             return self.parse_list_operand();
         }
+        if self.peek_function_call() {
+            return self.parse_function_operand();
+        }
         if self.consume_keyword("TRUE") {
             return Ok(Operand::Literal(Box::new(QueryValue::Bool(true))));
         }
@@ -741,6 +769,22 @@ impl Parser {
             return Err(self.error("expected number after unary minus"));
         }
         Ok(Operand::Reference(self.parse_reference()?))
+    }
+
+    fn parse_function_operand(&mut self) -> Result<Operand, QueryError> {
+        let name = self.parse_identifier("function name")?;
+        self.expect_symbol(Symbol::LeftParen)?;
+        let mut arguments = Vec::new();
+        if !self.consume_symbol(Symbol::RightParen) {
+            loop {
+                arguments.push(self.parse_operand()?);
+                if !self.consume_symbol(Symbol::Comma) {
+                    break;
+                }
+            }
+            self.expect_symbol(Symbol::RightParen)?;
+        }
+        Ok(Operand::Function { name, arguments })
     }
 
     fn parse_list_operand(&mut self) -> Result<Operand, QueryError> {
@@ -813,6 +857,15 @@ impl Parser {
                 },
                 column,
             )
+        } else if self.consume_keyword("CASE") {
+            let expression = self.parse_case_expression()?;
+            (ProjectionExpression::Case(expression), "case".to_owned())
+        } else if self.peek_function_call() {
+            let Operand::Function { name, arguments } = self.parse_function_operand()? else {
+                unreachable!();
+            };
+            let column = function_column(&name, &arguments);
+            (ProjectionExpression::Function { name, arguments }, column)
         } else {
             let reference = self.parse_reference()?;
             let column = reference_column(&reference);
@@ -824,6 +877,41 @@ impl Parser {
             default_column
         };
         Ok(Projection { expression, column })
+    }
+
+    fn parse_case_expression(&mut self) -> Result<CaseExpression, QueryError> {
+        let subject = if self.consume_keyword("WHEN") {
+            None
+        } else {
+            let subject = self.parse_operand()?;
+            self.expect_keyword("WHEN")?;
+            Some(subject)
+        };
+        let mut branches = Vec::new();
+        loop {
+            let when = if subject.is_some() {
+                CaseWhen::Value(self.parse_operand()?)
+            } else {
+                CaseWhen::Predicate(self.parse_or_expression()?)
+            };
+            self.expect_keyword("THEN")?;
+            let then = self.parse_operand()?;
+            branches.push(CaseBranch { when, then });
+            if !self.consume_keyword("WHEN") {
+                break;
+            }
+        }
+        let fallback = if self.consume_keyword("ELSE") {
+            Some(self.parse_operand()?)
+        } else {
+            None
+        };
+        self.expect_keyword("END")?;
+        Ok(CaseExpression {
+            subject,
+            branches,
+            fallback,
+        })
     }
 
     fn parse_order_clauses(&mut self) -> Result<Vec<OrderClause>, QueryError> {
@@ -927,6 +1015,14 @@ impl Parser {
         self.tokens.get(self.index).map(|token| &token.kind)
     }
 
+    fn peek_function_call(&self) -> bool {
+        matches!(self.peek(), Some(TokenKind::Identifier(_)))
+            && matches!(
+                self.tokens.get(self.index + 1).map(|token| &token.kind),
+                Some(TokenKind::Symbol(Symbol::LeftParen))
+            )
+    }
+
     fn error(&self, message: &str) -> QueryError {
         let position = self
             .tokens
@@ -978,6 +1074,42 @@ fn reference_column(reference: &Reference) -> String {
         Reference::Alias(alias) => alias.clone(),
         Reference::Property { alias, path } => format!("{alias}.{}", path.join(".")),
         Reference::EdgeType(alias) => format!("type({alias})"),
+    }
+}
+
+fn function_column(name: &str, arguments: &[Operand]) -> String {
+    format!(
+        "{name}({})",
+        arguments
+            .iter()
+            .map(operand_column)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn operand_column(operand: &Operand) -> String {
+    match operand {
+        Operand::Literal(value) => match value.as_ref() {
+            QueryValue::Null => "null".to_owned(),
+            QueryValue::Bool(value) => value.to_string(),
+            QueryValue::Integer(value) => value.to_string(),
+            QueryValue::Unsigned(value) => value.to_string(),
+            QueryValue::Float(value) => value.to_string(),
+            QueryValue::String(value) => format!("'{value}'"),
+            QueryValue::Json(value) => value.to_string(),
+            QueryValue::Node(_) | QueryValue::Edge(_) => "entity".to_owned(),
+        },
+        Operand::List(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(operand_column)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Operand::Reference(reference) => reference_column(reference),
+        Operand::Function { name, arguments } => function_column(name, arguments),
     }
 }
 
@@ -1338,7 +1470,279 @@ fn evaluate_operand(
                 .collect::<Result<_, _>>()?,
         ))),
         Operand::Reference(reference) => evaluate_reference(reference, binding, degrees),
+        Operand::Function { name, arguments } => {
+            evaluate_scalar_function(name, arguments, binding, degrees)
+        }
     }
+}
+
+fn evaluate_scalar_function(
+    name: &str,
+    arguments: &[Operand],
+    binding: &Binding<'_>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<QueryValue, QueryError> {
+    let values = arguments
+        .iter()
+        .map(|argument| evaluate_operand(argument, binding, degrees))
+        .collect::<Result<Vec<_>, _>>()?;
+    let normalized = name.to_ascii_lowercase();
+    let value = match normalized.as_str() {
+        "coalesce" => values
+            .into_iter()
+            .find(|value| !matches!(value, QueryValue::Null))
+            .unwrap_or(QueryValue::Null),
+        "tolower" => unary_string(&values, |value| value.to_lowercase()),
+        "toupper" => unary_string(&values, |value| value.to_uppercase()),
+        "tostring" => values
+            .first()
+            .and_then(query_value_string)
+            .map_or(QueryValue::Null, QueryValue::String),
+        "tointeger" => values.first().map_or(QueryValue::Null, query_value_integer),
+        "tofloat" => values.first().map_or(QueryValue::Null, query_value_float),
+        "toboolean" => values.first().map_or(QueryValue::Null, query_value_boolean),
+        "size" | "length" => values.first().map_or(QueryValue::Null, value_size),
+        "reverse" => values
+            .first()
+            .map_or(QueryValue::Null, |value| match value {
+                QueryValue::String(value) => QueryValue::String(value.chars().rev().collect()),
+                QueryValue::Json(serde_json::Value::Array(values)) => {
+                    let mut values = values.clone();
+                    values.reverse();
+                    QueryValue::Json(serde_json::Value::Array(values))
+                }
+                _ => QueryValue::Null,
+            }),
+        "trim" => unary_string(&values, |value| value.trim().to_owned()),
+        "ltrim" => unary_string(&values, |value| value.trim_start().to_owned()),
+        "rtrim" => unary_string(&values, |value| value.trim_end().to_owned()),
+        "substring" => substring_value(&values),
+        "left" => edge_slice_value(&values, true),
+        "right" => edge_slice_value(&values, false),
+        "replace" => match (values.first(), values.get(1), values.get(2)) {
+            (
+                Some(QueryValue::String(value)),
+                Some(QueryValue::String(from)),
+                Some(QueryValue::String(to)),
+            ) => QueryValue::String(value.replace(from, to)),
+            _ => QueryValue::Null,
+        },
+        "split" => match (values.first(), values.get(1)) {
+            (Some(QueryValue::String(value)), Some(QueryValue::String(separator))) => {
+                let parts: Vec<String> = if separator.is_empty() {
+                    value
+                        .chars()
+                        .map(|character| character.to_string())
+                        .collect()
+                } else {
+                    value.split(separator).map(str::to_owned).collect()
+                };
+                QueryValue::Json(serde_json::Value::Array(
+                    parts.into_iter().map(serde_json::Value::String).collect(),
+                ))
+            }
+            _ => QueryValue::Null,
+        },
+        "labels" => values
+            .first()
+            .map_or(QueryValue::Null, |value| match value {
+                QueryValue::Node(node) => {
+                    QueryValue::Json(serde_json::Value::Array(vec![serde_json::Value::String(
+                        node.label.clone(),
+                    )]))
+                }
+                _ => QueryValue::Json(serde_json::Value::Array(Vec::new())),
+            }),
+        "type" => values
+            .first()
+            .map_or(QueryValue::Null, |value| match value {
+                QueryValue::Edge(edge) => QueryValue::String(edge.kind.clone()),
+                _ => QueryValue::Null,
+            }),
+        "id" => values
+            .first()
+            .map_or(QueryValue::Null, |value| match value {
+                QueryValue::Node(node) => QueryValue::String(node.id.clone()),
+                QueryValue::Edge(edge) => QueryValue::String(edge.discriminator.clone()),
+                _ => QueryValue::Null,
+            }),
+        "properties" => values
+            .first()
+            .map_or(QueryValue::Null, |value| match value {
+                QueryValue::Node(node) => QueryValue::Json(
+                    serde_json::to_value(&node.properties).unwrap_or(serde_json::Value::Null),
+                ),
+                QueryValue::Edge(edge) => QueryValue::Json(
+                    serde_json::to_value(&edge.properties).unwrap_or(serde_json::Value::Null),
+                ),
+                _ => QueryValue::Json(serde_json::Value::Object(serde_json::Map::new())),
+            }),
+        "keys" => values.first().map_or(QueryValue::Null, entity_keys),
+        _ => return Err(unsupported(&format!("unsupported function {name}"))),
+    };
+    Ok(value)
+}
+
+fn unary_string(values: &[QueryValue], transform: impl FnOnce(&str) -> String) -> QueryValue {
+    match values.first() {
+        Some(QueryValue::String(value)) => QueryValue::String(transform(value)),
+        _ => QueryValue::Null,
+    }
+}
+
+fn query_value_string(value: &QueryValue) -> Option<String> {
+    Some(match value {
+        QueryValue::Null => return None,
+        QueryValue::Bool(value) => value.to_string(),
+        QueryValue::Integer(value) => value.to_string(),
+        QueryValue::Unsigned(value) => value.to_string(),
+        QueryValue::Float(value) => value.to_string(),
+        QueryValue::String(value) => value.clone(),
+        QueryValue::Json(value) => value.to_string(),
+        QueryValue::Node(value) => serde_json::to_string(value).ok()?,
+        QueryValue::Edge(value) => serde_json::to_string(value).ok()?,
+    })
+}
+
+fn query_value_integer(value: &QueryValue) -> QueryValue {
+    match value {
+        QueryValue::Integer(value) => QueryValue::Integer(*value),
+        QueryValue::Unsigned(value) => i64::try_from(*value)
+            .map(QueryValue::Integer)
+            .unwrap_or(QueryValue::Null),
+        QueryValue::Float(value)
+            if value.is_finite() && *value >= i64::MIN as f64 && *value <= i64::MAX as f64 =>
+        {
+            QueryValue::Integer(value.trunc() as i64)
+        }
+        QueryValue::String(value) => value
+            .parse::<i64>()
+            .map(QueryValue::Integer)
+            .unwrap_or(QueryValue::Null),
+        QueryValue::Bool(value) => QueryValue::Integer(i64::from(*value)),
+        _ => QueryValue::Null,
+    }
+}
+
+fn query_value_float(value: &QueryValue) -> QueryValue {
+    match value {
+        QueryValue::Integer(value) => QueryValue::Float(*value as f64),
+        QueryValue::Unsigned(value) => QueryValue::Float(*value as f64),
+        QueryValue::Float(value) => QueryValue::Float(*value),
+        QueryValue::String(value) => value
+            .parse::<f64>()
+            .map(QueryValue::Float)
+            .unwrap_or(QueryValue::Null),
+        QueryValue::Bool(value) => QueryValue::Float(if *value { 1.0 } else { 0.0 }),
+        _ => QueryValue::Null,
+    }
+}
+
+fn query_value_boolean(value: &QueryValue) -> QueryValue {
+    match value {
+        QueryValue::Bool(value) => QueryValue::Bool(*value),
+        QueryValue::Integer(value) => QueryValue::Bool(*value != 0),
+        QueryValue::Unsigned(value) => QueryValue::Bool(*value != 0),
+        QueryValue::Float(value) => QueryValue::Bool(*value != 0.0),
+        QueryValue::String(value) if value.eq_ignore_ascii_case("true") => QueryValue::Bool(true),
+        QueryValue::String(value) if value.eq_ignore_ascii_case("false") => QueryValue::Bool(false),
+        _ => QueryValue::Null,
+    }
+}
+
+fn value_size(value: &QueryValue) -> QueryValue {
+    let size = match value {
+        QueryValue::String(value) => value.chars().count(),
+        QueryValue::Json(serde_json::Value::Array(values)) => values.len(),
+        QueryValue::Json(serde_json::Value::Object(values)) => values.len(),
+        _ => return QueryValue::Null,
+    };
+    i64::try_from(size)
+        .map(QueryValue::Integer)
+        .unwrap_or(QueryValue::Null)
+}
+
+fn substring_value(values: &[QueryValue]) -> QueryValue {
+    let (Some(QueryValue::String(value)), Some(start)) =
+        (values.first(), values.get(1).and_then(value_index))
+    else {
+        return QueryValue::Null;
+    };
+    let characters: Vec<char> = value.chars().collect();
+    if start >= characters.len() {
+        return QueryValue::String(String::new());
+    }
+    let length = values
+        .get(2)
+        .and_then(value_index)
+        .unwrap_or(characters.len() - start);
+    QueryValue::String(
+        characters[start..characters.len().min(start.saturating_add(length))]
+            .iter()
+            .collect(),
+    )
+}
+
+fn edge_slice_value(values: &[QueryValue], from_left: bool) -> QueryValue {
+    let (Some(QueryValue::String(value)), Some(length)) =
+        (values.first(), values.get(1).and_then(value_index))
+    else {
+        return QueryValue::Null;
+    };
+    let characters: Vec<char> = value.chars().collect();
+    let take = length.min(characters.len());
+    let start = if from_left {
+        0
+    } else {
+        characters.len() - take
+    };
+    QueryValue::String(characters[start..start + take].iter().collect())
+}
+
+fn value_index(value: &QueryValue) -> Option<usize> {
+    match value {
+        QueryValue::Integer(value) => usize::try_from(*value).ok(),
+        QueryValue::Unsigned(value) => usize::try_from(*value).ok(),
+        QueryValue::Float(value) if value.is_finite() && *value >= 0.0 => {
+            usize::try_from(value.trunc() as u64).ok()
+        }
+        QueryValue::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn entity_keys(value: &QueryValue) -> QueryValue {
+    let keys = match value {
+        QueryValue::Node(node) => {
+            let mut keys = vec!["name", "qualified_name", "label"];
+            if node.file_path.is_some() {
+                keys.push("file_path");
+            }
+            if node.start_line.is_some() {
+                keys.push("start_line");
+            }
+            if node.end_line.is_some() {
+                keys.push("end_line");
+            }
+            let mut keys: Vec<String> = keys.into_iter().map(str::to_owned).collect();
+            keys.extend(node.properties.keys().cloned());
+            keys
+        }
+        QueryValue::Edge(edge) => {
+            let mut keys = vec![
+                "source_id".to_owned(),
+                "target_id".to_owned(),
+                "kind".to_owned(),
+                "discriminator".to_owned(),
+            ];
+            keys.extend(edge.properties.keys().cloned());
+            keys
+        }
+        _ => Vec::new(),
+    };
+    QueryValue::Json(serde_json::Value::Array(
+        keys.into_iter().map(serde_json::Value::String).collect(),
+    ))
 }
 
 fn evaluate_reference(
@@ -1670,11 +2074,8 @@ fn materialize_rows(
                 let values = query
                     .projections
                     .iter()
-                    .map(|projection| match &projection.expression {
-                        ProjectionExpression::Reference(reference) => {
-                            evaluate_reference(reference, &binding, degrees)
-                        }
-                        ProjectionExpression::Aggregate { .. } => unreachable!(),
+                    .map(|projection| {
+                        evaluate_projection_expression(&projection.expression, &binding, degrees)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let order_values =
@@ -1698,24 +2099,75 @@ fn materialize_rows(
     Ok(rows.into_iter().map(|(_, values)| values).collect())
 }
 
+fn evaluate_projection_expression(
+    expression: &ProjectionExpression,
+    binding: &Binding<'_>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<QueryValue, QueryError> {
+    match expression {
+        ProjectionExpression::Reference(reference) => {
+            evaluate_reference(reference, binding, degrees)
+        }
+        ProjectionExpression::Function { name, arguments } => {
+            evaluate_scalar_function(name, arguments, binding, degrees)
+        }
+        ProjectionExpression::Case(expression) => {
+            evaluate_case_expression(expression, binding, degrees)
+        }
+        ProjectionExpression::Aggregate { .. } => {
+            Err(unsupported("aggregate requires grouped evaluation"))
+        }
+    }
+}
+
+fn evaluate_case_expression(
+    expression: &CaseExpression,
+    binding: &Binding<'_>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<QueryValue, QueryError> {
+    let subject = expression
+        .subject
+        .as_ref()
+        .map(|subject| evaluate_operand(subject, binding, degrees))
+        .transpose()?;
+    for branch in &expression.branches {
+        let matches = match &branch.when {
+            CaseWhen::Predicate(predicate) => evaluate_expression(predicate, binding, degrees)?,
+            CaseWhen::Value(value) => {
+                let expected = subject
+                    .as_ref()
+                    .ok_or_else(|| unsupported("simple CASE is missing its subject"))?;
+                values_equal(expected, &evaluate_operand(value, binding, degrees)?)
+            }
+        };
+        if matches {
+            return evaluate_operand(&branch.then, binding, degrees);
+        }
+    }
+    expression.fallback.as_ref().map_or_else(
+        || Ok(QueryValue::Null),
+        |fallback| evaluate_operand(fallback, binding, degrees),
+    )
+}
+
 fn materialize_aggregate_rows<'a>(
     query: &ParsedQuery,
     bindings: Vec<Binding<'a>>,
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<(Vec<QueryValue>, Vec<QueryValue>)>, QueryError> {
-    let grouping: Vec<&Reference> = query
+    let grouping: Vec<&ProjectionExpression> = query
         .projections
         .iter()
         .filter_map(|projection| match &projection.expression {
-            ProjectionExpression::Reference(reference) => Some(reference),
             ProjectionExpression::Aggregate { .. } => None,
+            expression => Some(expression),
         })
         .collect();
     let mut groups: BTreeMap<String, Vec<Binding<'a>>> = BTreeMap::new();
     for binding in bindings {
         let key_values = grouping
             .iter()
-            .map(|reference| evaluate_reference(reference, &binding, degrees))
+            .map(|expression| evaluate_projection_expression(expression, &binding, degrees))
             .collect::<Result<Vec<_>, _>>()?;
         groups
             .entry(row_key(&key_values))
@@ -1734,15 +2186,15 @@ fn materialize_aggregate_rows<'a>(
                 .projections
                 .iter()
                 .map(|projection| match &projection.expression {
-                    ProjectionExpression::Reference(reference) => first.map_or_else(
-                        || Ok(QueryValue::Null),
-                        |binding| evaluate_reference(reference, binding, degrees),
-                    ),
                     ProjectionExpression::Aggregate {
                         kind,
                         target,
                         distinct,
                     } => evaluate_aggregate(*kind, target.as_ref(), *distinct, &group, degrees),
+                    expression => first.map_or_else(
+                        || Ok(QueryValue::Null),
+                        |binding| evaluate_projection_expression(expression, binding, degrees),
+                    ),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let order_values = materialize_order_values(query, &values, first, degrees)?;
