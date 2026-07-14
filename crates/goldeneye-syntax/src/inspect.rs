@@ -14,6 +14,7 @@ pub const DEFAULT_PREVIEW_CHARS: usize = 0;
 pub const MAX_INSPECT_DEPTH: usize = 32;
 pub const MAX_INSPECT_NODES: usize = 1_000;
 pub const MAX_PREVIEW_CHARS: usize = 256;
+pub const MAX_INSPECT_KIND_FILTERS: usize = 32;
 
 /// Bounds one syntax inspection. Depth is relative to the selected base node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +23,8 @@ pub struct InspectRequest {
     pub max_nodes: usize,
     pub preview_chars: usize,
     pub byte_range: Option<ByteSpan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub node_kinds: Vec<String>,
 }
 
 impl Default for InspectRequest {
@@ -31,6 +34,7 @@ impl Default for InspectRequest {
             max_nodes: DEFAULT_MAX_NODES,
             preview_chars: DEFAULT_PREVIEW_CHARS,
             byte_range: None,
+            node_kinds: Vec::new(),
         }
     }
 }
@@ -62,6 +66,8 @@ pub struct SyntaxNodeView {
     pub named_child_count: u32,
     #[serde(rename = "v", skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+    pub locator_path: Option<Vec<AncestorStep>>,
 }
 
 /// Bounded inspection wire model.
@@ -98,6 +104,19 @@ impl SyntaxInspection {
             .get(target_index)
             .filter(|node| node.ordinal == ordinal)
             .ok_or(InspectError::UnknownOrdinal { ordinal })?;
+
+        if let Some(locator_path) = &target.locator_path {
+            let mut ancestor_path = self.base_ancestor_path.clone();
+            ancestor_path.extend(locator_path.iter().cloned());
+            let anchor = NodeAnchor::new(
+                ancestor_path,
+                target.kind.clone(),
+                target.span,
+                target.content_hash,
+            )
+            .map_err(invalid_identity)?;
+            return Ok(NodeLocator::new(self.scope.clone(), anchor));
+        }
 
         let mut suffix = Vec::with_capacity(target.depth);
         let mut cursor_index = target_index;
@@ -181,6 +200,7 @@ struct TraversalItem<'tree> {
     parent_ordinal: Option<u32>,
     depth: usize,
     relative_step: Option<AncestorStep>,
+    locator_path: Vec<AncestorStep>,
 }
 
 /// Inspects named syntax nodes using bounded iterative preorder traversal.
@@ -197,11 +217,13 @@ pub fn inspect_syntax(
     validate_request(snapshot, request)?;
     let range = request.byte_range.as_ref();
     let (base, base_ancestor_path) = select_base(snapshot, range)?;
+    let filtering = !request.node_kinds.is_empty();
     let mut stack = vec![TraversalItem {
         node: base,
         parent_ordinal: None,
         depth: 0,
         relative_step: None,
+        locator_path: Vec::new(),
     }];
     let mut nodes = Vec::with_capacity(request.max_nodes.min(DEFAULT_MAX_NODES));
     let mut total_named_nodes_seen = 0_usize;
@@ -213,25 +235,33 @@ pub fn inspect_syntax(
             continue;
         }
 
-        total_named_nodes_seen =
-            total_named_nodes_seen
-                .checked_add(1)
-                .ok_or(InspectError::CountOverflow {
-                    field: "total_named_nodes_seen",
-                })?;
         let children = named_children(item.node)?;
         let named_child_count =
             u32::try_from(children.len()).map_err(|_| InspectError::CountOverflow {
                 field: "named_child_count",
             })?;
 
-        let emitted_ordinal = if nodes.len() < request.max_nodes {
+        let matches_kind = !filtering
+            || request
+                .node_kinds
+                .iter()
+                .any(|kind| kind == item.node.kind());
+        if matches_kind {
+            total_named_nodes_seen =
+                total_named_nodes_seen
+                    .checked_add(1)
+                    .ok_or(InspectError::CountOverflow {
+                        field: "total_named_nodes_seen",
+                    })?;
+        }
+
+        let emitted_ordinal = if matches_kind && nodes.len() < request.max_nodes {
             let ordinal = u32::try_from(nodes.len())
                 .map_err(|_| InspectError::CountOverflow { field: "ordinal" })?;
             let bytes = node_bytes(snapshot, item.node)?;
             nodes.push(SyntaxNodeView {
                 ordinal,
-                parent_ordinal: item.parent_ordinal,
+                parent_ordinal: if filtering { None } else { item.parent_ordinal },
                 depth: item.depth,
                 named_child_index: item
                     .relative_step
@@ -247,6 +277,7 @@ pub fn inspect_syntax(
                 named_child_count,
                 preview: (request.preview_chars > 0)
                     .then(|| bounded_preview(bytes, request.preview_chars)),
+                locator_path: filtering.then_some(item.locator_path.clone()),
             });
             Some(ordinal)
         } else {
@@ -256,11 +287,20 @@ pub fn inspect_syntax(
         if item.depth < request.max_depth {
             for (child, step) in children.into_iter().rev() {
                 if span_is_relevant(node_span(child)?.bytes, range) {
+                    let mut locator_path = if filtering {
+                        item.locator_path.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    if filtering {
+                        locator_path.push(step.clone());
+                    }
                     stack.push(TraversalItem {
                         node: child,
                         parent_ordinal: emitted_ordinal,
                         depth: item.depth + 1,
                         relative_step: Some(step),
+                        locator_path,
                     });
                 }
             }
@@ -289,6 +329,11 @@ fn validate_request(
     validate_limit("max_depth", request.max_depth, MAX_INSPECT_DEPTH)?;
     validate_limit("max_nodes", request.max_nodes, MAX_INSPECT_NODES)?;
     validate_limit("preview_chars", request.preview_chars, MAX_PREVIEW_CHARS)?;
+    validate_limit(
+        "node_kinds",
+        request.node_kinds.len(),
+        MAX_INSPECT_KIND_FILTERS,
+    )?;
 
     if let Some(range) = request.byte_range {
         if range.start > range.end {
@@ -381,6 +426,24 @@ fn validate_parent_links(nodes: &[SyntaxNodeView]) -> Result<(), InspectError> {
             return Err(InspectError::InvalidParentLink {
                 ordinal: node.ordinal,
             });
+        }
+        if let Some(locator_path) = &node.locator_path {
+            let valid = node.parent_ordinal.is_none()
+                && node.depth == locator_path.len()
+                && match locator_path.last() {
+                    Some(step) => {
+                        node.named_child_index == Some(step.named_child_index)
+                            && node.field_name == step.field_name
+                            && node.kind == step.node_kind
+                    }
+                    None => node.named_child_index.is_none() && node.field_name.is_none(),
+                };
+            if !valid {
+                return Err(InspectError::InvalidParentLink {
+                    ordinal: node.ordinal,
+                });
+            }
+            continue;
         }
         match node.parent_ordinal {
             None if index == 0 && node.depth == 0 && node.named_child_index.is_none() => {}

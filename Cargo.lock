@@ -306,6 +306,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-edit"
+version = "0.1.0"
+dependencies = [
+ "goldeneye-domain",
+ "goldeneye-syntax",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "goldeneye-full-grammars"
 version = "0.1.0"
 dependencies = [

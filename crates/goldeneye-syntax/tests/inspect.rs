@@ -53,6 +53,7 @@ fn root_preview(source: &[u8], preview_chars: usize) -> String {
         max_nodes: 1,
         preview_chars,
         byte_range: None,
+        node_kinds: Vec::new(),
     };
     inspect_syntax(&snapshot, &context(), &request)
         .unwrap()
@@ -75,6 +76,7 @@ fn node_preview(source: &[u8], kind: &str, preview_chars: usize) -> String {
             max_nodes: 1,
             preview_chars,
             byte_range: Some(range),
+            node_kinds: Vec::new(),
         },
     )
     .unwrap()
@@ -115,6 +117,7 @@ fn inspection_enforces_depth_node_and_preview_bounds_truthfully() {
         max_nodes: 5,
         preview_chars: 8,
         byte_range: None,
+        node_kinds: Vec::new(),
     };
     let view = inspect_syntax(&snapshot, &context(), &request).unwrap();
 
@@ -141,6 +144,33 @@ fn inspection_enforces_depth_node_and_preview_bounds_truthfully() {
     assert_eq!(node_limited.nodes.len(), 5);
     assert!(node_limited.total_named_nodes_seen > node_limited.nodes.len());
     assert!(node_limited.truncated);
+}
+
+#[test]
+fn kind_filter_is_exact_result_bounded_and_resolvable() {
+    let snapshot = rust_snapshot(Arc::<[u8]>::from(
+        b"fn first() { let x = 1; }\nstruct Skip;\nfn second() { let y = 2; }".as_slice(),
+    ));
+    let request = InspectRequest {
+        max_depth: 32,
+        max_nodes: 1,
+        node_kinds: vec!["function_item".to_owned()],
+        ..InspectRequest::default()
+    };
+
+    let inspection = inspect_syntax(&snapshot, &context(), &request).unwrap();
+
+    assert_eq!(inspection.nodes.len(), 1);
+    assert_eq!(inspection.nodes[0].kind, "function_item");
+    assert_eq!(inspection.total_named_nodes_seen, 2);
+    assert!(inspection.truncated);
+    let locator = inspection.locator(0).unwrap();
+    let resolved = resolve_locator(&snapshot, &context(), &locator).unwrap();
+    assert_eq!(resolved.kind(), "function_item");
+    assert_eq!(
+        &snapshot.source()[resolved.start_byte()..resolved.end_byte()],
+        b"fn first() { let x = 1; }"
+    );
 }
 
 #[test]
@@ -284,6 +314,13 @@ fn invalid_range_and_over_cap_requests_are_typed_errors() {
             },
             "preview_chars",
         ),
+        (
+            InspectRequest {
+                node_kinds: (0..33).map(|index| format!("kind_{index}")).collect(),
+                ..InspectRequest::default()
+            },
+            "node_kinds",
+        ),
     ];
     for (request, expected_field) in cases {
         assert!(matches!(
@@ -383,6 +420,7 @@ fn default_request_contract_is_stable() {
             max_nodes: 200,
             preview_chars: 0,
             byte_range: None,
+            node_kinds: Vec::new(),
         }
     );
 }

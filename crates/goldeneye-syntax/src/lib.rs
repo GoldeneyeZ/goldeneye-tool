@@ -24,7 +24,7 @@ pub use grammar::{
 };
 pub use inspect::{
     DEFAULT_MAX_DEPTH, DEFAULT_MAX_NODES, DEFAULT_PREVIEW_CHARS, InspectError, InspectRequest,
-    MAX_INSPECT_DEPTH, MAX_INSPECT_NODES, MAX_PREVIEW_CHARS, SyntaxInspection, SyntaxNodeView,
-    inspect_syntax,
+    MAX_INSPECT_DEPTH, MAX_INSPECT_KIND_FILTERS, MAX_INSPECT_NODES, MAX_PREVIEW_CHARS,
+    SyntaxInspection, SyntaxNodeView, inspect_syntax,
 };
 pub use locator::{LocatorError, all_named_locators, locator_scope, resolve_locator};
