@@ -39,19 +39,27 @@ pub use goldeneye_query::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
     CodeSnippetResult, CountSummary, EdgeSummary, GraphSchemaRequest, GraphSchemaResult,
     IndexStatusRequest, IndexStatusResult, NodeSummary, PageRequest, ProjectSummary, QueryError,
-    QueryGraphRequest, QueryGraphResult, QueryValue, SchemaEntry, SearchGraphPage,
-    SearchGraphRequest, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
+    QueryGraphRequest, QueryGraphResult, QueryValue, SchemaEntry, SearchCodeFilesResult,
+    SearchCodeHit, SearchCodeMatchesResult, SearchCodeMode, SearchCodeRequest, SearchCodeResult,
+    SearchGraphPage, SearchGraphRequest, SemanticSearchHit, SemanticSearchRequest,
+    SemanticSearchResult, SimilaritySearchHit, SimilaritySearchRequest, SimilaritySearchResult,
+    TraceDirection, TraceHop, TracePathRequest, TracePathResult,
 };
 
 pub const DATABASE_PATH_ENV: &str = "GOLDENEYE_DB_PATH";
 pub const PROJECT_ROOT_ENV: &str = "GOLDENEYE_PROJECT_ROOT";
 pub const ALLOWED_ROOT_ENV: &str = "CBM_ALLOWED_ROOT";
+pub const SEMANTIC_ENABLED_ENV: &str = "CBM_SEMANTIC_ENABLED";
+pub const SEMANTIC_THRESHOLD_ENV: &str = "CBM_SEMANTIC_THRESHOLD";
+pub const DEFAULT_SEMANTIC_THRESHOLD: f32 = 0.75;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServiceConfig {
     database_path: PathBuf,
     project_root: PathBuf,
     allowed_root: Option<PathBuf>,
+    semantic_enabled: bool,
+    semantic_threshold: f32,
 }
 
 impl ServiceConfig {
@@ -61,6 +69,8 @@ impl ServiceConfig {
             database_path: database_path.into(),
             project_root: project_root.into(),
             allowed_root: None,
+            semantic_enabled: false,
+            semantic_threshold: DEFAULT_SEMANTIC_THRESHOLD,
         }
     }
 
@@ -85,6 +95,25 @@ impl ServiceConfig {
         self.allowed_root.as_deref()
     }
 
+    #[must_use]
+    pub const fn semantic_enabled(&self) -> bool {
+        self.semantic_enabled
+    }
+
+    #[must_use]
+    pub const fn semantic_threshold(&self) -> f32 {
+        self.semantic_threshold
+    }
+
+    #[must_use]
+    pub fn with_semantic_config(mut self, enabled: bool, threshold: f32) -> Self {
+        self.semantic_enabled = enabled;
+        self.semantic_threshold = valid_semantic_threshold(threshold)
+            .then_some(threshold)
+            .unwrap_or(DEFAULT_SEMANTIC_THRESHOLD);
+        self
+    }
+
     /// Builds configuration from process environment without opening the database.
     ///
     /// # Errors
@@ -97,12 +126,14 @@ impl ServiceConfig {
         )?;
         let database_path =
             env::var_os(DATABASE_PATH_ENV).map_or_else(default_database_path, PathBuf::from);
-        let config = Self::new(database_path, project_root);
-        Ok(
-            env::var_os(ALLOWED_ROOT_ENV).map_or(config.clone(), |value| {
-                config.with_allowed_root(PathBuf::from(value))
-            }),
-        )
+        let mut config = Self::new(database_path, project_root).with_semantic_config(
+            semantic_enabled_from_value(env::var_os(SEMANTIC_ENABLED_ENV)),
+            semantic_threshold_from_value(env::var_os(SEMANTIC_THRESHOLD_ENV)),
+        );
+        if let Some(value) = env::var_os(ALLOWED_ROOT_ENV) {
+            config = config.with_allowed_root(PathBuf::from(value));
+        }
+        Ok(config)
     }
 }
 
@@ -458,6 +489,54 @@ impl Services {
         Ok(self.query_engine()?.search_graph(request)?)
     }
 
+    /// Searches indexed source and collapses matching lines to graph nodes.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed validation, source, not-found, storage, or query failures.
+    pub fn search_code(
+        &self,
+        request: &SearchCodeRequest,
+    ) -> Result<SearchCodeResult, ServiceError> {
+        Ok(self.query_engine()?.search_code(request)?)
+    }
+
+    /// Searches persisted semantic vectors using upstream minimum-cosine ranking.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed validation, not-found, storage, or query failures.
+    pub fn semantic_search(
+        &self,
+        request: &SemanticSearchRequest,
+    ) -> Result<SemanticSearchResult, ServiceError> {
+        Ok(self.query_engine()?.semantic_search(request)?)
+    }
+
+    /// Finds nodes with persisted structural signatures similar to one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed validation, resolution, storage, or query failures.
+    pub fn similarity_search(
+        &self,
+        request: &SimilaritySearchRequest,
+    ) -> Result<SimilaritySearchResult, ServiceError> {
+        Ok(self.query_engine()?.similarity_search(request)?)
+    }
+
+    /// Compatibility alias for [`Self::similarity_search`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same failures as [`Self::similarity_search`].
+    pub fn find_similar(
+        &self,
+        request: &SimilaritySearchRequest,
+    ) -> Result<SimilaritySearchResult, ServiceError> {
+        self.similarity_search(request)
+    }
+
     /// Executes the supported read-only Cypher subset.
     ///
     /// # Errors
@@ -597,4 +676,59 @@ fn default_database_path() -> PathBuf {
             .join("goldeneye.db");
     }
     PathBuf::from(".goldeneye/goldeneye.db")
+}
+
+fn semantic_enabled_from_value(value: Option<std::ffi::OsString>) -> bool {
+    value.is_some_and(|value| value.to_string_lossy().starts_with('1'))
+}
+
+fn semantic_threshold_from_value(value: Option<std::ffi::OsString>) -> f32 {
+    value
+        .and_then(|value| value.to_string_lossy().parse::<f32>().ok())
+        .filter(|value| valid_semantic_threshold(*value))
+        .unwrap_or(DEFAULT_SEMANTIC_THRESHOLD)
+}
+
+fn valid_semantic_threshold(value: f32) -> bool {
+    value > 0.0 && value <= 1.0
+}
+
+#[cfg(test)]
+mod semantic_config_tests {
+    use std::ffi::OsString;
+
+    use super::{
+        DEFAULT_SEMANTIC_THRESHOLD, semantic_enabled_from_value, semantic_threshold_from_value,
+    };
+
+    #[test]
+    fn upstream_semantic_environment_parsing_is_exact() {
+        assert!(!semantic_enabled_from_value(None));
+        assert!(!semantic_enabled_from_value(Some(OsString::from("true"))));
+        assert!(semantic_enabled_from_value(Some(OsString::from("1"))));
+        assert!(semantic_enabled_from_value(Some(OsString::from(
+            "1-enabled"
+        ))));
+
+        assert_eq!(
+            semantic_threshold_from_value(None),
+            DEFAULT_SEMANTIC_THRESHOLD
+        );
+        assert_eq!(
+            semantic_threshold_from_value(Some(OsString::from("invalid"))),
+            DEFAULT_SEMANTIC_THRESHOLD
+        );
+        assert_eq!(
+            semantic_threshold_from_value(Some(OsString::from("0"))),
+            DEFAULT_SEMANTIC_THRESHOLD
+        );
+        assert_eq!(
+            semantic_threshold_from_value(Some(OsString::from("1.1"))),
+            DEFAULT_SEMANTIC_THRESHOLD
+        );
+        assert_eq!(
+            semantic_threshold_from_value(Some(OsString::from("0.82"))),
+            0.82
+        );
+    }
 }

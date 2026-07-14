@@ -5,8 +5,9 @@ use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult, IndexStatusRequest,
     InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId,
-    ProjectRelativePath, QueryGraphRequest, SearchGraphRequest, ServiceConfig, ServiceErrorCode,
-    Services, TraceDirection, TracePathRequest,
+    ProjectRelativePath, QueryGraphRequest, SearchCodeRequest, SearchCodeResult,
+    SearchGraphRequest, ServiceConfig, ServiceErrorCode, Services, TraceDirection,
+    TracePathRequest,
 };
 use tempfile::TempDir;
 
@@ -93,7 +94,26 @@ fn verify_read_surfaces(services: &Services, indexed: &IndexRepositoryResult) ->
         ))
         .expect("query graph");
     assert!(!query.rows.is_empty());
+    let SearchCodeResult::Matches(code) = services
+        .search_code(&SearchCodeRequest::new(project.clone(), "helper"))
+        .expect("search code")
+    else {
+        panic!("expected search matches");
+    };
+    assert!(code.total_grep_matches >= 2);
+    assert!(code.results.iter().any(|result| result.node == "helper"));
     project
+}
+
+#[test]
+fn semantic_model_configuration_has_upstream_defaults_and_explicit_overrides() {
+    let config = ServiceConfig::new("graph.db", ".");
+    assert!(!config.semantic_enabled());
+    assert_eq!(config.semantic_threshold(), 0.75);
+
+    let configured = config.with_semantic_config(true, 0.82);
+    assert!(configured.semantic_enabled());
+    assert_eq!(configured.semantic_threshold(), 0.82);
 }
 
 #[test]
