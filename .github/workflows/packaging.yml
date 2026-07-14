@@ -1,0 +1,100 @@
+name: Packaging smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/packaging.yml"
+      - ".github/workflows/release.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "NOTICE"
+      - "flake.nix"
+      - "go.mod"
+      - "packaging/**"
+      - "pkg/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/packaging.yml"
+      - ".github/workflows/release.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "NOTICE"
+      - "flake.nix"
+      - "go.mod"
+      - "packaging/**"
+      - "pkg/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-metadata:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: pkg/npm/package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go.mod
+      - name: npm metadata and resolver tests
+        working-directory: pkg/npm
+        run: |
+          npm test
+          npm pack --ignore-scripts --dry-run
+      - name: PyPI metadata and resolver tests
+        run: |
+          python -m unittest discover -s pkg/pypi/tests -v
+          python -m pip install --disable-pip-version-check build
+          python -m build pkg/pypi
+      - name: Go install shim tests
+        run: go test ./pkg/go/cmd/goldeneye
+      - name: Cross-ecosystem contract and archive smoke tests
+        run: python -m unittest packaging.tests.test_packaging -v
+
+  windows-metadata:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Chocolatey metadata and scripts
+        shell: pwsh
+        run: |
+          [xml](Get-Content -LiteralPath pkg/chocolatey/goldeneye-tool.nuspec.tmpl -Raw) | Out-Null
+          foreach ($script in @(
+            'pkg/chocolatey/tools/chocolateyinstall.ps1.tmpl',
+            'pkg/chocolatey/tools/chocolateyuninstall.ps1'
+          )) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$null,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -ne 0) { throw "$script failed PowerShell parsing: $errors" }
+          }
+
+  homebrew-metadata:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Homebrew formula template
+        run: ruby -c pkg/homebrew/Formula/goldeneye-tool.rb.tmpl
+
+  nix-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Evaluate and build source flake
+        run: nix flake check --no-write-lock-file
