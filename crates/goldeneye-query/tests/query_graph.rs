@@ -123,7 +123,7 @@ fn max_rows_skip_and_limit_bound_materialization() {
 }
 
 #[test]
-fn mutating_and_unsupported_syntax_fail_closed_without_false_literal_hits() {
+fn mutating_syntax_fails_closed_without_false_literal_hits() {
     let fixture = Fixture::seeded();
     let engine = fixture.engine();
     for query in [
@@ -154,13 +154,6 @@ fn mutating_and_unsupported_syntax_fail_closed_without_false_literal_hits() {
         ))
         .expect("mutation word inside literal");
     assert!(literal.rows.is_empty());
-    assert!(matches!(
-        engine.query_graph(&QueryGraphRequest::new(
-            fixture.project.clone(),
-            "MATCH (a)-[:CALLS*1..3]->(b) RETURN a",
-        )),
-        Err(QueryError::UnsupportedQuery { .. } | QueryError::CypherSyntax { .. })
-    ));
 }
 
 fn text(value: &str) -> QueryValue {
