@@ -39,8 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: pkg/npm/package.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -61,7 +59,7 @@ jobs:
       - name: Go install shim tests
         run: go test ./pkg/go/cmd/goldeneye
       - name: Cross-ecosystem contract and archive smoke tests
-        run: python -m unittest packaging.tests.test_packaging -v
+        run: python -m unittest discover -s packaging/tests -v
 
   windows-metadata:
     runs-on: windows-2025
@@ -75,10 +73,11 @@ jobs:
             'pkg/chocolatey/tools/chocolateyinstall.ps1.tmpl',
             'pkg/chocolatey/tools/chocolateyuninstall.ps1'
           )) {
+            $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Resolve-Path $script),
-              [ref]$null,
+              [ref]$tokens,
               [ref]$errors
             ) | Out-Null
             if ($errors.Count -ne 0) { throw "$script failed PowerShell parsing: $errors" }

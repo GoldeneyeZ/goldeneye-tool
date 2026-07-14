@@ -12,7 +12,7 @@ import stat
 import sys
 import tarfile
 import tempfile
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 import zipfile
@@ -45,7 +45,7 @@ def normalize_version(value: str) -> str:
     return version
 
 
-def platform_spec(system: str | None = None, machine: str | None = None) -> tuple[str, str, str, str]:
+def platform_spec(system: Optional[str] = None, machine: Optional[str] = None) -> tuple[str, str, str, str]:
     system_value = (system or host_platform.system()).lower()
     machine_value = (machine or host_platform.machine()).lower()
     systems = {"darwin": "darwin", "linux": "linux", "windows": "windows"}
@@ -61,8 +61,8 @@ def platform_spec(system: str | None = None, machine: str | None = None) -> tupl
 
 def release_asset(
     version_value: str,
-    system: str | None = None,
-    machine: str | None = None,
+    system: Optional[str] = None,
+    machine: Optional[str] = None,
     base_value: str = DEFAULT_RELEASE_BASE,
 ) -> ReleaseAsset:
     version = normalize_version(version_value)
@@ -85,7 +85,7 @@ def release_asset(
 
 
 def parse_checksums(text: str, asset_name: str) -> str:
-    found: str | None = None
+    found: Optional[str] = None
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:

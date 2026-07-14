@@ -71,7 +71,7 @@ def render_template(source: Path, destination: Path, values: dict[str, str]) -> 
     if unresolved:
         raise ValueError(f"unresolved placeholders in {source}: {', '.join(unresolved)}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(text, encoding="utf-8", newline="\n")
+    destination.write_text(text, encoding="utf-8")
 
 
 def render(version: str, checksum_path: Path, output: Path) -> None:
@@ -108,7 +108,6 @@ def render(version: str, checksum_path: Path, output: Path) -> None:
     (output / "release-metadata.sha256").write_text(
         hashlib.sha256(checksum_path.read_bytes()).hexdigest() + "  checksums.txt\n",
         encoding="utf-8",
-        newline="\n",
     )
 
 

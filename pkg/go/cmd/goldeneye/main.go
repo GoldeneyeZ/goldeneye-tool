@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -100,7 +101,7 @@ func parseChecksums(text, assetName string) (string, error) {
 		if len(fields) != 2 || len(fields[0]) != 64 {
 			return "", fmt.Errorf("malformed checksum line: %s", line)
 		}
-		if _, err := fmt.Sscanf(fields[0], "%x", new([32]byte)); err != nil {
+		if _, err := hex.DecodeString(fields[0]); err != nil {
 			return "", fmt.Errorf("malformed checksum line: %s", line)
 		}
 		name := strings.TrimPrefix(fields[1], "*")
@@ -180,7 +181,11 @@ func verifyArchive(archive, expected string) error {
 }
 
 func safeDestination(root, name string) (string, error) {
-	normalized := filepath.FromSlash(strings.ReplaceAll(name, "\\", "/"))
+	normalizedSlash := strings.ReplaceAll(name, "\\", "/")
+	if regexp.MustCompile(`^[A-Za-z]:`).MatchString(normalizedSlash) {
+		return "", fmt.Errorf("unsafe archive entry: %s", name)
+	}
+	normalized := filepath.FromSlash(normalizedSlash)
 	cleaned := filepath.Clean(normalized)
 	if filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || filepath.VolumeName(cleaned) != "" {
 		return "", fmt.Errorf("unsafe archive entry: %s", name)
