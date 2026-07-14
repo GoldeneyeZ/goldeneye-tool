@@ -138,12 +138,7 @@ fn semantic_artifacts_round_trip_and_cascade_with_the_project() {
         generation,
     );
     store
-        .replace_project_graph(
-            &project.id,
-            vec![source],
-            vec![function.clone()],
-            Vec::new(),
-        )
+        .replace_project_graph(&project, vec![source], vec![function.clone()], Vec::new())
         .expect("graph");
 
     let mut node_values = [0_i8; 768];
@@ -233,7 +228,7 @@ fn semantic_replacement_is_validated_before_the_existing_snapshot_is_removed() {
     );
     store
         .replace_project_graph(
-            &project.id,
+            &project,
             vec![source],
             vec![function.clone()],
             Vec::new(),

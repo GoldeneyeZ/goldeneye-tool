@@ -24,7 +24,7 @@ fn adr_and_runtime_traces_are_durable_and_project_scoped() {
     let temp = TempDir::new().expect("temp dir");
     let (mut store, project, database) = registered_store(&temp);
 
-    assert_eq!(CURRENT_SCHEMA_VERSION, 5);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
     let schema = store.schema_info().expect("schema");
     assert!(schema.tables.contains("project_summaries"));
     assert!(schema.tables.contains("runtime_traces"));
