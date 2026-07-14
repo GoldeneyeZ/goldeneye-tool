@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "goldeneye-tool"
+version = "0.1.0"
+description = "Token-efficient code intelligence and editing tools for AI agents"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "GoldeneyeZ" }]
+keywords = ["ai-agent", "code-intelligence", "mcp", "tree-sitter"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/GoldeneyeZ/goldeneye-tool"
+Repository = "https://github.com/GoldeneyeZ/goldeneye-tool"
+Issues = "https://github.com/GoldeneyeZ/goldeneye-tool/issues"
+
+[project.scripts]
+goldeneye = "goldeneye_tool._cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/goldeneye_tool"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/goldeneye_tool",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "NOTICE",
+  "pyproject.toml",
+]

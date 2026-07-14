@@ -1,0 +1,45 @@
+{
+  "name": "goldeneye-tool",
+  "version": "0.1.0",
+  "description": "Token-efficient code intelligence and editing tools for AI agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GoldeneyeZ/goldeneye-tool.git"
+  },
+  "homepage": "https://github.com/GoldeneyeZ/goldeneye-tool",
+  "bugs": "https://github.com/GoldeneyeZ/goldeneye-tool/issues",
+  "keywords": [
+    "ai-agent",
+    "code-intelligence",
+    "mcp",
+    "tree-sitter"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "goldeneye": "bin.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node --test test/*.test.js",
+    "smoke": "npm pack --ignore-scripts --dry-run"
+  },
+  "files": [
+    "bin.js",
+    "install.js",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ]
+}
