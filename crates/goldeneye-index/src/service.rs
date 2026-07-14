@@ -18,7 +18,7 @@ use goldeneye_syntax::GrammarProvider;
 
 use crate::extract::{
     Candidate, ExtractedFile, branch_node, extract, project_contains_file, project_has_branch,
-    project_node, project_node_id,
+    project_node,
 };
 use crate::{
     FileRefreshResult, FileRefreshStatus, FileSyntaxDiagnostics, IndexError, IndexOptions,
@@ -130,8 +130,11 @@ where
             });
         }
 
-        let parsed = self.parse_candidates(parse_inputs)?;
-        let parsed_files = parsed.len();
+        // Hybrid resolution depends on pending facts from every source file. Reparse the
+        // discovered set whenever the project changes so calls in otherwise unchanged files
+        // cannot retain stale targets after definitions move, disappear, or become ambiguous.
+        let parsed_files = parse_inputs.len();
+        let parsed = self.parse_candidates(candidates.clone())?;
         let mut parsed_by_path = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for extracted in parsed {
@@ -232,7 +235,8 @@ where
                 .into_iter()
                 .filter(|file| file.id.path != *path)
                 .collect::<Vec<_>>();
-            let mut parsed = BTreeMap::new();
+            let mut parsed =
+                self.parse_matching_records(&report.files, &records, project_id, None)?;
             let (files, nodes, edges) =
                 self.assemble_project_graph(&project, records, &mut parsed)?;
             self.ensure_not_cancelled()?;
@@ -282,7 +286,9 @@ where
             .filter(|file| file.id.path != *path)
             .collect::<Vec<_>>();
         records.push(extracted.record.clone());
-        let mut parsed = BTreeMap::from([(path.clone(), extracted)]);
+        let mut parsed =
+            self.parse_matching_records(&report.files, &records, project_id, Some(path))?;
+        parsed.insert(path.clone(), extracted);
         let (files, nodes, edges) = self.assemble_project_graph(&project, records, &mut parsed)?;
         self.ensure_not_cancelled()?;
         let outcome = self
@@ -327,12 +333,14 @@ where
         let branch = branch_node(project)?;
         let mut edges = vec![project_has_branch(&project.id, &branch)?];
         let mut nodes = vec![project_graph_node, branch];
+        let mut pending_calls = Vec::new();
+        let mut pending_relations = Vec::new();
+        let mut pending_imports = Vec::new();
         for file in &files {
-            let graph = if let Some(extracted) = parsed.remove(&file.id.path) {
-                // Raw calls remain bounded to extraction and are intentionally
-                // not persisted until a definition/hybrid resolver can target them.
-                let _raw_calls = extracted.calls;
-                let _raw_relations = extracted.relations;
+            let graph = if let Some(mut extracted) = parsed.remove(&file.id.path) {
+                pending_calls.append(&mut extracted.calls);
+                pending_relations.append(&mut extracted.relations);
+                pending_imports.append(&mut extracted.imports);
                 FileGraph {
                     nodes: extracted.nodes,
                     edges: extracted.edges,
@@ -349,6 +357,19 @@ where
             nodes.extend(graph.nodes);
             edges.extend(graph.edges);
         }
+        let node_ids = nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<BTreeSet<_>>();
+        edges.retain(|edge| node_ids.contains(&edge.source) && node_ids.contains(&edge.target));
+        crate::hybrid::resolve_project(
+            &project.id,
+            &nodes,
+            &mut edges,
+            pending_calls,
+            pending_relations,
+            pending_imports,
+        )?;
         Ok((files, nodes, edges))
     }
 
@@ -358,14 +379,11 @@ where
             .iter()
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
-        let project_node = project_node_id(&file.project)?;
         let mut identities = BTreeSet::new();
         let mut edges = Vec::new();
         for node in &nodes {
             for edge in self.store.edges_from(&file.project, &node.id)? {
-                if !node_ids.contains(&edge.source)
-                    || (!node_ids.contains(&edge.target) && edge.target != project_node)
-                {
+                if !node_ids.contains(&edge.source) {
                     continue;
                 }
                 let identity = (
@@ -380,6 +398,47 @@ where
             }
         }
         Ok(FileGraph { nodes, edges })
+    }
+
+    fn parse_matching_records(
+        &self,
+        discovered: &[DiscoveredFile],
+        records: &[FileRecord],
+        project: &ProjectId,
+        excluded: Option<&ProjectRelativePath>,
+    ) -> Result<BTreeMap<ProjectRelativePath, ExtractedFile>, IndexError> {
+        let discovered_by_path = discovered
+            .iter()
+            .filter_map(|file| {
+                relative_path(&file.relative_path)
+                    .ok()
+                    .map(|path| (path, file))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let records_by_path = records
+            .iter()
+            .map(|record| (record.id.path.clone(), record))
+            .collect::<BTreeMap<_, _>>();
+        let mut candidates = Vec::new();
+        for (path, record) in records_by_path {
+            if excluded.is_some_and(|excluded| excluded == &path) {
+                continue;
+            }
+            let Some(discovered) = discovered_by_path.get(&path) else {
+                continue;
+            };
+            let candidate = Self::read_candidate(discovered, project)?;
+            if candidate.record.content_hash == record.content_hash {
+                candidates.push(candidate);
+            }
+        }
+        let mut parsed = BTreeMap::new();
+        for extracted in self.parse_candidates(candidates)? {
+            if extracted.diagnostics.is_none() {
+                parsed.insert(extracted.record.id.path.clone(), extracted);
+            }
+        }
+        Ok(parsed)
     }
 
     fn read_candidates(

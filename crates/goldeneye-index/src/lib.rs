@@ -1,6 +1,7 @@
 //! Fast, deterministic repository indexing for Goldeneye.
 
 mod extract;
+mod hybrid;
 mod identity;
 mod language_specs;
 mod service;

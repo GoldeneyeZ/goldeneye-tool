@@ -393,6 +393,79 @@ fn duplicate_short_names_never_create_false_cross_file_calls() {
 }
 
 #[test]
+fn unimported_builtins_do_not_link_to_project_lookalikes() {
+    let temp = TempDir::new().expect("temp repo");
+    write(
+        temp.path(),
+        "lookalike.py",
+        "def print(value):\n    return value\n",
+    );
+    write(
+        temp.path(),
+        "caller.py",
+        "def caller():\n    print('external')\n",
+    );
+    let mut index = service(IndexOptions::default());
+    let result = index.index_repository(temp.path()).expect("index");
+
+    let calls = nodes_for(&index, &result.project.id, "caller.py")
+        .into_iter()
+        .flat_map(|node| {
+            index
+                .store()
+                .edges_from(&result.project.id, &node.id)
+                .expect("caller edges")
+        })
+        .filter(|edge| edge.kind.as_str() == "CALLS")
+        .collect::<Vec<_>>();
+    assert!(
+        calls.is_empty(),
+        "builtin linked to project lookalike: {calls:#?}"
+    );
+}
+
+#[test]
+fn targeted_refresh_recomputes_cross_file_calls() {
+    let temp = TempDir::new().expect("temp repo");
+    write(temp.path(), "target.py", "def helper():\n    return 1\n");
+    write(
+        temp.path(),
+        "caller.py",
+        "from target import helper\ndef caller():\n    return helper()\n",
+    );
+    let mut index = service(IndexOptions::default());
+    let result = index.index_repository(temp.path()).expect("index");
+    let target_path = ProjectRelativePath::new("target.py").expect("target path");
+
+    let call_count = |index: &IndexService<CoreGrammarProvider>| {
+        nodes_for(index, &result.project.id, "caller.py")
+            .into_iter()
+            .flat_map(|node| {
+                index
+                    .store()
+                    .edges_from(&result.project.id, &node.id)
+                    .expect("caller edges")
+            })
+            .filter(|edge| edge.kind.as_str() == "CALLS")
+            .count()
+    };
+    assert_eq!(call_count(&index), 1);
+
+    write(temp.path(), "target.py", "def helper():\n    return 2\n");
+    let refreshed = index
+        .refresh_file(&result.project.id, &target_path)
+        .expect("refresh stable target");
+    assert_eq!(refreshed.status, FileRefreshStatus::Updated);
+    assert_eq!(call_count(&index), 1);
+
+    write(temp.path(), "target.py", "def renamed():\n    return 3\n");
+    index
+        .refresh_file(&result.project.id, &target_path)
+        .expect("refresh renamed target");
+    assert_eq!(call_count(&index), 0);
+}
+
+#[test]
 fn bounds_and_cancellation_abort_before_registration() {
     let temp = TempDir::new().expect("temp repo");
     write(temp.path(), "one.rs", "fn one() {}\n");

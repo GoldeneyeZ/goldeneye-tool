@@ -13,6 +13,11 @@ use tree_sitter::Node;
 use crate::language_specs::{LanguageSpec, language_spec};
 use crate::{FileSyntaxDiagnostics, IndexError};
 
+const MAX_PENDING_CALLS_PER_FILE: usize = 4_096;
+const MAX_PENDING_RELATIONS_PER_FILE: usize = 1_024;
+const MAX_PENDING_IMPORTS_PER_FILE: usize = 1_024;
+const MAX_TYPE_BINDINGS_PER_SCOPE: usize = 2_048;
+
 #[derive(Clone)]
 pub(crate) struct Candidate {
     pub record: FileRecord,
@@ -26,6 +31,7 @@ pub(crate) struct ExtractedFile {
     pub edges: Vec<GraphEdge>,
     pub calls: Vec<ExtractedCall>,
     pub relations: Vec<ExtractedRelation>,
+    pub imports: Vec<ExtractedImport>,
     pub diagnostics: Option<FileSyntaxDiagnostics>,
 }
 
@@ -65,12 +71,14 @@ where
     let edges = extractor.edges;
     let calls = extractor.pending_calls;
     let relations = extractor.pending_relations;
+    let imports = extractor.pending_imports;
     Ok(ExtractedFile {
         record: candidate.record,
         nodes,
         edges,
         calls,
         relations,
+        imports,
         diagnostics,
     })
 }
@@ -97,18 +105,33 @@ struct Definition {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractedCall {
-    source: NodeId,
-    short_name: String,
-    start_byte: u64,
-    line: u64,
-    text: String,
+    pub source: NodeId,
+    pub file: ProjectRelativePath,
+    pub language: LanguageId,
+    pub caller_qn: String,
+    pub callee_name: String,
+    pub short_name: String,
+    pub receiver_type: Option<String>,
+    pub start_byte: u64,
+    pub line: u64,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ExtractedRelation {
-    source: NodeId,
-    kind: &'static str,
-    target_name: String,
+    pub source: NodeId,
+    pub file: ProjectRelativePath,
+    pub language: LanguageId,
+    pub kind: &'static str,
+    pub target_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ExtractedImport {
+    pub file: ProjectRelativePath,
+    pub language: LanguageId,
+    pub alias: String,
+    pub module_path: String,
 }
 
 struct Extractor<'a> {
@@ -123,8 +146,10 @@ struct Extractor<'a> {
     qualified_name_counts: BTreeMap<String, usize>,
     callable_definitions: BTreeMap<String, Vec<NodeId>>,
     type_scopes: BTreeMap<String, Vec<Scope>>,
+    type_bindings: BTreeMap<NodeId, BTreeMap<String, String>>,
     pending_calls: Vec<ExtractedCall>,
     pending_relations: Vec<ExtractedRelation>,
+    pending_imports: Vec<ExtractedImport>,
     module_scope: Scope,
 }
 
@@ -209,8 +234,10 @@ impl<'a> Extractor<'a> {
             qualified_name_counts: BTreeMap::new(),
             callable_definitions: BTreeMap::new(),
             type_scopes: BTreeMap::new(),
+            type_bindings: BTreeMap::new(),
             pending_calls: Vec::new(),
             pending_relations: Vec::new(),
+            pending_imports: Vec::new(),
             module_scope: Scope {
                 parent: module_id,
                 qualified_name: module_qualified_name,
@@ -254,7 +281,10 @@ impl<'a> Extractor<'a> {
             }
         }
         self.resolve_calls()?;
-        self.resolve_relations()
+        self.resolve_relations()?;
+        self.pending_imports.sort();
+        self.pending_imports.dedup();
+        Ok(())
     }
 
     fn walk(&mut self, node: Node<'_>, scope: &Scope) -> Result<(), IndexError> {
@@ -322,8 +352,23 @@ impl<'a> Extractor<'a> {
         definition: Definition,
         scope: &Scope,
     ) -> Result<Option<Scope>, IndexError> {
+        if definition.label == "Import" {
+            self.record_imports(node, &definition.name);
+        }
+        if matches!(definition.label, "Variable" | "Field") {
+            self.record_type_binding(node, &definition.name, scope);
+        }
         let segment = qualified_segment(&definition.name);
-        let base = format!("{}.{}", scope.qualified_name, segment);
+        let base = if definition.label == "Import" {
+            format!(
+                "{}.__imports__.{}#{}",
+                scope.qualified_name,
+                segment,
+                node.start_byte()
+            )
+        } else {
+            format!("{}.{}", scope.qualified_name, segment)
+        };
         let count = self.qualified_name_counts.entry(base.clone()).or_default();
         *count += 1;
         let qualified_name = if *count == 1 {
@@ -380,8 +425,13 @@ impl<'a> Extractor<'a> {
         ) {
             for (kind, target_name) in audited_relations(self.language.as_str(), node, self.source)
             {
+                if self.pending_relations.len() >= MAX_PENDING_RELATIONS_PER_FILE {
+                    break;
+                }
                 self.pending_relations.push(ExtractedRelation {
                     source: id.clone(),
+                    file: self.path.clone(),
+                    language: self.language.clone(),
                     kind,
                     target_name,
                 });
@@ -399,6 +449,45 @@ impl<'a> Extractor<'a> {
             return Ok(Some(type_scope));
         }
         Ok(None)
+    }
+
+    fn record_imports(&mut self, node: Node<'_>, fallback_name: &str) {
+        if self.pending_imports.len() >= MAX_PENDING_IMPORTS_PER_FILE {
+            return;
+        }
+        let text = self.node_text(node);
+        let mut imports = import_bindings(self.language.as_str(), &text);
+        if imports.is_empty() {
+            let module_path = normalize_import_path(fallback_name);
+            if !module_path.is_empty() {
+                imports.push((import_alias(&module_path), module_path));
+            }
+        }
+        for (alias, module_path) in imports {
+            if self.pending_imports.len() >= MAX_PENDING_IMPORTS_PER_FILE {
+                break;
+            }
+            if alias.is_empty() || module_path.is_empty() {
+                continue;
+            }
+            self.pending_imports.push(ExtractedImport {
+                file: self.path.clone(),
+                language: self.language.clone(),
+                alias,
+                module_path,
+            });
+        }
+    }
+
+    fn record_type_binding(&mut self, node: Node<'_>, name: &str, scope: &Scope) {
+        let Some(type_name) = infer_declared_type(&self.node_text(node), name) else {
+            return;
+        };
+        let bindings = self.type_bindings.entry(scope.parent.clone()).or_default();
+        if bindings.len() >= MAX_TYPE_BINDINGS_PER_SCOPE {
+            return;
+        }
+        bindings.insert(binding_key(name), type_name);
     }
 
     fn record_call(&mut self, node: Node<'_>, scope: &Scope) -> Result<(), IndexError> {
@@ -441,9 +530,24 @@ impl<'a> Extractor<'a> {
         if short_name.is_empty() {
             return Ok(());
         }
+        if self.pending_calls.len() >= MAX_PENDING_CALLS_PER_FILE {
+            return Ok(());
+        }
+        let receiver_type = call_receiver(&text).and_then(|receiver| {
+            self.type_bindings
+                .get(&source)
+                .and_then(|bindings| bindings.get(&binding_key(receiver)))
+                .cloned()
+                .or_else(|| receiver_looks_like_type(receiver).then(|| receiver.to_owned()))
+        });
         self.pending_calls.push(ExtractedCall {
             source,
+            file: self.path.clone(),
+            language: self.language.clone(),
+            caller_qn: scope.qualified_name.clone(),
+            callee_name: text.clone(),
             short_name,
+            receiver_type,
             start_byte: u64::try_from(node.start_byte())
                 .map_err(|_| IndexError::CoordinateOverflow("call start byte"))?,
             line: u64::try_from(node.start_position().row)
@@ -535,6 +639,9 @@ fn classify(
     scope: &Scope,
     source: &[u8],
 ) -> Option<Definition> {
+    if language == "graphql" && node.kind() == "type_definition" {
+        return None;
+    }
     if let Some(definition) = classify_known(language, node, scope, source) {
         return Some(definition);
     }
@@ -787,6 +894,7 @@ fn audited_definition_name(
     (!name.is_empty()).then(|| name.to_owned())
 }
 
+#[allow(clippy::too_many_lines)]
 fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> Option<Node<'tree>> {
     let kind = node.kind();
     if language == "zig" && kind == "test_declaration" {
@@ -802,10 +910,10 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
     {
         return find_descendant_kind(parent, &["identifier"]);
     }
-    if language == "lean" {
-        if let Some(decl_id) = node.child_by_field_name("declId") {
-            return first_name_like(decl_id).or(Some(decl_id));
-        }
+    if language == "lean"
+        && let Some(decl_id) = node.child_by_field_name("declId")
+    {
+        return first_name_like(decl_id).or(Some(decl_id));
     }
     if language == "haskell" && matches!(label, "Function" | "Method") {
         return find_descendant_kind(node, &["variable", "name", "identifier"]);
@@ -1444,15 +1552,420 @@ fn embedded_es_imports(language: &str, source: &[u8]) -> Vec<String> {
     imports
 }
 
+fn import_bindings(language: &str, text: &str) -> Vec<(String, String)> {
+    match language {
+        "python" => python_import_bindings(text),
+        "javascript" | "typescript" | "tsx" | "astro" | "svelte" | "vue" => {
+            es_import_bindings(text)
+        }
+        "java" | "kotlin" => jvm_import_bindings(text),
+        "csharp" => csharp_import_bindings(text),
+        "php" => php_import_bindings(text),
+        "rust" => rust_import_bindings(text),
+        "go" => go_import_bindings(text),
+        "c" | "cpp" | "cuda" | "objc" => c_import_bindings(text),
+        _ => generic_import_bindings(text),
+    }
+}
+
+fn python_import_bindings(text: &str) -> Vec<(String, String)> {
+    let mut imports = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("from ")
+            && let Some((module, names)) = rest.split_once(" import ")
+        {
+            let module = normalize_import_path(module);
+            for item in names
+                .trim_matches(|character| matches!(character, '(' | ')'))
+                .split(',')
+            {
+                let (name, alias) = split_alias(item.trim());
+                if name.is_empty() || name == "*" {
+                    continue;
+                }
+                let alias = alias.unwrap_or_else(|| import_alias(&name));
+                let target = format!("{module}.{}", normalize_import_path(&name));
+                imports.push((alias, target.trim_matches('.').to_owned()));
+            }
+        } else if let Some(rest) = line.strip_prefix("import ") {
+            for item in rest.split(',') {
+                let (module, alias) = split_alias(item.trim());
+                let module = normalize_import_path(&module);
+                let alias = alias
+                    .unwrap_or_else(|| module.split('.').next().unwrap_or_default().to_owned());
+                if !alias.is_empty() && !module.is_empty() {
+                    imports.push((alias, module));
+                }
+            }
+        }
+    }
+    imports
+}
+
+fn es_import_bindings(text: &str) -> Vec<(String, String)> {
+    let mut imports = Vec::new();
+    for line in text.lines().map(str::trim) {
+        let Some(import_at) = line.find("import ") else {
+            continue;
+        };
+        let import = &line[import_at + "import ".len()..];
+        let Some(module_raw) = first_quoted_value(import) else {
+            continue;
+        };
+        let module = normalize_import_path(&module_raw);
+        let specifier = import
+            .split_once(" from ")
+            .map(|(value, _)| value.trim())
+            .unwrap_or_default();
+        if specifier.starts_with('{') {
+            for item in specifier
+                .trim_matches(|c| matches!(c, '{' | '}'))
+                .split(',')
+            {
+                let (name, alias) = split_alias(item.trim());
+                if name.is_empty() {
+                    continue;
+                }
+                let alias = alias.unwrap_or_else(|| name.clone());
+                imports.push((alias, format!("{module}.{}", normalize_import_path(&name))));
+            }
+        } else if let Some(alias) = specifier.strip_prefix("* as ") {
+            imports.push((binding_key(alias), module));
+        } else if !specifier.is_empty() {
+            let alias = specifier
+                .split(',')
+                .next()
+                .map(binding_key)
+                .unwrap_or_default();
+            if !alias.is_empty() {
+                imports.push((alias.clone(), format!("{module}.{alias}")));
+            }
+        } else {
+            imports.push((import_alias(&module), module));
+        }
+    }
+    imports
+}
+
+fn jvm_import_bindings(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("import ")?.trim();
+            let rest = rest.strip_prefix("static ").unwrap_or(rest);
+            let (target, alias) = split_alias(rest.trim_end_matches(';'));
+            let target = normalize_import_path(&target);
+            let alias = alias.unwrap_or_else(|| import_alias(&target));
+            (!alias.is_empty() && !target.is_empty()).then_some((alias, target))
+        })
+        .collect()
+}
+
+fn csharp_import_bindings(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line
+                .trim()
+                .strip_prefix("using ")?
+                .trim_end_matches(';')
+                .trim();
+            let (alias, target) = rest.split_once('=').map_or_else(
+                || (None, rest),
+                |(alias, target)| (Some(alias.trim()), target.trim()),
+            );
+            let target = normalize_import_path(target);
+            let alias = alias.map_or_else(|| import_alias(&target), binding_key);
+            (!alias.is_empty() && !target.is_empty()).then_some((alias, target))
+        })
+        .collect()
+}
+
+fn php_import_bindings(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line
+                .trim()
+                .strip_prefix("use ")?
+                .trim_end_matches(';')
+                .trim();
+            let rest = rest
+                .strip_prefix("function ")
+                .or_else(|| rest.strip_prefix("const "))
+                .unwrap_or(rest);
+            let (target, alias) = split_alias(rest);
+            let target = normalize_import_path(&target);
+            let alias = alias.unwrap_or_else(|| import_alias(&target));
+            (!alias.is_empty() && !target.is_empty()).then_some((alias, target))
+        })
+        .collect()
+}
+
+fn rust_import_bindings(text: &str) -> Vec<(String, String)> {
+    let mut imports = Vec::new();
+    for line in text.lines().map(str::trim) {
+        let Some(rest) = line.strip_prefix("use ") else {
+            continue;
+        };
+        let rest = rest.trim_end_matches(';').trim();
+        if let Some((base, names)) = rest.split_once("::{") {
+            let base = normalize_import_path(base);
+            for item in names.trim_end_matches('}').split(',') {
+                let (name, alias) = split_alias(item.trim());
+                if name.is_empty() {
+                    continue;
+                }
+                let alias = alias.unwrap_or_else(|| import_alias(&name));
+                imports.push((alias, format!("{base}.{}", normalize_import_path(&name))));
+            }
+        } else {
+            let (target, alias) = split_alias(rest);
+            let target = normalize_import_path(&target);
+            let alias = alias.unwrap_or_else(|| import_alias(&target));
+            if !alias.is_empty() && !target.is_empty() {
+                imports.push((alias, target));
+            }
+        }
+    }
+    imports
+}
+
+fn go_import_bindings(text: &str) -> Vec<(String, String)> {
+    let mut imports = Vec::new();
+    for line in text.lines().map(str::trim) {
+        for module_raw in quoted_values(line) {
+            let module = normalize_import_path(&module_raw);
+            let quote_at = line.find(['"', '\'']).unwrap_or_default();
+            let prefix = line[..quote_at].trim().trim_start_matches("import").trim();
+            let alias = if prefix.is_empty() || matches!(prefix, "(" | "." | "_") {
+                import_alias(&module)
+            } else {
+                binding_key(prefix.split_whitespace().last().unwrap_or_default())
+            };
+            if !alias.is_empty() && !module.is_empty() {
+                imports.push((alias, module));
+            }
+        }
+    }
+    imports
+}
+
+fn c_import_bindings(text: &str) -> Vec<(String, String)> {
+    quoted_values(text)
+        .into_iter()
+        .chain(
+            text.split('<')
+                .skip(1)
+                .filter_map(|rest| rest.split_once('>').map(|(value, _)| value.to_owned())),
+        )
+        .filter_map(|path| {
+            let module = normalize_import_path(&path);
+            let alias = import_alias(&module);
+            (!alias.is_empty() && !module.is_empty()).then_some((alias, module))
+        })
+        .collect()
+}
+
+fn generic_import_bindings(text: &str) -> Vec<(String, String)> {
+    quoted_values(text)
+        .into_iter()
+        .filter_map(|path| {
+            let module = normalize_import_path(&path);
+            let alias = import_alias(&module);
+            (!alias.is_empty() && !module.is_empty()).then_some((alias, module))
+        })
+        .collect()
+}
+
+fn split_alias(value: &str) -> (String, Option<String>) {
+    for separator in [" as ", " AS "] {
+        if let Some((target, alias)) = value.split_once(separator) {
+            return (target.trim().to_owned(), Some(binding_key(alias.trim())));
+        }
+    }
+    (value.trim().to_owned(), None)
+}
+
+fn quoted_values(text: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut start = None;
+    let mut quote = '\0';
+    for (index, character) in text.char_indices() {
+        if let Some(value_start) = start {
+            if character == quote {
+                values.push(text[value_start..index].to_owned());
+                start = None;
+            }
+        } else if matches!(character, '"' | '\'') {
+            quote = character;
+            start = Some(index + character.len_utf8());
+        }
+    }
+    values
+}
+
+fn normalize_import_path(value: &str) -> String {
+    let mut normalized = value
+        .trim()
+        .trim_matches(|character: char| {
+            character.is_whitespace()
+                || matches!(character, '"' | '\'' | '<' | '>' | ';' | '(' | ')')
+        })
+        .replace("::", ".")
+        .replace(['/', '\\'], ".");
+    while normalized.starts_with("./") || normalized.starts_with("../") {
+        normalized = normalized
+            .trim_start_matches("../")
+            .trim_start_matches("./")
+            .to_owned();
+    }
+    normalized = normalized.trim_start_matches('.').to_owned();
+    for extension in [
+        ".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs", ".py", ".rs", ".go", ".java", ".kt", ".cs",
+        ".php", ".hpp", ".h", ".cpp", ".cc", ".c", ".cu",
+    ] {
+        if normalized.ends_with(extension) {
+            normalized.truncate(normalized.len() - extension.len());
+            break;
+        }
+    }
+    normalized
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn import_alias(module_path: &str) -> String {
+    module_path
+        .rsplit('.')
+        .find(|segment| !segment.is_empty() && *segment != "*")
+        .map(binding_key)
+        .unwrap_or_default()
+}
+
+fn binding_key(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches(['$', '&', '*'])
+        .trim_matches(|character: char| {
+            !character.is_alphanumeric() && character != '_' && character != '.'
+        })
+        .to_owned()
+}
+
+fn infer_declared_type(text: &str, name: &str) -> Option<String> {
+    let name = binding_key(name);
+    if name.is_empty() {
+        return None;
+    }
+    let position = find_identifier_position(text, &name)?;
+    let before = text[..position].trim_end();
+    let after = text[position + name.len()..].trim_start();
+
+    if let Some(type_text) = after.strip_prefix(':') {
+        let candidate = take_type_name(type_text);
+        if !candidate.is_empty() {
+            return Some(candidate);
+        }
+    }
+    if let Some(type_text) = after.strip_prefix("as ") {
+        let candidate = take_type_name(type_text);
+        if !candidate.is_empty() {
+            return Some(candidate);
+        }
+    }
+    let declared = before
+        .split_whitespace()
+        .next_back()
+        .map(take_type_name)
+        .unwrap_or_default();
+    if !declared.is_empty()
+        && !matches!(
+            declared.as_str(),
+            "let"
+                | "const"
+                | "var"
+                | "auto"
+                | "final"
+                | "static"
+                | "private"
+                | "public"
+                | "protected"
+                | "internal"
+                | "local"
+        )
+    {
+        return Some(declared);
+    }
+    let rhs = after
+        .split_once(":=")
+        .map(|(_, rhs)| rhs)
+        .or_else(|| after.split_once('=').map(|(_, rhs)| rhs))
+        .unwrap_or(after)
+        .trim_start();
+    let rhs = rhs.strip_prefix("new ").unwrap_or(rhs).trim_start();
+    let candidate = take_type_name(rhs);
+    (!candidate.is_empty() && rhs[candidate.len()..].trim_start().starts_with(['(', '{']))
+        .then_some(candidate)
+}
+
+fn find_identifier_position(text: &str, identifier: &str) -> Option<usize> {
+    text.match_indices(identifier).find_map(|(index, _)| {
+        let before = text[..index].chars().next_back();
+        let after = text[index + identifier.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })
+}
+
+fn take_type_name(value: &str) -> String {
+    value
+        .trim_start_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '&' | '*' | '?' | '(')
+        })
+        .chars()
+        .take_while(|character| {
+            character.is_alphanumeric() || matches!(character, '_' | '.' | ':' | '\\' | '/' | '$')
+        })
+        .collect::<String>()
+        .replace("::", ".")
+        .replace(['\\', '/'], ".")
+        .trim_end_matches('.')
+        .to_owned()
+}
+
+fn call_receiver(callee: &str) -> Option<&str> {
+    let separators = ["->", "::", "."];
+    separators
+        .into_iter()
+        .filter_map(|separator| {
+            callee
+                .rfind(separator)
+                .map(|index| (index, separator.len()))
+        })
+        .max_by_key(|(index, _)| *index)
+        .map(|(index, _)| callee[..index].trim())
+        .filter(|receiver| !receiver.is_empty())
+}
+
+fn receiver_looks_like_type(receiver: &str) -> bool {
+    receiver
+        .rsplit(['.', ':', '>', '\\'])
+        .find(|segment| !segment.is_empty())
+        .and_then(|segment| segment.chars().next())
+        .is_some_and(char::is_uppercase)
+}
+
 fn gomod_requirement_name(text: &str) -> Option<String> {
     import_name_after_keyword(text, "require")
 }
 
 fn audited_relations(language: &str, node: Node<'_>, source: &[u8]) -> Vec<(&'static str, String)> {
-    if language == "graphql" && node.kind() == "type_definition" {
-        return Vec::new();
-    }
     let text = node_text(node, source);
+    if language == "python" {
+        return python_base_relations(&text);
+    }
     if language == "smali" {
         return text
             .lines()
@@ -1487,7 +2000,51 @@ fn audited_relations(language: &str, node: Node<'_>, source: &[u8]) -> Vec<(&'st
             .into_iter()
             .map(|target| ("IMPLEMENTS", target)),
     );
+    if relations.is_empty() && matches!(language, "cpp" | "cuda" | "csharp" | "kotlin" | "rust") {
+        relations.extend(colon_base_relations(language, header));
+    }
     relations
+}
+
+fn python_base_relations(text: &str) -> Vec<(&'static str, String)> {
+    let Some((_, bases)) = text.split_once('(') else {
+        return Vec::new();
+    };
+    let Some((bases, _)) = bases.split_once(')') else {
+        return Vec::new();
+    };
+    bases
+        .split(',')
+        .filter(|base| !base.contains('='))
+        .filter_map(|base| {
+            let base = base.split('[').next().unwrap_or(base);
+            relation_target(base).map(|target| ("INHERITS", target))
+        })
+        .collect()
+}
+
+fn colon_base_relations(language: &str, header: &str) -> Vec<(&'static str, String)> {
+    let Some((_, bases)) = header.split_once(':') else {
+        return Vec::new();
+    };
+    bases
+        .split(',')
+        .enumerate()
+        .filter_map(|(index, base)| {
+            let base = base
+                .trim()
+                .strip_prefix("public ")
+                .or_else(|| base.trim().strip_prefix("protected "))
+                .or_else(|| base.trim().strip_prefix("private "))
+                .unwrap_or(base.trim());
+            let kind = if language == "csharp" && index > 0 {
+                "IMPLEMENTS"
+            } else {
+                "INHERITS"
+            };
+            relation_target(base).map(|target| (kind, target))
+        })
+        .collect()
 }
 
 fn relation_names_after_keyword(text: &str, keyword: &str) -> Vec<String> {
