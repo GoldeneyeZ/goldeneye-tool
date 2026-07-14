@@ -15,4 +15,6 @@ not embedded into Goldeneye binaries.
   `b2d1cc1524bc934c157d9b64afa1d45cf0739c5d9db7e8806ddce7ed48232819`
 
 The loader rejects either asset if its checksum, shape, byte length, token
-count, UTF-8 encoding, or token uniqueness differs from this audited bundle.
+count, UTF-8 encoding, or non-empty token uniqueness differs from this audited
+bundle. Eleven empty vocabulary rows are preserved at their original vector
+indices and excluded from lookup, matching the upstream map construction.

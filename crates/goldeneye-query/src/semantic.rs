@@ -392,7 +392,15 @@ impl PretrainedModel {
 
         let token_text = String::from_utf8(token_bytes)?;
         let mut token_indices = HashMap::with_capacity(count);
+        let mut token_count = 0;
         for (index, token) in token_text.lines().enumerate() {
+            token_count += 1;
+            // The audited vocabulary contains eleven deliberately empty rows;
+            // upstream excludes them from its lookup table while preserving
+            // their vector row positions.
+            if token.is_empty() {
+                continue;
+            }
             if token_indices
                 .insert(Box::<str>::from(token), index)
                 .is_some()
@@ -400,10 +408,10 @@ impl PretrainedModel {
                 return Err(PretrainedModelError::DuplicateToken(token.to_owned()));
             }
         }
-        if token_indices.len() != count {
+        if token_count != count {
             return Err(PretrainedModelError::InvalidTokenCount {
                 expected: count,
-                actual: token_indices.len(),
+                actual: token_count,
             });
         }
         let vectors = vector_bytes[PRETRAINED_HEADER_LEN..]
@@ -428,6 +436,11 @@ impl PretrainedModel {
 
     #[must_use]
     pub fn token_count(&self) -> usize {
+        PRETRAINED_TOKEN_COUNT
+    }
+
+    #[must_use]
+    pub fn lookup_token_count(&self) -> usize {
         self.token_indices.len()
     }
 
@@ -543,6 +556,7 @@ mod tests {
     fn bundled_model_passes_integrity_and_shape_guards() {
         let model = PretrainedModel::load_bundled().expect("audited runtime model");
         assert_eq!(model.token_count(), PRETRAINED_TOKEN_COUNT);
+        assert_eq!(model.lookup_token_count(), PRETRAINED_TOKEN_COUNT - 11);
         let error = model.vector("error").expect("error token");
         assert_eq!(
             &error[..16],

@@ -85,7 +85,7 @@ impl RotatedScalarCode {
     #[must_use]
     pub fn inner_product(&self, other: &Self) -> f32 {
         let mut code_dot = 0_i64;
-        for (&left, &right) in self.codes.iter().zip(other.codes) {
+        for (&left, right) in self.codes.iter().zip(other.codes) {
             code_dot += i64::from(left & 0x0f) * i64::from(right & 0x0f);
             code_dot += i64::from(left >> 4) * i64::from(right >> 4);
         }
