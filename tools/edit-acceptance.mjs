@@ -9,7 +9,6 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -33,6 +32,7 @@ const outsideRoot = join(temporaryRoot, "outside");
 const database = join(temporaryRoot, "state", "goldeneye.db");
 const results = [];
 
+async function main() {
 try {
   assert.ok(existsSync(fixture), `edit fixture does not exist: ${fixture}`);
   if (!argumentsMap.has("--goldeneye-bin")) {
@@ -199,6 +199,7 @@ try {
 } finally {
   rmSync(temporaryRoot, { force: true, recursive: true });
 }
+}
 
 async function inspect(session, project) {
   return session.callSuccess("inspect_syntax", {
@@ -364,3 +365,5 @@ function commandFailure(name, completed) {
   const detail = completed.stderr.trim() || completed.stdout.trim();
   return `${name} exited ${String(completed.status)}${detail ? `: ${detail}` : ""}`;
 }
+
+await main();
