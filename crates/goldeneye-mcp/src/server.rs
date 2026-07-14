@@ -3,11 +3,11 @@ use std::sync::Mutex;
 
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
-    DeleteNodeRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexStatusRequest,
-    IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest, NodeContentRequest,
-    OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest, QueryValue,
-    SearchGraphRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
-    TracePathRequest,
+    DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest,
+    IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest,
+    NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest,
+    QueryValue, SearchGraphRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services,
+    TraceDirection, TracePathRequest,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -140,6 +140,12 @@ impl Server {
             return ToolCallResult::error(format!(
                 "Invalid parameters for {name}: arguments must be an object"
             ));
+        }
+        if name == "detect_changes" {
+            return match self.detect_changes(arguments, id) {
+                Ok((value, is_error)) => ToolCallResult::structured(value, is_error),
+                Err(message) => ToolCallResult::error(message),
+            };
         }
         match self.dispatch(name, arguments, id) {
             Ok(value) => ToolCallResult::success(value),
@@ -321,6 +327,40 @@ impl Server {
             .ingest_traces(&request)
             .map_err(|error| compatibility_error(&self.services, error))?;
         to_value(result)
+    }
+
+    fn detect_changes(&self, arguments: Value, id: &RequestId) -> Result<(Value, bool), String> {
+        let args: DetectChangesArguments = parse_arguments("detect_changes", arguments)?;
+        let Some(project) = args.project else {
+            return Err(missing_project_error());
+        };
+        let mut request = DetectChangesRequest::new(project_id("detect_changes", project)?);
+        request.scope = args.scope;
+        request.depth = args
+            .depth
+            .unwrap_or(goldeneye_services::DEFAULT_CHANGE_DEPTH);
+        request.base_branch = args.base_branch.unwrap_or_else(|| "main".to_owned());
+        request.since = args.since;
+
+        let cancellation = CancellationToken::new();
+        {
+            let mut active = self
+                .active_index
+                .lock()
+                .map_err(|_| "change cancellation state is unavailable".to_owned())?;
+            *active = Some((id.clone(), cancellation.clone()));
+        }
+        let result = self.services.detect_changes(&request, &cancellation);
+        if let Ok(mut active) = self.active_index.lock()
+            && active
+                .as_ref()
+                .is_some_and(|(active_id, _)| active_id == id)
+        {
+            *active = None;
+        }
+        let result = result.map_err(|error| compatibility_error(&self.services, error))?;
+        let is_error = result.is_error;
+        Ok((to_value(result)?, is_error))
     }
 
     fn index_repository(
@@ -683,6 +723,16 @@ struct IngestTracesArguments {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct DetectChangesArguments {
+    project: Option<String>,
+    scope: Option<String>,
+    depth: Option<usize>,
+    base_branch: Option<String>,
+    since: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IndexArguments {
     repo_path: String,
     mode: Option<String>,
@@ -889,7 +939,7 @@ mod tests {
 
         assert_eq!(
             value["result"]["tools"].as_array().expect("tools").len(),
-            18
+            19
         );
         assert_eq!(value["result"]["tools"][0]["name"], "index_repository");
     }

@@ -4,7 +4,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{SchemaInfo, StoreError};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -185,6 +185,38 @@ const MIGRATIONS: &[(u32, &str)] = &[
 
         CREATE INDEX runtime_traces_project_count_idx
             ON runtime_traces(project_id, count DESC, caller, callee);
+        ",
+    ),
+    (
+        5,
+        r"
+        CREATE TABLE git_file_history (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            path TEXT NOT NULL COLLATE BINARY,
+            change_count INTEGER NOT NULL CHECK (change_count > 0),
+            last_modified INTEGER NOT NULL CHECK (last_modified >= 0),
+            PRIMARY KEY (project_id, path),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE git_cochanges (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            file_a TEXT NOT NULL COLLATE BINARY,
+            file_b TEXT NOT NULL COLLATE BINARY,
+            co_changes INTEGER NOT NULL CHECK (co_changes > 0),
+            coupling_score REAL NOT NULL CHECK (coupling_score >= 0 AND coupling_score <= 1),
+            last_co_change INTEGER NOT NULL CHECK (last_co_change >= 0),
+            PRIMARY KEY (project_id, file_a, file_b),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            CHECK (file_a < file_b)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE INDEX git_file_history_recent_idx
+            ON git_file_history(project_id, last_modified DESC, path);
+        CREATE INDEX git_cochanges_file_b_idx
+            ON git_cochanges(project_id, file_b, file_a);
+        CREATE INDEX git_cochanges_score_idx
+            ON git_cochanges(project_id, coupling_score DESC, file_a, file_b);
         ",
     ),
 ];

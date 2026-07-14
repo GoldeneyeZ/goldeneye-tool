@@ -342,6 +342,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-git"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "goldeneye-grammar-pack"
 version = "0.1.0"
 dependencies = [
@@ -403,6 +412,7 @@ dependencies = [
  "goldeneye-discovery",
  "goldeneye-domain",
  "goldeneye-edit",
+ "goldeneye-git",
  "goldeneye-index",
  "goldeneye-query",
  "goldeneye-store",

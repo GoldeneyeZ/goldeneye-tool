@@ -4,6 +4,7 @@
 
 mod adr_traces;
 mod edit;
+mod git;
 
 use std::env;
 use std::fs;
@@ -26,8 +27,13 @@ pub use edit::{
     InspectSyntaxRequest, InspectSyntaxResult, InspectionSize, MutationDiagnostics, MutationDiff,
     MutationSize, NodeContentRequest, SyntaxDiagnosticResult,
 };
+pub use git::{
+    DEFAULT_CHANGE_DEPTH, DetectChangesRequest, DetectChangesResult, GitHistoryResult,
+    ImpactedSymbol, MAX_CHANGE_DEPTH, MAX_IMPACTED_SYMBOLS,
+};
 pub use goldeneye_domain::{Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath};
 pub use goldeneye_edit::{RecoveryAction, RecoveryEntry, RecoveryReport};
+pub use goldeneye_git::GitContext;
 pub use goldeneye_index::CancellationToken;
 pub use goldeneye_query::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
@@ -255,6 +261,8 @@ pub enum ServiceError {
     Index(IndexError),
     #[error(transparent)]
     Query(#[from] QueryError),
+    #[error(transparent)]
+    Git(#[from] goldeneye_git::GitError),
     #[error("{message}")]
     Edit {
         code: ServiceErrorCode,
@@ -278,6 +286,9 @@ impl ServiceError {
             Self::Index(_) => ServiceErrorCode::Index,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
+            Self::Git(goldeneye_git::GitError::Cancelled) => ServiceErrorCode::Cancelled,
+            Self::Git(goldeneye_git::GitError::InvalidReference) => ServiceErrorCode::InvalidInput,
+            Self::Git(_) => ServiceErrorCode::Index,
             Self::Edit { code, .. } => *code,
         }
     }
@@ -358,7 +369,25 @@ impl Services {
         options.cancellation = hooks.cancellation.clone();
         let mut index = IndexService::new(store, CoreGrammarProvider, options);
         hooks.report("indexing");
-        let result = index.index_repository(root).map_err(map_index_error)?;
+        let mut result = index
+            .index_repository(root.clone())
+            .map_err(map_index_error)?;
+        drop(index);
+        match self.refresh_git_history_at(&result.project.id, &root, hooks.cancellation()) {
+            Ok(history) if history.enriched_edges > 0 => {
+                match Store::open(&self.config.database_path)
+                    .and_then(|store| store.counts(&result.project.id))
+                {
+                    Ok(counts) => result.counts = counts,
+                    Err(error) => result.warnings.push(format!("git_history_counts: {error}")),
+                }
+            }
+            Ok(_) => {}
+            Err(ServiceError::Git(goldeneye_git::GitError::Cancelled)) => {
+                return Err(ServiceError::Cancelled);
+            }
+            Err(error) => result.warnings.push(format!("git_history: {error}")),
+        }
         hooks.report("complete");
         Ok(IndexRepositoryResult {
             project: result.project.id.as_str().to_owned(),

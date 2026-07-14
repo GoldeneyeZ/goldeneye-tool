@@ -104,13 +104,18 @@ pub struct ToolCallResult {
 impl ToolCallResult {
     #[must_use]
     pub fn success(value: Value) -> Self {
+        Self::structured(value, false)
+    }
+
+    #[must_use]
+    pub fn structured(value: Value, is_error: bool) -> Self {
         Self {
             content: vec![TextContent {
                 content_type: "text",
                 text: value.to_string(),
             }],
             structured_content: Some(value),
-            is_error: false,
+            is_error,
         }
     }
 
@@ -466,6 +471,25 @@ fn edit_tools(project: &Value) -> Vec<ToolDefinition> {
 
 fn compatibility_tools() -> Vec<ToolDefinition> {
     vec![
+        ToolDefinition::new(
+            "detect_changes",
+            "Detect changes",
+            "Detect code changes and their impact",
+            json!({
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "depth": {"type": "integer", "default": 2},
+                    "base_branch": {"type": "string", "default": "main"},
+                    "since": {
+                        "type": "string",
+                        "description": "Git ref or date to compare from (e.g. HEAD~5, v0.5.0, 2026-01-01)"
+                    }
+                },
+                "required": ["project"]
+            }),
+        ),
         ToolDefinition::new(
             "manage_adr",
             "Manage ADR",
