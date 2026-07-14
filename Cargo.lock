@@ -272,7 +272,12 @@ dependencies = [
 name = "goldeneye"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-edit",
+ "goldeneye-index",
  "goldeneye-mcp",
+ "goldeneye-services",
+ "goldeneye-store",
+ "goldeneye-syntax",
  "serde_json",
  "tempfile",
 ]
@@ -396,11 +401,13 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-discovery",
  "goldeneye-domain",
+ "goldeneye-edit",
  "goldeneye-index",
  "goldeneye-query",
  "goldeneye-store",
  "goldeneye-syntax",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]

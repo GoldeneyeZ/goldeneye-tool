@@ -2,10 +2,11 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use goldeneye_services::{
-    ArchitectureRequest, CancellationToken, CodeSnippetRequest, GraphSchemaRequest,
-    IndexRepositoryRequest, IndexRepositoryResult, IndexStatusRequest, OperationHooks, PageRequest,
-    ProjectId, QueryGraphRequest, SearchGraphRequest, ServiceConfig, ServiceErrorCode, Services,
-    TraceDirection, TracePathRequest,
+    ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
+    GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult, IndexStatusRequest,
+    InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId,
+    ProjectRelativePath, QueryGraphRequest, SearchGraphRequest, ServiceConfig, ServiceErrorCode,
+    Services, TraceDirection, TracePathRequest,
 };
 use tempfile::TempDir;
 
@@ -172,4 +173,78 @@ fn allowed_root_unknown_project_and_cancellation_are_typed() {
         )
         .expect_err("cancelled request");
     assert_eq!(cancelled.code(), ServiceErrorCode::Cancelled);
+}
+
+#[test]
+fn structural_edits_refresh_source_graph_and_reject_stale_or_existing_targets() {
+    let temp = TempDir::new().expect("temp directory");
+    let allowed = temp.path().join("allowed");
+    let repo = allowed.join("fixture");
+    write_fixture(&repo);
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+    );
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("index fixture");
+    let project = ProjectId::new(indexed.project).expect("project ID");
+    let path = ProjectRelativePath::new("src/lib.rs").expect("relative path");
+    let mut inspect_request = InspectSyntaxRequest::new(project.clone(), path.clone());
+    inspect_request.inspect.preview_chars = 96;
+    let inspection = services
+        .inspect_syntax(&inspect_request)
+        .expect("inspect source");
+    let helper_index = inspection
+        .syntax
+        .nodes
+        .iter()
+        .position(|node| {
+            node.kind == "function_item"
+                && node
+                    .preview
+                    .as_deref()
+                    .is_some_and(|preview| preview.contains("fn helper"))
+        })
+        .expect("helper syntax node");
+    let helper = inspection.locators[helper_index].clone();
+
+    let replacement = NodeContentRequest::new(
+        "replace-helper",
+        helper.clone(),
+        "pub fn helper() -> usize { 2 }",
+    );
+    let mutation = services.replace_node(&replacement).expect("replace helper");
+    assert_ne!(mutation.old_file_hash, Some(mutation.new_file_hash));
+    assert!(!mutation.changed_syntax_ids.is_empty());
+    assert!(!mutation.changed_graph_ids.is_empty());
+    assert_eq!(
+        fs::read_to_string(repo.join("src/lib.rs")).expect("read replacement"),
+        "pub fn helper() -> usize { 2 }\npub fn entry() -> usize { helper() }\n"
+    );
+
+    let stale = services
+        .replace_node(&replacement)
+        .expect_err("stale locator must fail");
+    assert_eq!(stale.code(), ServiceErrorCode::Conflict);
+    assert!(stale.to_string().contains("fresh_syntax="), "{stale}");
+
+    let create = CreateFileRequest::new(
+        "create-extra",
+        project,
+        ProjectRelativePath::new("src/nested/extra.rs").expect("create path"),
+        "pub fn extra() -> usize { 3 }",
+        mutation.generation,
+    )
+    .with_parent_creation(true);
+    let created = services.create_file(&create).expect("create file");
+    assert!(repo.join("src/nested/extra.rs").is_file());
+    assert!(!created.changed_graph_ids.is_empty());
+    let existing = services
+        .create_file(&CreateFileRequest {
+            operation_id: "create-extra-again".to_owned(),
+            expected_generation: created.generation,
+            ..create
+        })
+        .expect_err("existing destination must fail");
+    assert_eq!(existing.code(), ServiceErrorCode::Conflict);
 }

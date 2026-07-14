@@ -25,6 +25,12 @@ impl ToolDefinition {
         }
     }
 
+    #[must_use]
+    pub fn with_output_schema(mut self, output_schema: Value) -> Self {
+        self.output_schema = output_schema;
+        self
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn test(name: &str) -> Self {
@@ -154,6 +160,7 @@ fn implemented_tools() -> Vec<ToolDefinition> {
     let mut tools = index_and_metadata_tools(&project_only);
     tools.extend(search_and_query_tools(&project));
     tools.extend(trace_and_source_tools(&project, &trace_schema));
+    tools.extend(edit_tools(&project));
     tools
 }
 
@@ -273,6 +280,258 @@ fn trace_and_source_tools(project: &Value, trace_schema: &Value) -> Vec<ToolDefi
             ),
         ),
     ]
+}
+
+fn edit_tools(project: &Value) -> Vec<ToolDefinition> {
+    let path = json!({
+        "type": "string",
+        "minLength": 1,
+        "description": "Validated project-relative path"
+    });
+    let operation_id = json!({
+        "type": "string",
+        "minLength": 1,
+        "description": "Unique durable journal operation ID"
+    });
+    let parse_policy = json!({
+        "type": "string",
+        "enum": ["require_clean", "no_additional_diagnostics", "allow_errors"]
+    });
+    let locator = locator_schema();
+    let inspection_output = object_schema(
+        &json!({
+            "project": project.clone(),
+            "path": path.clone(),
+            "language_id": {"type": "string"},
+            "file_hash": content_hash_schema(),
+            "generation": {"type": "integer", "minimum": 0},
+            "syntax": {"type": "object"},
+            "locators": {"type": "array", "items": locator.clone()},
+            "diagnostic_total": {"type": "integer", "minimum": 0},
+            "diagnostics_truncated": {"type": "boolean"},
+            "diagnostics": {"type": "array", "items": {"type": "object"}},
+            "size": {"type": "object"}
+        }),
+        &[
+            "project",
+            "path",
+            "language_id",
+            "file_hash",
+            "generation",
+            "syntax",
+            "locators",
+            "diagnostic_total",
+            "diagnostics_truncated",
+            "diagnostics",
+            "size",
+        ],
+    );
+    let mutation_output = object_schema(
+        &json!({
+            "operation_id": {"type": "string"},
+            "project": project.clone(),
+            "path": path.clone(),
+            "old_file_hash": {"anyOf": [content_hash_schema(), {"type": "null"}]},
+            "new_file_hash": content_hash_schema(),
+            "diff": {"type": "object"},
+            "changed_syntax_ids": {"type": "array", "items": locator.clone()},
+            "changed_graph_ids": {"type": "array", "items": {"type": "string"}},
+            "graph": {"type": "object"},
+            "generation": {"type": "integer", "minimum": 0},
+            "diagnostics": {"type": "object"},
+            "size": {"type": "object"}
+        }),
+        &[
+            "operation_id",
+            "project",
+            "path",
+            "old_file_hash",
+            "new_file_hash",
+            "diff",
+            "changed_syntax_ids",
+            "changed_graph_ids",
+            "graph",
+            "generation",
+            "diagnostics",
+            "size",
+        ],
+    );
+    let inspection_request = object_schema(
+        &json!({
+            "project": project.clone(),
+            "path": path.clone(),
+            "inspect": object_schema(
+                &json!({
+                    "max_depth": {"type": "integer", "minimum": 0, "maximum": 32, "default": 4},
+                    "max_nodes": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
+                    "preview_chars": {"type": "integer", "minimum": 0, "maximum": 256, "default": 0},
+                    "byte_range": object_schema(
+                        &json!({
+                            "start": {"type": "integer", "minimum": 0},
+                            "end": {"type": "integer", "minimum": 0}
+                        }),
+                        &["start", "end"],
+                    ),
+                    "node_kinds": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "items": {"type": "string", "minLength": 1}
+                    }
+                }),
+                &[],
+            )
+        }),
+        &["project", "path"],
+    );
+    let content_request = object_schema(
+        &json!({
+            "operation_id": operation_id.clone(),
+            "locator": locator.clone(),
+            "content": {"type": "string"},
+            "parse_policy": parse_policy.clone()
+        }),
+        &["operation_id", "locator", "content"],
+    );
+    vec![
+        ToolDefinition::new(
+            "inspect_syntax",
+            "Inspect syntax",
+            "Return compact named-node syntax and guarded full locators for one indexed file.",
+            inspection_request,
+        )
+        .with_output_schema(inspection_output),
+        ToolDefinition::new(
+            "create_file",
+            "Create file",
+            "Create one authorized project-relative file without overwriting an existing target.",
+            object_schema(
+                &json!({
+                    "operation_id": operation_id,
+                    "project": project.clone(),
+                    "path": path,
+                    "content": {"type": "string"},
+                    "expected_generation": {"type": "integer", "minimum": 0},
+                    "language_id": {"type": "string", "minLength": 1},
+                    "parse_policy": parse_policy.clone(),
+                    "create_parents": {"type": "boolean", "default": false}
+                }),
+                &[
+                    "operation_id",
+                    "project",
+                    "path",
+                    "content",
+                    "expected_generation",
+                ],
+            ),
+        )
+        .with_output_schema(mutation_output.clone()),
+        ToolDefinition::new(
+            "replace_node",
+            "Replace node",
+            "Replace exactly one locator-identified named node; stale locators never write.",
+            content_request.clone(),
+        )
+        .with_output_schema(mutation_output.clone()),
+        ToolDefinition::new(
+            "delete_node",
+            "Delete node",
+            "Delete exactly one locator-identified named node; stale locators never write.",
+            object_schema(
+                &json!({
+                    "operation_id": {"type": "string", "minLength": 1},
+                    "locator": locator,
+                    "parse_policy": parse_policy
+                }),
+                &["operation_id", "locator"],
+            ),
+        )
+        .with_output_schema(mutation_output.clone()),
+        ToolDefinition::new(
+            "insert_before_node",
+            "Insert before node",
+            "Insert content immediately before one locator-identified named node.",
+            content_request.clone(),
+        )
+        .with_output_schema(mutation_output.clone()),
+        ToolDefinition::new(
+            "insert_after_node",
+            "Insert after node",
+            "Insert content immediately after one locator-identified named node.",
+            content_request,
+        )
+        .with_output_schema(mutation_output),
+    ]
+}
+
+fn content_hash_schema() -> Value {
+    json!({"type": "string", "pattern": "^[0-9a-f]{64}$"})
+}
+
+fn locator_schema() -> Value {
+    let byte_span = object_schema(
+        &json!({
+            "start": {"type": "integer", "minimum": 0},
+            "end": {"type": "integer", "minimum": 0}
+        }),
+        &["start", "end"],
+    );
+    let point = object_schema(
+        &json!({
+            "row": {"type": "integer", "minimum": 0},
+            "column_bytes": {"type": "integer", "minimum": 0}
+        }),
+        &["row", "column_bytes"],
+    );
+    let source_span = object_schema(
+        &json!({"bytes": byte_span, "start": point.clone(), "end": point}),
+        &["bytes", "start", "end"],
+    );
+    let ancestor = object_schema(
+        &json!({
+            "node_kind": {"type": "string", "minLength": 1},
+            "named_child_index": {"type": "integer", "minimum": 0},
+            "field_name": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+        }),
+        &["node_kind", "named_child_index", "field_name"],
+    );
+    object_schema(
+        &json!({
+            "scope": object_schema(
+                &json!({
+                    "file": object_schema(
+                        &json!({
+                            "project_id": {"type": "string", "minLength": 1},
+                            "relative_path": {"type": "string", "minLength": 1}
+                        }),
+                        &["project_id", "relative_path"],
+                    ),
+                    "language_id": {"type": "string", "minLength": 1},
+                    "grammar": object_schema(
+                        &json!({
+                            "provider": {"type": "string", "minLength": 1},
+                            "grammar": {"type": "string", "minLength": 1},
+                            "revision": {"type": "string", "minLength": 1},
+                            "abi": {"type": "integer", "minimum": 0}
+                        }),
+                        &["provider", "grammar", "revision", "abi"],
+                    ),
+                    "file_hash": content_hash_schema(),
+                    "generation": {"type": "integer", "minimum": 0}
+                }),
+                &["file", "language_id", "grammar", "file_hash", "generation"],
+            ),
+            "anchor": object_schema(
+                &json!({
+                    "ancestor_path": {"type": "array", "items": ancestor},
+                    "node_kind": {"type": "string", "minLength": 1},
+                    "source_span": source_span,
+                    "content_hash": content_hash_schema()
+                }),
+                &["ancestor_path", "node_kind", "source_span", "content_hash"],
+            )
+        }),
+        &["scope", "anchor"],
+    )
 }
 
 #[cfg(test)]

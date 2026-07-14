@@ -156,6 +156,12 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
             "trace_call_path",
             "get_code_snippet",
             "get_architecture",
+            "inspect_syntax",
+            "create_file",
+            "replace_node",
+            "delete_node",
+            "insert_before_node",
+            "insert_after_node",
         ]
     );
     assert!(
@@ -171,7 +177,7 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
     assert_eq!(first["result"]["tools"].as_array().expect("page").len(), 8);
     assert_eq!(first["result"]["nextCursor"], "8");
     let second = request(&server, 3, "tools/list", json!({"cursor": "8"}));
-    assert_eq!(second["result"]["tools"].as_array().expect("page").len(), 2);
+    assert_eq!(second["result"]["tools"].as_array().expect("page").len(), 8);
     assert!(second["result"].get("nextCursor").is_none());
 }
 

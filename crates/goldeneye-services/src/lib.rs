@@ -2,10 +2,12 @@
 
 //! Tool-neutral orchestration over Goldeneye indexing, storage, and query crates.
 
+mod edit;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use goldeneye_discovery::IndexMode;
 use goldeneye_index::{IndexError, IndexOptions, IndexService, IndexStatus};
@@ -14,7 +16,13 @@ use goldeneye_syntax::CoreGrammarProvider;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use goldeneye_domain::ProjectId;
+pub use edit::{
+    CreateFileRequest, DeleteNodeRequest, EditMutationResult, EditParsePolicy, GraphMutation,
+    InspectSyntaxRequest, InspectSyntaxResult, InspectionSize, MutationDiagnostics, MutationDiff,
+    MutationSize, NodeContentRequest, SyntaxDiagnosticResult,
+};
+pub use goldeneye_domain::{Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath};
+pub use goldeneye_edit::{RecoveryAction, RecoveryEntry, RecoveryReport};
 pub use goldeneye_index::CancellationToken;
 pub use goldeneye_query::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
@@ -208,6 +216,7 @@ pub enum ServiceErrorCode {
     Storage,
     Index,
     Query,
+    Conflict,
 }
 
 #[derive(Debug, Error)]
@@ -241,6 +250,11 @@ pub enum ServiceError {
     Index(IndexError),
     #[error(transparent)]
     Query(#[from] QueryError),
+    #[error("{message}")]
+    Edit {
+        code: ServiceErrorCode,
+        message: String,
+    },
 }
 
 impl ServiceError {
@@ -259,19 +273,33 @@ impl ServiceError {
             Self::Index(_) => ServiceErrorCode::Index,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
+            Self::Edit { code, .. } => *code,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Services {
     config: ServiceConfig,
+    edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService<CoreGrammarProvider>>>>,
+}
+
+impl std::fmt::Debug for Services {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Services")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Services {
     #[must_use]
-    pub const fn new(config: ServiceConfig) -> Self {
-        Self { config }
+    pub fn new(config: ServiceConfig) -> Self {
+        Self {
+            config,
+            edit: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Builds lazy services from process environment.
@@ -280,7 +308,9 @@ impl Services {
     ///
     /// Returns a typed configuration error when environment resolution fails.
     pub fn from_env() -> Result<Self, ServiceError> {
-        Ok(Self::new(ServiceConfig::from_env()?))
+        let (services, recovery) = Self::open(ServiceConfig::from_env()?)?;
+        Self::ensure_recovery_resolved(&recovery)?;
+        Ok(services)
     }
 
     #[must_use]

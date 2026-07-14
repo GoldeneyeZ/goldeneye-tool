@@ -2,10 +2,11 @@ use std::fs;
 use std::sync::Mutex;
 
 use goldeneye_services::{
-    ArchitectureRequest, CancellationToken, CodeSnippetRequest, GraphSchemaRequest,
-    IndexRepositoryRequest, IndexStatusRequest, OperationHooks, PageRequest, ProjectId, QueryError,
-    QueryGraphRequest, QueryValue, SearchGraphRequest, ServiceConfig, ServiceError, Services,
-    TraceDirection, TracePathRequest,
+    ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
+    DeleteNodeRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexStatusRequest,
+    InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
+    QueryGraphRequest, QueryValue, SearchGraphRequest, ServiceConfig, ServiceError,
+    ServiceErrorCode, Services, TraceDirection, TracePathRequest,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -227,6 +228,54 @@ impl Server {
             "get_architecture" => {
                 let args: ArchitectureArguments = parse_arguments(name, arguments)?;
                 self.get_architecture(args)
+            }
+            "inspect_syntax" => {
+                let request: InspectSyntaxRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .inspect_syntax(&request)
+                        .map_err(service_error_message)?,
+                )
+            }
+            "create_file" => {
+                let request: CreateFileRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .create_file(&request)
+                        .map_err(service_error_message)?,
+                )
+            }
+            "replace_node" => {
+                let request: NodeContentRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .replace_node(&request)
+                        .map_err(service_error_message)?,
+                )
+            }
+            "delete_node" => {
+                let request: DeleteNodeRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .delete_node(&request)
+                        .map_err(service_error_message)?,
+                )
+            }
+            "insert_before_node" => {
+                let request: NodeContentRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .insert_before_node(&request)
+                        .map_err(service_error_message)?,
+                )
+            }
+            "insert_after_node" => {
+                let request: NodeContentRequest = parse_arguments(name, arguments)?;
+                to_value(
+                    self.services
+                        .insert_after_node(&request)
+                        .map_err(service_error_message)?,
+                )
             }
             _ => Err(format!("Unknown tool: {name}")),
         }
@@ -478,7 +527,24 @@ fn service_error_message(error: ServiceError) -> String {
         }
         ServiceError::OutsideAllowedRoot => "repo_path is outside the allowed root".to_owned(),
         ServiceError::Cancelled => "Request cancelled".to_owned(),
+        ServiceError::Edit { code, message } => {
+            format!("{}: {message}", service_error_code(code))
+        }
         other => other.to_string(),
+    }
+}
+
+const fn service_error_code(code: ServiceErrorCode) -> &'static str {
+    match code {
+        ServiceErrorCode::Configuration => "configuration",
+        ServiceErrorCode::InvalidInput => "invalid_input",
+        ServiceErrorCode::Forbidden => "forbidden",
+        ServiceErrorCode::NotFound => "not_found",
+        ServiceErrorCode::Cancelled => "cancelled",
+        ServiceErrorCode::Storage => "storage",
+        ServiceErrorCode::Index => "index",
+        ServiceErrorCode::Query => "query",
+        ServiceErrorCode::Conflict => "conflict",
     }
 }
 

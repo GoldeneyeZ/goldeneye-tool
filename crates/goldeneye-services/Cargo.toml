@@ -8,11 +8,13 @@ license.workspace = true
 [dependencies]
 goldeneye-discovery = { path = "../goldeneye-discovery" }
 goldeneye-domain = { path = "../goldeneye-domain" }
+goldeneye-edit = { path = "../goldeneye-edit" }
 goldeneye-index = { path = "../goldeneye-index" }
 goldeneye-query = { path = "../goldeneye-query" }
 goldeneye-store = { path = "../goldeneye-store" }
 goldeneye-syntax = { path = "../goldeneye-syntax" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

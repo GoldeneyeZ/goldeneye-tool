@@ -1,0 +1,18 @@
+[
+  "index_repository",
+  "list_projects",
+  "index_status",
+  "get_graph_schema",
+  "search_graph",
+  "query_graph",
+  "trace_path",
+  "trace_call_path",
+  "get_code_snippet",
+  "get_architecture",
+  "inspect_syntax",
+  "create_file",
+  "replace_node",
+  "delete_node",
+  "insert_before_node",
+  "insert_after_node"
+]

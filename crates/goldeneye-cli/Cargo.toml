@@ -10,6 +10,11 @@ goldeneye-mcp = { path = "../goldeneye-mcp" }
 serde_json.workspace = true
 
 [dev-dependencies]
+goldeneye-edit = { path = "../goldeneye-edit" }
+goldeneye-index = { path = "../goldeneye-index" }
+goldeneye-services = { path = "../goldeneye-services" }
+goldeneye-store = { path = "../goldeneye-store" }
+goldeneye-syntax = { path = "../goldeneye-syntax" }
 tempfile.workspace = true
 
 [lints]

@@ -97,6 +97,7 @@ pub struct MutationResult {
     pub new_file_hash: ContentHash,
     pub diff: SourceDiff,
     pub syntax_identities: Vec<NodeLocator>,
+    pub changed_graph_identities: Vec<String>,
     pub graph_changes: GraphChanges,
     pub generation: Generation,
     pub diagnostics: EditDiagnostics,
@@ -308,6 +309,7 @@ where
         }
         let refresh = outcome?;
         let after_nodes = self.node_ids(&project_id, &relative_path)?;
+        let changed_graph_identities = changed_graph_identities(&before_nodes, &after_nodes);
         Ok(MutationResult {
             operation_id: request.operation_id,
             project_id,
@@ -316,6 +318,7 @@ where
             new_file_hash: plan.new_file_hash,
             diff: plan.diff,
             syntax_identities: plan.refreshed_locators,
+            changed_graph_identities,
             graph_changes: graph_changes(&before_nodes, &after_nodes),
             generation: refresh.generation,
             diagnostics: plan.diagnostics,
@@ -381,6 +384,7 @@ where
         }
         let refresh = outcome?;
         let after_nodes = self.node_ids(&request.project_id, &request.relative_path)?;
+        let changed_graph_identities = changed_graph_identities(&BTreeSet::new(), &after_nodes);
         let file_context =
             FileContext::new(request.project_id.clone(), request.relative_path.clone());
         let mut syntax_identities = all_named_locators(&validated.snapshot, &file_context)?;
@@ -402,6 +406,7 @@ where
             new_file_hash: validated.content_hash,
             diff,
             syntax_identities,
+            changed_graph_identities,
             graph_changes: graph_changes(&BTreeSet::new(), &after_nodes),
             generation: refresh.generation,
             diagnostics: validated.diagnostics,
@@ -489,6 +494,12 @@ fn graph_changes(before: &BTreeSet<String>, after: &BTreeSet<String>) -> GraphCh
         removed: before.difference(after).count(),
         retained: before.intersection(after).count(),
     }
+}
+
+fn changed_graph_identities(before: &BTreeSet<String>, after: &BTreeSet<String>) -> Vec<String> {
+    let mut identities = before.union(after).cloned().collect::<Vec<_>>();
+    identities.truncate(64);
+    identities
 }
 
 fn ensure_generation(expected: Generation, actual: Generation) -> Result<(), DurableEditError> {
