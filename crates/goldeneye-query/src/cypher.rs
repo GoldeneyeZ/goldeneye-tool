@@ -35,6 +35,7 @@ pub(crate) fn execute(
     request: &QueryGraphRequest,
     nodes: &[GraphNode],
     edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<QueryGraphResult, QueryError> {
     if request.max_rows == 0 || request.max_rows > MAX_QUERY_ROWS {
         return Err(QueryError::InvalidQueryRowLimit {
@@ -60,14 +61,16 @@ pub(crate) fn execute(
             request.query.len(),
         )
         .parse()?;
-        return execute_parsed(request, query, nodes, edges, request.max_rows);
+        return execute_parsed(request, query, nodes, edges, degrees, request.max_rows);
     }
     let mut results = branches
         .into_iter()
         .map(|tokens| {
             Parser::new(tokens, request.query.len())
                 .parse()
-                .and_then(|query| execute_parsed(request, query, nodes, edges, MAX_QUERY_ROWS))
+                .and_then(|query| {
+                    execute_parsed(request, query, nodes, edges, degrees, MAX_QUERY_ROWS)
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let first = results
@@ -108,13 +111,17 @@ fn execute_parsed(
     mut query: ParsedQuery,
     nodes: &[GraphNode],
     edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
     row_cap: usize,
 ) -> Result<QueryGraphResult, QueryError> {
-    let degrees = graph_degrees(edges);
-    let initial = execute_unwind(query.unwind.as_ref(), &degrees)?;
-    let mut bindings = execute_match_clauses(&query.matches, initial, nodes, edges, &degrees)?;
+    if let Some(result) = execute_simple_node_limit(request, &query, nodes, edges, degrees, row_cap)
+    {
+        return result;
+    }
+    let initial = execute_unwind(query.unwind.as_ref(), degrees)?;
+    let mut bindings = execute_match_clauses(&query.matches, initial, nodes, edges, degrees)?;
     if let Some(with_clause) = &query.with_clause {
-        bindings = execute_with_clause(with_clause, bindings, &degrees)?;
+        bindings = execute_with_clause(with_clause, bindings, degrees)?;
     }
 
     if query.star {
@@ -142,14 +149,14 @@ fn execute_parsed(
                 .projections
                 .iter()
                 .map(|projection| {
-                    evaluate_projection_expression(&projection.expression, &binding, &degrees)
+                    evaluate_projection_expression(&projection.expression, &binding, degrees)
                 })
                 .collect::<Result<Vec<_>, _>>()
         });
         let bounded = collect_bounded_rows(projected, query.skip, materialized_limit)?;
         (bounded.rows, bounded.total, bounded.truncated)
     } else {
-        let mut rows = materialize_rows(&query, bindings, &degrees)?;
+        let mut rows = materialize_rows(&query, bindings, degrees)?;
         if query.distinct {
             let mut seen = BTreeSet::new();
             rows.retain(|row| seen.insert(row_key(row)));
@@ -171,6 +178,175 @@ fn execute_parsed(
         truncated,
         warning,
     })
+}
+
+fn execute_simple_node_limit(
+    request: &QueryGraphRequest,
+    query: &ParsedQuery,
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    row_cap: usize,
+) -> Option<Result<QueryGraphResult, QueryError>> {
+    let query_limit = query.limit?;
+    let [clause] = query.matches.as_slice() else {
+        return None;
+    };
+    let [MatchPattern::Node(pattern)] = clause.patterns.as_slice() else {
+        return None;
+    };
+    if query.unwind.is_some()
+        || query.with_clause.is_some()
+        || clause.optional
+        || query.distinct
+        || query.star
+        || !query.order.is_empty()
+        || query.projections.iter().any(|projection| {
+            matches!(
+                projection.expression,
+                ProjectionExpression::Aggregate { .. }
+            )
+        })
+    {
+        return None;
+    }
+
+    // Buffer only references so binding-cap errors retain priority over expression errors.
+    let mut candidates = Vec::with_capacity(nodes.len().min(MAX_INTERMEDIATE_BINDINGS));
+    for node in nodes {
+        if node_matches(node, pattern, degrees) {
+            if candidates.len() == MAX_INTERMEDIATE_BINDINGS {
+                return Some(Err(unsupported(
+                    "query exceeds intermediate binding safety cap",
+                )));
+            }
+            candidates.push(node);
+        }
+    }
+
+    if clause.filter.is_none()
+        && let [
+            Projection {
+                expression: ProjectionExpression::Reference(Reference::Property { alias, path }),
+                ..
+            },
+        ] = query.projections.as_slice()
+        && alias == &pattern.alias
+        && path.as_slice() == ["qualified_name"]
+    {
+        candidates.sort_by_cached_key(|node| {
+            serde_json::to_string(node.qualified_name.as_str())
+                .unwrap_or_else(|_| node.qualified_name.as_str().to_owned())
+        });
+        let skipped = query.skip.min(candidates.len());
+        let total = candidates.len() - skipped;
+        let limit = row_cap.min(query_limit);
+        let rows = candidates
+            .into_iter()
+            .skip(skipped)
+            .take(limit)
+            .map(|node| vec![QueryValue::String(node.qualified_name.as_str().to_owned())])
+            .collect();
+        return Some(Ok(QueryGraphResult {
+            project: request.project.as_str().to_owned(),
+            columns: query
+                .projections
+                .iter()
+                .map(|projection| projection.column.clone())
+                .collect(),
+            rows,
+            total,
+            truncated: total > limit,
+            warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
+        }));
+    }
+
+    if clause.filter.is_none()
+        && let [
+            Projection {
+                expression: ProjectionExpression::Reference(Reference::Alias(alias)),
+                ..
+            },
+        ] = query.projections.as_slice()
+        && alias == &pattern.alias
+    {
+        // QueryValue::Node row keys start with the unique node ID. Sorting its exact JSON
+        // encoding therefore preserves collect_bounded_rows ordering without constructing a
+        // full NodeSummary for every candidate.
+        candidates.sort_by_cached_key(|node| {
+            serde_json::to_string(node.id.as_str()).unwrap_or_else(|_| node.id.as_str().to_owned())
+        });
+        let skipped = query.skip.min(candidates.len());
+        let total = candidates.len() - skipped;
+        let limit = row_cap.min(query_limit);
+        let rows = candidates
+            .into_iter()
+            .skip(skipped)
+            .take(limit)
+            .map(|node| {
+                vec![QueryValue::Node(node_summary(
+                    node,
+                    None,
+                    degrees,
+                    Vec::new(),
+                ))]
+            })
+            .collect();
+        return Some(Ok(QueryGraphResult {
+            project: request.project.as_str().to_owned(),
+            columns: query
+                .projections
+                .iter()
+                .map(|projection| projection.column.clone())
+                .collect(),
+            rows,
+            total,
+            truncated: total > limit,
+            warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
+        }));
+    }
+
+    let projected = candidates.into_iter().filter_map(|node| {
+        let binding = Binding {
+            nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
+            edges: BTreeMap::new(),
+            values: BTreeMap::new(),
+            all_nodes: Some(nodes),
+            all_edges: Some(edges),
+        };
+        if let Some(filter) = &clause.filter {
+            match evaluate_expression(filter, &binding, degrees) {
+                Ok(true) => {}
+                Ok(false) => return None,
+                Err(error) => return Some(Err(error)),
+            }
+        }
+        Some(
+            query
+                .projections
+                .iter()
+                .map(|projection| {
+                    evaluate_projection_expression(&projection.expression, &binding, degrees)
+                })
+                .collect::<Result<Vec<_>, _>>(),
+        )
+    });
+    let bounded = match collect_bounded_rows(projected, query.skip, row_cap.min(query_limit)) {
+        Ok(bounded) => bounded,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(Ok(QueryGraphResult {
+        project: request.project.as_str().to_owned(),
+        columns: query
+            .projections
+            .iter()
+            .map(|projection| projection.column.clone())
+            .collect(),
+        rows: bounded.rows,
+        total: bounded.total,
+        truncated: bounded.truncated,
+        warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1881,15 +2057,6 @@ fn node_matches(
                 expected,
             )
         })
-}
-
-fn graph_degrees(edges: &[GraphEdge]) -> BTreeMap<NodeId, (usize, usize)> {
-    let mut degrees = BTreeMap::new();
-    for edge in edges {
-        degrees.entry(edge.source.clone()).or_insert((0, 0)).1 += 1;
-        degrees.entry(edge.target.clone()).or_insert((0, 0)).0 += 1;
-    }
-    degrees
 }
 
 fn evaluate_expression(

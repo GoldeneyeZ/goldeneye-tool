@@ -16,7 +16,8 @@ use goldeneye_domain::{
     ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan, SyntaxIdentityError,
 };
 use rusqlite::{
-    Connection, OpenFlags, OptionalExtension, Row, Transaction, TransactionBehavior, params,
+    Connection, OpenFlags, OptionalExtension, Row, Statement, Transaction, TransactionBehavior,
+    params,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -39,6 +40,20 @@ const EDGE_COLUMNS: &str = "project_id, source_id, target_id, kind, discriminato
 const EDIT_JOURNAL_COLUMNS: &str = "operation_id, record_version, operation_kind, project_id, path, \
     original_hash, new_hash, temp_path, backup_path, created_parent_paths_json, phase, created_at, \
     updated_at, last_error";
+const UPSERT_FILE_SQL: &str = "INSERT INTO files(\
+    project_id, path, content_hash, generation, modified_ns, byte_len\
+  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+  ON CONFLICT(project_id, path) DO UPDATE SET \
+    content_hash = excluded.content_hash, generation = excluded.generation, \
+    modified_ns = excluded.modified_ns, byte_len = excluded.byte_len";
+const INSERT_NODE_SQL: &str = "INSERT INTO nodes(\
+    project_id, node_id, label, name, qualified_name, file_path, \
+    start_byte, end_byte, start_row, start_column, end_row, end_column, \
+    generation, properties_json\
+  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)";
+const INSERT_EDGE_SQL: &str = "INSERT INTO edges(\
+    project_id, source_id, target_id, kind, discriminator, generation, properties_json\
+  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -669,16 +684,23 @@ impl Store {
             "DELETE FROM files WHERE project_id = ?1",
             params![project.id.as_str()],
         )?;
-        for file in &files {
-            upsert_file_in(&transaction, file)?;
+        {
+            let mut statement = transaction.prepare(UPSERT_FILE_SQL)?;
+            for file in &files {
+                upsert_file_with(&mut statement, file)?;
+            }
         }
-        for node in &nodes {
-            insert_node(&transaction, node)?;
+        {
+            let mut statement = transaction.prepare(INSERT_NODE_SQL)?;
+            for node in &nodes {
+                insert_node_with(&mut statement, node)?;
+            }
         }
-        for edge in &edges {
-            ensure_node_exists(&transaction, &edge.project, &edge.source)?;
-            ensure_node_exists(&transaction, &edge.project, &edge.target)?;
-            insert_edge(&transaction, edge)?;
+        {
+            let mut statement = transaction.prepare(INSERT_EDGE_SQL)?;
+            for edge in &edges {
+                insert_edge_with(&mut statement, edge)?;
+            }
         }
 
         let outcome = ProjectReplacementOutcome {
@@ -1237,40 +1259,46 @@ impl Store {
             params![project.as_str()],
         )?;
 
-        for record in node_vectors {
-            transaction.execute(
+        {
+            let mut statement = transaction.prepare(
                 "INSERT INTO node_vectors(project_id, node_id, vector) VALUES (?1, ?2, ?3)",
-                params![
+            )?;
+            for record in node_vectors {
+                statement.execute(params![
                     project.as_str(),
                     record.node_id.as_str(),
                     record.vector.to_blob(),
-                ],
-            )?;
+                ])?;
+            }
         }
-        for record in token_vectors {
-            transaction.execute(
+        {
+            let mut statement = transaction.prepare(
                 "INSERT INTO token_vectors(project_id, token, vector, idf_milli) \
                  VALUES (?1, ?2, ?3, ?4)",
-                params![
+            )?;
+            for record in token_vectors {
+                statement.execute(params![
                     project.as_str(),
                     record.token,
                     record.vector.to_blob(),
                     i64::from(record.idf_milli),
-                ],
-            )?;
+                ])?;
+            }
         }
-        for record in node_signatures {
-            transaction.execute(
+        {
+            let mut statement = transaction.prepare(
                 "INSERT INTO node_signatures(\
                    project_id, node_id, minhash_hex, ast_profile\
                  ) VALUES (?1, ?2, ?3, ?4)",
-                params![
+            )?;
+            for record in node_signatures {
+                statement.execute(params![
                     project.as_str(),
                     record.node_id.as_str(),
                     record.minhash_hex,
                     record.ast_profile,
-                ],
-            )?;
+                ])?;
+            }
         }
         transaction.commit()?;
         Ok(SemanticIndexOutcome {
@@ -2031,21 +2059,19 @@ fn ensure_generation(
 }
 
 fn upsert_file_in(transaction: &Transaction<'_>, file: &FileRecord) -> Result<(), StoreError> {
-    transaction.execute(
-        "INSERT INTO files(project_id, path, content_hash, generation, modified_ns, byte_len) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-         ON CONFLICT(project_id, path) DO UPDATE SET \
-           content_hash = excluded.content_hash, generation = excluded.generation, \
-           modified_ns = excluded.modified_ns, byte_len = excluded.byte_len",
-        params![
-            file.id.project.as_str(),
-            file.id.path.as_str(),
-            file.content_hash.to_string(),
-            sqlite_integer("file generation", file.generation.value())?,
-            sqlite_integer("file modified_ns", file.modified_ns)?,
-            sqlite_integer("file byte_len", file.byte_len)?,
-        ],
-    )?;
+    let mut statement = transaction.prepare(UPSERT_FILE_SQL)?;
+    upsert_file_with(&mut statement, file)
+}
+
+fn upsert_file_with(statement: &mut Statement<'_>, file: &FileRecord) -> Result<(), StoreError> {
+    statement.execute(params![
+        file.id.project.as_str(),
+        file.id.path.as_str(),
+        file.content_hash.to_string(),
+        sqlite_integer("file generation", file.generation.value())?,
+        sqlite_integer("file modified_ns", file.modified_ns)?,
+        sqlite_integer("file byte_len", file.byte_len)?,
+    ])?;
     Ok(())
 }
 
@@ -2188,6 +2214,11 @@ fn validate_project_replacement(
 }
 
 fn insert_node(transaction: &Transaction<'_>, node: &GraphNode) -> Result<(), StoreError> {
+    let mut statement = transaction.prepare(INSERT_NODE_SQL)?;
+    insert_node_with(&mut statement, node)
+}
+
+fn insert_node_with(statement: &mut Statement<'_>, node: &GraphNode) -> Result<(), StoreError> {
     let span = node.source_span.map(sql_span).transpose()?;
     let (start_byte, end_byte, start_row, start_column, end_row, end_column) =
         span.map_or((None, None, None, None, None, None), |values| {
@@ -2200,29 +2231,22 @@ fn insert_node(transaction: &Transaction<'_>, node: &GraphNode) -> Result<(), St
                 Some(values.5),
             )
         });
-    transaction.execute(
-        "INSERT INTO nodes(\
-           project_id, node_id, label, name, qualified_name, file_path, \
-           start_byte, end_byte, start_row, start_column, end_row, end_column, \
-           generation, properties_json\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![
-            node.project.as_str(),
-            node.id.as_str(),
-            node.label.as_str(),
-            node.name,
-            node.qualified_name.as_str(),
-            node.file_path.as_ref().map(ProjectRelativePath::as_str),
-            start_byte,
-            end_byte,
-            start_row,
-            start_column,
-            end_row,
-            end_column,
-            sqlite_integer("node generation", node.generation.value())?,
-            serde_json::to_string(&node.properties)?,
-        ],
-    )?;
+    statement.execute(params![
+        node.project.as_str(),
+        node.id.as_str(),
+        node.label.as_str(),
+        node.name,
+        node.qualified_name.as_str(),
+        node.file_path.as_ref().map(ProjectRelativePath::as_str),
+        start_byte,
+        end_byte,
+        start_row,
+        start_column,
+        end_row,
+        end_column,
+        sqlite_integer("node generation", node.generation.value())?,
+        serde_json::to_string(&node.properties)?,
+    ])?;
     Ok(())
 }
 
@@ -2245,20 +2269,20 @@ fn ensure_node_exists(
 }
 
 fn insert_edge(transaction: &Transaction<'_>, edge: &GraphEdge) -> Result<(), StoreError> {
-    transaction.execute(
-        "INSERT INTO edges(\
-           project_id, source_id, target_id, kind, discriminator, generation, properties_json\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            edge.project.as_str(),
-            edge.source.as_str(),
-            edge.target.as_str(),
-            edge.kind.as_str(),
-            edge.discriminator.as_str(),
-            sqlite_integer("edge generation", edge.generation.value())?,
-            serde_json::to_string(&edge.properties)?,
-        ],
-    )?;
+    let mut statement = transaction.prepare(INSERT_EDGE_SQL)?;
+    insert_edge_with(&mut statement, edge)
+}
+
+fn insert_edge_with(statement: &mut Statement<'_>, edge: &GraphEdge) -> Result<(), StoreError> {
+    statement.execute(params![
+        edge.project.as_str(),
+        edge.source.as_str(),
+        edge.target.as_str(),
+        edge.kind.as_str(),
+        edge.discriminator.as_str(),
+        sqlite_integer("edge generation", edge.generation.value())?,
+        serde_json::to_string(&edge.properties)?,
+    ])?;
     Ok(())
 }
 

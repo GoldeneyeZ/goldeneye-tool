@@ -385,6 +385,7 @@ pub struct Services {
     config: ServiceConfig,
     edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService<CoreGrammarProvider>>>>,
     query: Arc<goldeneye_query::QueryCache>,
+    query_engine: Arc<Mutex<Option<goldeneye_query::QueryEngine>>>,
 }
 
 impl std::fmt::Debug for Services {
@@ -403,6 +404,7 @@ impl Services {
             config,
             edit: Arc::new(Mutex::new(None)),
             query: Arc::new(goldeneye_query::QueryCache::default()),
+            query_engine: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -531,7 +533,7 @@ impl Services {
     ///
     /// Returns a typed storage/query failure.
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>, ServiceError> {
-        Ok(self.query_engine()?.list_projects()?)
+        self.with_query_engine(goldeneye_query::QueryEngine::list_projects)
     }
 
     /// Deletes one persisted project and all project-scoped graph data.
@@ -569,7 +571,7 @@ impl Services {
         &self,
         request: &IndexStatusRequest,
     ) -> Result<IndexStatusResult, ServiceError> {
-        Ok(self.query_engine()?.index_status(request)?)
+        self.with_query_engine(|engine| engine.index_status(request))
     }
 
     /// Returns graph schema information for one project.
@@ -581,7 +583,7 @@ impl Services {
         &self,
         request: &GraphSchemaRequest,
     ) -> Result<GraphSchemaResult, ServiceError> {
-        Ok(self.query_engine()?.graph_schema(request)?)
+        self.with_query_engine(|engine| engine.graph_schema(request))
     }
 
     /// Searches one project with bounded cursor pagination.
@@ -593,7 +595,7 @@ impl Services {
         &self,
         request: &SearchGraphRequest,
     ) -> Result<SearchGraphPage, ServiceError> {
-        Ok(self.query_engine()?.search_graph(request)?)
+        self.with_query_engine(|engine| engine.search_graph(request))
     }
 
     /// Searches indexed source and collapses matching lines to graph nodes.
@@ -605,7 +607,7 @@ impl Services {
         &self,
         request: &SearchCodeRequest,
     ) -> Result<SearchCodeResult, ServiceError> {
-        Ok(self.query_engine()?.search_code(request)?)
+        self.with_query_engine(|engine| engine.search_code(request))
     }
 
     /// Searches persisted semantic vectors using upstream minimum-cosine ranking.
@@ -617,7 +619,7 @@ impl Services {
         &self,
         request: &SemanticSearchRequest,
     ) -> Result<SemanticSearchResult, ServiceError> {
-        Ok(self.query_engine()?.semantic_search(request)?)
+        self.with_query_engine(|engine| engine.semantic_search(request))
     }
 
     /// Finds nodes with persisted structural signatures similar to one symbol.
@@ -629,7 +631,7 @@ impl Services {
         &self,
         request: &SimilaritySearchRequest,
     ) -> Result<SimilaritySearchResult, ServiceError> {
-        Ok(self.query_engine()?.similarity_search(request)?)
+        self.with_query_engine(|engine| engine.similarity_search(request))
     }
 
     /// Compatibility alias for [`Self::similarity_search`].
@@ -653,7 +655,7 @@ impl Services {
         &self,
         request: &QueryGraphRequest,
     ) -> Result<QueryGraphResult, ServiceError> {
-        Ok(self.query_engine()?.query_graph(request)?)
+        self.with_query_engine(|engine| engine.query_graph(request))
     }
 
     /// Traces graph relationships from one symbol.
@@ -662,7 +664,7 @@ impl Services {
     ///
     /// Returns typed validation, symbol resolution, storage, or query failures.
     pub fn trace_path(&self, request: &TracePathRequest) -> Result<TracePathResult, ServiceError> {
-        Ok(self.query_engine()?.trace_path(request)?)
+        self.with_query_engine(|engine| engine.trace_path(request))
     }
 
     /// Compatibility alias for [`Self::trace_path`].
@@ -686,7 +688,7 @@ impl Services {
         &self,
         request: &CodeSnippetRequest,
     ) -> Result<CodeSnippetResult, ServiceError> {
-        Ok(self.query_engine()?.get_code_snippet(request)?)
+        self.with_query_engine(|engine| engine.get_code_snippet(request))
     }
 
     /// Returns compact architecture summaries for one project.
@@ -698,7 +700,7 @@ impl Services {
         &self,
         request: &ArchitectureRequest,
     ) -> Result<ArchitectureResult, ServiceError> {
-        Ok(self.query_engine()?.get_architecture(request)?)
+        self.with_query_engine(|engine| engine.get_architecture(request))
     }
 
     fn refresh_semantic_index_at(
@@ -706,9 +708,6 @@ impl Services {
         project: &ProjectId,
         mode: IndexRepositoryMode,
     ) -> Result<(), ServiceError> {
-        let query = Store::open_read_only(&self.config.database_path)?;
-        let nodes = query.list_nodes(project)?;
-        drop(query);
         if mode == IndexRepositoryMode::Fast {
             Store::open(&self.config.database_path)?.replace_semantic_index(
                 project,
@@ -719,6 +718,9 @@ impl Services {
             return Ok(());
         }
 
+        let query = Store::open_read_only(&self.config.database_path)?;
+        let nodes = query.list_nodes(project)?;
+        drop(query);
         let model = goldeneye_query::PretrainedModel::load_bundled().ok();
         let mut documents = Vec::new();
         let mut document_frequency = BTreeMap::<String, usize>::new();
@@ -746,20 +748,21 @@ impl Services {
 
         let document_count = documents.len();
         let mut token_vectors = Vec::with_capacity(document_frequency.len());
-        let mut token_weights = BTreeMap::<String, f32>::new();
+        let mut semantic_tokens = BTreeMap::new();
         for (token, frequency) in &document_frequency {
             // Index limits keep both operands well below f32's exact integer range.
             #[allow(clippy::cast_precision_loss)]
             let idf = (((document_count + 1) as f32 / (*frequency + 1) as f32).ln() + 1.0).max(0.0);
-            token_weights.insert(token.clone(), idf);
             let mut vector = goldeneye_query::SemanticVector::for_token(token, model.as_ref());
             vector.normalize();
             // IDF is non-negative and logarithmic; milli-units remain far below u32::MAX.
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let idf_milli = (idf * 1_000.0).round().max(0.0) as u32;
+            let quantized_vector = quantize_semantic(vector.values());
+            semantic_tokens.insert(token.clone(), (idf, vector));
             token_vectors.push(TokenVectorRecord {
                 token: token.clone(),
-                vector: quantize_semantic(vector.values()),
+                vector: quantized_vector,
                 idf_milli,
             });
         }
@@ -769,12 +772,9 @@ impl Services {
         for (node, tokens) in documents {
             let mut vector = goldeneye_query::SemanticVector::zero();
             for token in &tokens {
-                let token_vector =
-                    goldeneye_query::SemanticVector::for_token(token, model.as_ref());
-                vector.add_scaled(
-                    &token_vector,
-                    token_weights.get(token).copied().unwrap_or(1.0),
-                );
+                if let Some((weight, token_vector)) = semantic_tokens.get(token) {
+                    vector.add_scaled(token_vector, *weight);
+                }
             }
             vector.normalize();
             node_vectors.push(NodeVectorRecord {
@@ -823,12 +823,22 @@ impl Services {
         Ok(())
     }
 
-    fn query_engine(&self) -> Result<goldeneye_query::QueryEngine, ServiceError> {
+    fn with_query_engine<T>(
+        &self,
+        action: impl FnOnce(&goldeneye_query::QueryEngine) -> Result<T, goldeneye_query::QueryError>,
+    ) -> Result<T, ServiceError> {
         self.prepare_database()?;
-        Ok(goldeneye_query::QueryEngine::open_with_cache(
-            &self.config.database_path,
-            Arc::clone(&self.query),
-        )?)
+        let mut engine = self
+            .query_engine
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if engine.is_none() {
+            *engine = Some(goldeneye_query::QueryEngine::open_with_cache(
+                &self.config.database_path,
+                Arc::clone(&self.query),
+            )?);
+        }
+        Ok(action(engine.as_ref().expect("query engine initialized"))?)
     }
 
     fn resolve_repository(&self, path: &Path) -> Result<PathBuf, ServiceError> {

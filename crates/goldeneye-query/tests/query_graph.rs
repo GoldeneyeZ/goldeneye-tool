@@ -139,6 +139,65 @@ fn simple_limit_without_order_preserves_rows_total_and_truncation() {
 }
 
 #[test]
+fn direct_node_limit_preserves_sorted_rows_skip_and_total() {
+    let fixture = Fixture::seeded();
+    let engine = fixture.engine();
+    let result = engine
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (n) RETURN n SKIP 1 LIMIT 2",
+        ))
+        .expect("bounded direct-node query");
+
+    let ids = result
+        .rows
+        .iter()
+        .map(|row| match row.as_slice() {
+            [QueryValue::Node(node)] => node.id.as_str(),
+            _ => panic!("expected one node value"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(result.total, 6);
+    assert!(result.truncated);
+}
+
+#[test]
+fn simple_limit_fast_path_preserves_filter_skip_and_total() {
+    let fixture = Fixture::seeded();
+    let engine = fixture.engine();
+    let result = engine
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) WHERE f.name CONTAINS 'a' RETURN f.name SKIP 1 LIMIT 1",
+        ))
+        .expect("filtered bounded query without explicit order");
+
+    assert_eq!(result.rows, vec![vec![text("beta")]]);
+    assert_eq!(result.total, 2);
+    assert!(result.truncated);
+}
+
+#[test]
+fn simple_limit_fast_path_preserves_projection_error() {
+    let fixture = Fixture::seeded();
+    let engine = fixture.engine();
+    let error = engine
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (n) RETURN unsupported(n) LIMIT 1",
+        ))
+        .expect_err("unsupported projection function");
+
+    assert!(matches!(
+        error,
+        QueryError::UnsupportedQuery { ref message }
+            if message == "unsupported function unsupported"
+    ));
+}
+
+#[test]
 fn mutating_syntax_fails_closed_without_false_literal_hits() {
     let fixture = Fixture::seeded();
     let engine = fixture.engine();

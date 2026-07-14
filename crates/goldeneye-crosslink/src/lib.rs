@@ -36,6 +36,15 @@ pub enum CrossLinkError {
 #[allow(clippy::too_many_lines)]
 pub fn rebuild(store: &mut Store) -> Result<CrossLinkOutcome, CrossLinkError> {
     let records = store.list_projects()?;
+    if records.len() <= 1 {
+        if let Some(record) = records.first() {
+            store.replace_cross_project_edges(&record.id, &[])?;
+        }
+        return Ok(CrossLinkOutcome {
+            projects: records.len(),
+            edges: 0,
+        });
+    }
     let mut projects = Vec::with_capacity(records.len());
     for record in records {
         projects.push(ProjectGraph {
@@ -411,9 +420,66 @@ fn project_by_name<'a>(projects: &'a [ProjectGraph], name: &str) -> Option<&'a P
 
 #[cfg(test)]
 mod tests {
-    use goldeneye_domain::{EdgeDiscriminator, EdgeKind, Generation, GraphEdge, NodeId, ProjectId};
+    use goldeneye_domain::{
+        EdgeDiscriminator, EdgeKind, Generation, GraphEdge, GraphNode, NodeId, NodeLabel,
+        ProjectId, ProjectRecord, QualifiedName,
+    };
+    use goldeneye_store::Store;
 
-    use super::deduplicate_edges;
+    use super::{deduplicate_edges, rebuild};
+
+    #[test]
+    fn single_project_rebuild_clears_stale_cross_edges_without_loading_graphs() {
+        let mut store = Store::open_in_memory().expect("store");
+        let project_id = ProjectId::new("api").expect("project ID");
+        let project = ProjectRecord::new(project_id.clone(), "/api").expect("project");
+        let source = GraphNode::new(
+            project_id.clone(),
+            NodeId::new("source").expect("source ID"),
+            NodeLabel::new("Function").expect("source label"),
+            "source",
+            QualifiedName::new("api.source").expect("source qualified name"),
+            None,
+            None,
+            Generation::new(0),
+        )
+        .expect("source node");
+        let target = GraphNode::new(
+            project_id.clone(),
+            NodeId::new("target").expect("target ID"),
+            NodeLabel::new("Function").expect("target label"),
+            "target",
+            QualifiedName::new("api.target").expect("target qualified name"),
+            None,
+            None,
+            Generation::new(0),
+        )
+        .expect("target node");
+        let replacement = store
+            .replace_project_graph(&project, vec![], vec![source, target], vec![])
+            .expect("replace project graph");
+        let stale = GraphEdge::new(
+            project_id.clone(),
+            NodeId::new("source").expect("source ID"),
+            NodeId::new("target").expect("target ID"),
+            EdgeKind::new("CROSS_HTTP_CALLS").expect("cross edge kind"),
+            replacement.generation,
+        );
+        store
+            .replace_cross_project_edges(&project_id, &[stale])
+            .expect("seed stale cross edge");
+
+        let outcome = rebuild(&mut store).expect("rebuild");
+
+        assert_eq!(outcome.projects, 1);
+        assert_eq!(outcome.edges, 0);
+        assert!(
+            store
+                .list_edges(&project_id)
+                .expect("list edges")
+                .is_empty()
+        );
+    }
 
     #[test]
     fn duplicate_cross_edges_are_collapsed_by_identity() {

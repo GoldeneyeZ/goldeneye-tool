@@ -610,10 +610,13 @@ impl Server {
             .trace_path(&request)
             .map_err(service_error_message)?;
         let mut value = to_value(&result)?;
-        let paths = to_value(&result.paths)?;
         let object = value
             .as_object_mut()
             .ok_or_else(|| "trace serialization did not produce an object".to_owned())?;
+        let paths = object
+            .get("paths")
+            .cloned()
+            .ok_or_else(|| "trace serialization did not produce paths".to_owned())?;
         match result.direction {
             TraceDirection::Inbound => {
                 object.insert("callers".to_owned(), paths);

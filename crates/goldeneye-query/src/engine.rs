@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use goldeneye_domain::{ContentHash, FileId, Generation, GraphEdge, GraphNode, NodeId, ProjectId};
+use goldeneye_domain::{
+    ContentHash, FileId, FileRecord, Generation, GraphEdge, GraphNode, NodeId, ProjectId,
+};
 use goldeneye_store::{QueryStore, SearchHit, Store};
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -23,6 +25,8 @@ const MAX_TRACE_DEPTH: usize = 5;
 const MAX_TRACE_LIMIT: usize = 1_000;
 const MAX_SNIPPET_BYTES: usize = 1_048_576;
 const MAX_SNIPPET_LINES: usize = 10_000;
+const MAX_CACHED_SEARCH_PAGES: usize = 16;
+const MAX_CACHED_TRACE_RESULTS: usize = 16;
 
 pub struct QueryEngine {
     store: QueryStore,
@@ -42,9 +46,60 @@ struct ProjectGraph {
     edges_by_node: BTreeMap<NodeId, Vec<usize>>,
     define_counts: BTreeMap<NodeId, usize>,
     nodes_by_name: BTreeMap<String, Vec<usize>>,
+    nodes_by_id: BTreeMap<NodeId, usize>,
+    nodes_by_qualified_name: BTreeMap<String, usize>,
+    search_pages: Mutex<BTreeMap<SearchCacheKey, SearchGraphPage>>,
+    trace_results: Mutex<BTreeMap<TraceCacheKey, TracePathResult>>,
+    files_by_path: Mutex<BTreeMap<String, FileRecord>>,
+    architecture_summary: OnceLock<ArchitectureSummary>,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct SearchCacheKey {
+    query: Option<String>,
+    name_pattern: Option<String>,
+    qualified_name_pattern: Option<String>,
+    label: Option<String>,
+    file_pattern: Option<String>,
+    relationship: Option<String>,
+    min_degree: Option<usize>,
+    max_degree: Option<usize>,
+    exclude_entry_points: bool,
+    include_connected: bool,
+    limit: usize,
+    offset: usize,
+    cursor: Option<String>,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct TraceCacheKey {
+    function_name: String,
+    direction: u8,
+    depth: usize,
+    limit: usize,
+    edge_types: Vec<String>,
+}
+
+struct ArchitectureSummary {
+    total_nodes: usize,
+    total_edges: usize,
+    languages: Vec<CountSummary>,
+    modules: Vec<ArchitectureModule>,
+    types: Vec<NodeSummary>,
+    entry_points: Vec<NodeSummary>,
+    edge_types: Vec<CountSummary>,
 }
 
 impl QueryCache {
+    fn get(&self, project: &ProjectId, generation: Generation) -> Option<Arc<ProjectGraph>> {
+        self.graphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(project)
+            .filter(|graph| graph.generation == generation.value())
+            .map(Arc::clone)
+    }
+
     fn get_or_load(
         &self,
         project: &ProjectId,
@@ -74,11 +129,15 @@ impl ProjectGraph {
         let mut edges_by_node = BTreeMap::<NodeId, Vec<usize>>::new();
         let mut define_counts = BTreeMap::<NodeId, usize>::new();
         let mut nodes_by_name = BTreeMap::<String, Vec<usize>>::new();
+        let mut nodes_by_id = BTreeMap::<NodeId, usize>::new();
+        let mut nodes_by_qualified_name = BTreeMap::<String, usize>::new();
         for (index, node) in nodes.iter().enumerate() {
             nodes_by_name
                 .entry(node.name.clone())
                 .or_default()
                 .push(index);
+            nodes_by_id.insert(node.id.clone(), index);
+            nodes_by_qualified_name.insert(node.qualified_name.as_str().to_owned(), index);
         }
         for (index, edge) in edges.iter().enumerate() {
             edges_by_node
@@ -103,6 +162,172 @@ impl ProjectGraph {
             edges_by_node,
             define_counts,
             nodes_by_name,
+            nodes_by_id,
+            nodes_by_qualified_name,
+            search_pages: Mutex::new(BTreeMap::new()),
+            trace_results: Mutex::new(BTreeMap::new()),
+            files_by_path: Mutex::new(BTreeMap::new()),
+            architecture_summary: OnceLock::new(),
+        }
+    }
+
+    fn cached_file(&self, path: &str) -> Option<FileRecord> {
+        self.files_by_path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(path)
+            .cloned()
+    }
+
+    fn cache_file(&self, file: FileRecord) {
+        self.files_by_path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(file.id.path.as_str().to_owned(), file);
+    }
+
+    fn cached_search(&self, key: &SearchCacheKey) -> Option<SearchGraphPage> {
+        self.search_pages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    fn cache_search(&self, key: SearchCacheKey, page: SearchGraphPage) {
+        let mut pages = self
+            .search_pages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pages.len() >= MAX_CACHED_SEARCH_PAGES
+            && !pages.contains_key(&key)
+            && let Some(first) = pages.keys().next().cloned()
+        {
+            pages.remove(&first);
+        }
+        pages.insert(key, page);
+    }
+
+    fn cached_trace(&self, key: &TraceCacheKey) -> Option<TracePathResult> {
+        self.trace_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    fn cache_trace(&self, key: TraceCacheKey, result: TracePathResult) {
+        let mut results = self
+            .trace_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if results.len() >= MAX_CACHED_TRACE_RESULTS
+            && !results.contains_key(&key)
+            && let Some(first) = results.keys().next().cloned()
+        {
+            results.remove(&first);
+        }
+        results.insert(key, result);
+    }
+
+    fn architecture_summary(&self) -> &ArchitectureSummary {
+        self.architecture_summary
+            .get_or_init(|| ArchitectureSummary::from_graph(self))
+    }
+}
+
+impl ArchitectureSummary {
+    fn from_graph(graph: &ProjectGraph) -> Self {
+        let nodes = &graph.nodes;
+        let edges = &graph.edges;
+
+        let mut languages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for node in nodes {
+            let Some(language) = node
+                .properties
+                .get("language")
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            if let Some(path) = &node.file_path {
+                languages
+                    .entry(language.to_owned())
+                    .or_default()
+                    .insert(path.as_str().to_owned());
+            }
+        }
+        let languages = languages
+            .into_iter()
+            .map(|(name, paths)| CountSummary {
+                name,
+                count: u64::try_from(paths.len()).unwrap_or(u64::MAX),
+            })
+            .collect();
+
+        let modules = nodes
+            .iter()
+            .filter(|node| node.label.as_str() == "Module")
+            .map(|node| ArchitectureModule {
+                name: node.name.clone(),
+                qualified_name: node.qualified_name.as_str().to_owned(),
+                file_path: node.file_path.as_ref().map(|path| path.as_str().to_owned()),
+                defined_symbols: graph.define_counts.get(&node.id).copied().unwrap_or(0),
+            })
+            .collect();
+        let type_labels = [
+            "Class",
+            "Enum",
+            "Interface",
+            "Struct",
+            "Trait",
+            "Type",
+            "TypeAlias",
+        ];
+        let types = nodes
+            .iter()
+            .filter(|node| type_labels.contains(&node.label.as_str()))
+            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
+            .collect();
+        let entry_points = nodes
+            .iter()
+            .filter(|node| {
+                node.properties
+                    .get("is_entry_point")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                    && !node
+                        .properties
+                        .get("is_test")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                    && !node
+                        .file_path
+                        .as_ref()
+                        .is_some_and(|path| path.as_str().to_lowercase().contains("test"))
+            })
+            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
+            .take(20)
+            .collect();
+        let mut edge_counts: BTreeMap<String, u64> = BTreeMap::new();
+        for edge in edges {
+            *edge_counts
+                .entry(edge.kind.as_str().to_owned())
+                .or_default() += 1;
+        }
+        let edge_types = edge_counts
+            .into_iter()
+            .map(|(name, count)| CountSummary { name, count })
+            .collect();
+
+        Self {
+            total_nodes: nodes.len(),
+            total_edges: edges.len(),
+            languages,
+            modules,
+            types,
+            entry_points,
+            edge_types,
         }
     }
 }
@@ -229,6 +454,10 @@ impl QueryEngine {
         }
         let fingerprint = search_fingerprint(request);
         let offset = page_offset(request, &fingerprint)?;
+        let cache_key = SearchCacheKey::from(request);
+        if let Some(page) = graph.cached_search(&cache_key) {
+            return Ok(page);
+        }
         let name = compile_pattern("name_pattern", request.name_pattern.as_deref())?;
         let qualified_name = compile_pattern(
             "qualified_name_pattern",
@@ -285,13 +514,15 @@ impl QueryEngine {
             })
             .collect();
         let has_more = end < total;
-        Ok(SearchGraphPage {
+        let page = SearchGraphPage {
             project: request.project.as_str().to_owned(),
             results,
             total,
             has_more,
             next_cursor: has_more.then(|| format_cursor(&fingerprint, end)),
-        })
+        };
+        graph.cache_search(cache_key, page.clone());
+        Ok(page)
     }
 
     /// Traverses graph edges breadth-first with deterministic cycle suppression.
@@ -313,20 +544,22 @@ impl QueryEngine {
                 maximum: MAX_TRACE_LIMIT,
             });
         }
-        let origin = resolve_symbol(
-            &request.function_name,
-            &graph.nodes,
-            &graph.degrees,
-            ResolveMode::Callable,
-        )?;
+        let cache_key = TraceCacheKey::from(request);
+        if let Some(result) = graph.cached_trace(&cache_key) {
+            return Ok(result);
+        }
+        let origin =
+            resolve_symbol_in_graph(&request.function_name, &graph, ResolveMode::Callable)?;
         let (paths, truncated) = trace_breadth_first(&origin, &graph, request);
-        Ok(TracePathResult {
+        let result = TracePathResult {
             project: request.project.as_str().to_owned(),
             origin: node_summary(&origin, None, &graph.degrees, Vec::new()),
             direction: request.direction,
             paths,
             truncated,
-        })
+        };
+        graph.cache_trace(cache_key, result.clone());
+        Ok(result)
     }
 
     /// Compatibility alias for the legacy `trace_call_path` tool name.
@@ -351,15 +584,10 @@ impl QueryEngine {
         request: &CodeSnippetRequest,
     ) -> Result<CodeSnippetResult, QueryError> {
         let project = self.require_project(&request.project)?;
-        let graph = self.cached_graph(&request.project)?;
+        let graph = self.cached_graph_at_generation(&request.project, project.generation)?;
         validate_snippet_limit("max_bytes", request.max_bytes, MAX_SNIPPET_BYTES)?;
         validate_snippet_limit("max_lines", request.max_lines, MAX_SNIPPET_LINES)?;
-        let symbol = resolve_symbol(
-            &request.qualified_name,
-            &graph.nodes,
-            &graph.degrees,
-            ResolveMode::Any,
-        )?;
+        let symbol = resolve_symbol_in_graph(&request.qualified_name, &graph, ResolveMode::Any)?;
         let file_path =
             symbol
                 .file_path
@@ -372,12 +600,18 @@ impl QueryEngine {
             .ok_or_else(|| QueryError::SourceSpanUnavailable {
                 qualified_name: symbol.qualified_name.as_str().to_owned(),
             })?;
-        let file = self
-            .store
-            .get_file(&FileId::new(request.project.clone(), file_path.clone()))?
-            .ok_or_else(|| QueryError::IndexedFileNotFound {
-                path: file_path.as_str().to_owned(),
-            })?;
+        let file = if let Some(file) = graph.cached_file(file_path.as_str()) {
+            file
+        } else {
+            let file = self
+                .store
+                .get_file(&FileId::new(request.project.clone(), file_path.clone()))?
+                .ok_or_else(|| QueryError::IndexedFileNotFound {
+                    path: file_path.as_str().to_owned(),
+                })?;
+            graph.cache_file(file.clone());
+            file
+        };
         let absolute_path = std::path::Path::new(&project.root_path).join(file_path.as_str());
         let bytes = std::fs::read(&absolute_path).map_err(|source| QueryError::SourceRead {
             path: absolute_path,
@@ -442,99 +676,19 @@ impl QueryEngine {
     ) -> Result<ArchitectureResult, QueryError> {
         let project = self.require_project(&request.project)?;
         let graph = self.cached_graph(&request.project)?;
-        let nodes = &graph.nodes;
-        let edges = &graph.edges;
-
-        let mut languages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for node in nodes {
-            let Some(language) = node
-                .properties
-                .get("language")
-                .and_then(serde_json::Value::as_str)
-            else {
-                continue;
-            };
-            if let Some(path) = &node.file_path {
-                languages
-                    .entry(language.to_owned())
-                    .or_default()
-                    .insert(path.as_str().to_owned());
-            }
-        }
-        let languages = languages
-            .into_iter()
-            .map(|(name, paths)| CountSummary {
-                name,
-                count: u64::try_from(paths.len()).unwrap_or(u64::MAX),
-            })
-            .collect();
-
-        let modules = nodes
-            .iter()
-            .filter(|node| node.label.as_str() == "Module")
-            .map(|node| ArchitectureModule {
-                name: node.name.clone(),
-                qualified_name: node.qualified_name.as_str().to_owned(),
-                file_path: node.file_path.as_ref().map(|path| path.as_str().to_owned()),
-                defined_symbols: graph.define_counts.get(&node.id).copied().unwrap_or(0),
-            })
-            .collect();
-        let type_labels = [
-            "Class",
-            "Enum",
-            "Interface",
-            "Struct",
-            "Trait",
-            "Type",
-            "TypeAlias",
-        ];
-        let types = nodes
-            .iter()
-            .filter(|node| type_labels.contains(&node.label.as_str()))
-            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
-            .collect();
-        let entry_points = nodes
-            .iter()
-            .filter(|node| {
-                node.properties
-                    .get("is_entry_point")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                    && !node
-                        .properties
-                        .get("is_test")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                    && !node
-                        .file_path
-                        .as_ref()
-                        .is_some_and(|path| path.as_str().to_lowercase().contains("test"))
-            })
-            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
-            .take(20)
-            .collect();
-        let mut edge_counts: BTreeMap<String, u64> = BTreeMap::new();
-        for edge in edges {
-            *edge_counts
-                .entry(edge.kind.as_str().to_owned())
-                .or_default() += 1;
-        }
-        let edge_types = edge_counts
-            .into_iter()
-            .map(|(name, count)| CountSummary { name, count })
-            .collect();
+        let summary = graph.architecture_summary();
 
         Ok(ArchitectureResult {
             project: project.id.as_str().to_owned(),
             root_path: project.root_path,
             generation: project.generation.value(),
-            total_nodes: nodes.len(),
-            total_edges: edges.len(),
-            languages,
-            modules,
-            types,
-            entry_points,
-            edge_types,
+            total_nodes: summary.total_nodes,
+            total_edges: summary.total_edges,
+            languages: summary.languages.clone(),
+            modules: summary.modules.clone(),
+            types: summary.types.clone(),
+            entry_points: summary.entry_points.clone(),
+            edge_types: summary.edge_types.clone(),
         })
     }
 
@@ -546,7 +700,7 @@ impl QueryEngine {
     /// projects, invalid row bounds, or store failures.
     pub fn query_graph(&self, request: &QueryGraphRequest) -> Result<QueryGraphResult, QueryError> {
         let graph = self.cached_graph(&request.project)?;
-        crate::cypher::execute(request, &graph.nodes, &graph.edges)
+        crate::cypher::execute(request, &graph.nodes, &graph.edges, &graph.degrees)
     }
 
     /// Searches indexed source and collapses line matches to their tightest graph nodes.
@@ -606,6 +760,9 @@ impl QueryEngine {
     fn cached_graph(&self, project: &ProjectId) -> Result<Arc<ProjectGraph>, QueryError> {
         loop {
             let before = self.require_project(project)?.generation;
+            if let Some(graph) = self.cache.get(project, before) {
+                return Ok(graph);
+            }
             let graph = self.cache.get_or_load(project, before, || {
                 Ok((
                     self.store.list_nodes(project)?,
@@ -617,6 +774,26 @@ impl QueryEngine {
                 return Ok(graph);
             }
         }
+    }
+
+    fn cached_graph_at_generation(
+        &self,
+        project: &ProjectId,
+        generation: Generation,
+    ) -> Result<Arc<ProjectGraph>, QueryError> {
+        if let Some(graph) = self.cache.get(project, generation) {
+            return Ok(graph);
+        }
+        let graph = self.cache.get_or_load(project, generation, || {
+            Ok((
+                self.store.list_nodes(project)?,
+                self.store.list_edges(project)?,
+            ))
+        })?;
+        if self.require_project(project)?.generation == generation {
+            return Ok(graph);
+        }
+        self.cached_graph(project)
     }
 
     fn search_candidates(
@@ -672,6 +849,42 @@ impl QueryEngine {
 struct Candidate {
     node: GraphNode,
     rank: Option<f64>,
+}
+
+impl From<&SearchGraphRequest> for SearchCacheKey {
+    fn from(request: &SearchGraphRequest) -> Self {
+        Self {
+            query: request.query.clone(),
+            name_pattern: request.name_pattern.clone(),
+            qualified_name_pattern: request.qualified_name_pattern.clone(),
+            label: request.label.clone(),
+            file_pattern: request.file_pattern.clone(),
+            relationship: request.relationship.clone(),
+            min_degree: request.min_degree,
+            max_degree: request.max_degree,
+            exclude_entry_points: request.exclude_entry_points,
+            include_connected: request.include_connected,
+            limit: request.page.limit,
+            offset: request.page.offset,
+            cursor: request.page.cursor.clone(),
+        }
+    }
+}
+
+impl From<&TracePathRequest> for TraceCacheKey {
+    fn from(request: &TracePathRequest) -> Self {
+        Self {
+            function_name: request.function_name.clone(),
+            direction: match request.direction {
+                TraceDirection::Inbound => 0,
+                TraceDirection::Outbound => 1,
+                TraceDirection::Both => 2,
+            },
+            depth: request.depth,
+            limit: request.limit,
+            edge_types: request.edge_types.clone(),
+        }
+    }
 }
 
 impl From<SearchHit> for Candidate {
@@ -905,6 +1118,22 @@ pub(crate) enum ResolveMode {
     Callable,
 }
 
+fn resolve_symbol_in_graph(
+    query: &str,
+    graph: &ProjectGraph,
+    mode: ResolveMode,
+) -> Result<GraphNode, QueryError> {
+    if let Some(node) = graph
+        .nodes_by_qualified_name
+        .get(query)
+        .and_then(|index| graph.nodes.get(*index))
+        .filter(|node| resolve_eligible(node, mode))
+    {
+        return Ok(node.clone());
+    }
+    resolve_symbol(query, &graph.nodes, &graph.degrees, mode)
+}
+
 pub(crate) fn resolve_symbol(
     query: &str,
     nodes: &[GraphNode],
@@ -1006,8 +1235,6 @@ fn trace_breadth_first(
 ) -> (Vec<TraceHop>, bool) {
     let nodes = &graph.nodes;
     let edges = &graph.edges;
-    let nodes_by_id: BTreeMap<&NodeId, &GraphNode> =
-        nodes.iter().map(|node| (&node.id, node)).collect();
     let edge_types: BTreeSet<&str> = request.edge_types.iter().map(String::as_str).collect();
     let mut visited = BTreeSet::from([origin.id.clone()]);
     let mut frontier = vec![origin.id.clone()];
@@ -1040,8 +1267,8 @@ fn trace_breadth_first(
             }
         }
         candidates.sort_by(|(left_id, left_edge), (right_id, right_edge)| {
-            node_qualified_name(&nodes_by_id, left_id)
-                .cmp(node_qualified_name(&nodes_by_id, right_id))
+            node_qualified_name(graph, left_id)
+                .cmp(node_qualified_name(graph, right_id))
                 .then_with(|| left_edge.source.cmp(&right_edge.source))
                 .then_with(|| left_edge.target.cmp(&right_edge.target))
                 .then_with(|| left_edge.kind.cmp(&right_edge.kind))
@@ -1055,13 +1282,25 @@ fn trace_breadth_first(
                 truncated = true;
                 break 'depth;
             }
-            let Some(source) = nodes_by_id.get(&edge.source) else {
+            let Some(source) = graph
+                .nodes_by_id
+                .get(&edge.source)
+                .and_then(|index| nodes.get(*index))
+            else {
                 continue;
             };
-            let Some(target) = nodes_by_id.get(&edge.target) else {
+            let Some(target) = graph
+                .nodes_by_id
+                .get(&edge.target)
+                .and_then(|index| nodes.get(*index))
+            else {
                 continue;
             };
-            let Some(related) = nodes_by_id.get(&related_id) else {
+            let Some(related) = graph
+                .nodes_by_id
+                .get(&related_id)
+                .and_then(|index| nodes.get(*index))
+            else {
                 continue;
             };
             paths.push(TraceHop {
@@ -1086,9 +1325,11 @@ fn trace_breadth_first(
     (paths, truncated)
 }
 
-fn node_qualified_name<'a>(nodes: &'a BTreeMap<&NodeId, &GraphNode>, node: &NodeId) -> &'a str {
-    nodes
+fn node_qualified_name<'a>(graph: &'a ProjectGraph, node: &NodeId) -> &'a str {
+    graph
+        .nodes_by_id
         .get(node)
+        .and_then(|index| graph.nodes.get(*index))
         .map_or("", |node| node.qualified_name.as_str())
 }
 
@@ -1128,7 +1369,9 @@ mod cache_tests {
 
     use goldeneye_domain::{Generation, ProjectId};
 
-    use super::{QueryCache, exact_pattern_literal};
+    use crate::types::SearchGraphPage;
+
+    use super::{ProjectGraph, QueryCache, SearchCacheKey, exact_pattern_literal};
 
     #[test]
     fn exact_pattern_literal_only_accepts_anchored_identifier_names() {
@@ -1156,9 +1399,48 @@ mod cache_tests {
         let replaced = cache
             .get_or_load(&project, Generation::new(2), &mut load)
             .expect("replacement graph load");
+        let first_summary = first.architecture_summary();
+        let reused_summary = reused.architecture_summary();
+        let replaced_summary = replaced.architecture_summary();
 
         assert!(Arc::ptr_eq(&first, &reused));
         assert!(!Arc::ptr_eq(&first, &replaced));
+        assert!(std::ptr::eq(first_summary, reused_summary));
+        assert!(!std::ptr::eq(first_summary, replaced_summary));
         assert_eq!(loads.get(), 2);
+    }
+
+    #[test]
+    fn search_page_cache_is_scoped_to_one_project_graph_generation() {
+        let graph = ProjectGraph::new(Generation::new(1), Vec::new(), Vec::new());
+        let key = SearchCacheKey {
+            query: Some("fs search".to_owned()),
+            name_pattern: None,
+            qualified_name_pattern: None,
+            label: None,
+            file_pattern: None,
+            relationship: None,
+            min_degree: None,
+            max_degree: None,
+            exclude_entry_points: false,
+            include_connected: false,
+            limit: 20,
+            offset: 0,
+            cursor: None,
+        };
+        let page = SearchGraphPage {
+            project: "demo".to_owned(),
+            results: Vec::new(),
+            total: 0,
+            has_more: false,
+            next_cursor: None,
+        };
+
+        assert_eq!(graph.cached_search(&key), None);
+        graph.cache_search(key.clone(), page.clone());
+        assert_eq!(graph.cached_search(&key), Some(page));
+
+        let next_generation = ProjectGraph::new(Generation::new(2), Vec::new(), Vec::new());
+        assert_eq!(next_generation.cached_search(&key), None);
     }
 }
