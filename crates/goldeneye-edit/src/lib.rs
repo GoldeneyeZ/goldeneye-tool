@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod path_auth;
+
 use std::sync::Arc;
 
 use goldeneye_domain::{
