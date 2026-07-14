@@ -6,8 +6,8 @@ use goldeneye_services::{
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest,
     IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest,
     NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest,
-    QueryValue, SearchGraphRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services,
-    TraceDirection, TracePathRequest,
+    QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest, SemanticSearchRequest,
+    ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection, TracePathRequest,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -220,6 +220,16 @@ impl Server {
                 let args: SearchArguments = parse_arguments(name, arguments)?;
                 self.search_graph(args)
             }
+            "search_code" => {
+                if arguments.get("pattern").is_none() {
+                    return Err("pattern is required".to_owned());
+                }
+                if arguments.get("project").is_none() {
+                    return Err(project_list_error(&self.services, "project is required"));
+                }
+                let args: SearchCodeArguments = parse_arguments(name, arguments)?;
+                self.search_code(args)
+            }
             "query_graph" => {
                 let args: QueryArguments = parse_arguments(name, arguments)?;
                 self.query_graph(args)
@@ -418,12 +428,13 @@ impl Server {
 
     fn search_graph(&self, args: SearchArguments) -> Result<Value, String> {
         let project = project_id("search_graph", args.project)?;
+        let semantic_query = args.semantic_query;
         let search_mode = if args.query.is_some() {
             "bm25"
         } else {
             "regex"
         };
-        let mut request = SearchGraphRequest::new(project);
+        let mut request = SearchGraphRequest::new(project.clone());
         request.query = args.query;
         request.name_pattern = args.name_pattern;
         request.qualified_name_pattern = args.qn_pattern;
@@ -451,6 +462,34 @@ impl Server {
                 "search_mode".to_owned(),
                 Value::String(search_mode.to_owned()),
             );
+        if let Some(keywords) = semantic_query {
+            let mut semantic_request = SemanticSearchRequest::new(project, keywords);
+            semantic_request.limit = args.limit;
+            let semantic = self
+                .services
+                .semantic_search(&semantic_request)
+                .map_err(service_error_message)?;
+            let semantic_results = semantic
+                .results
+                .into_iter()
+                .map(|hit| {
+                    json!({
+                        "name": hit.node.name,
+                        "qualified_name": hit.node.qualified_name,
+                        "label": hit.node.label,
+                        "file_path": hit.node.file_path,
+                        "score": hit.score
+                    })
+                })
+                .collect::<Vec<_>>();
+            value
+                .as_object_mut()
+                .expect("search serialization was checked as an object")
+                .insert(
+                    "semantic_results".to_owned(),
+                    Value::Array(semantic_results),
+                );
+        }
         Ok(value)
     }
 
@@ -478,6 +517,27 @@ impl Server {
             "total": result.total,
             "truncated": result.truncated
         }))
+    }
+
+    fn search_code(&self, args: SearchCodeArguments) -> Result<Value, String> {
+        let project = project_id("search_code", args.project)?;
+        let regex = args.regex;
+        let mut request = SearchCodeRequest::new(project, args.pattern);
+        request.file_pattern = args.file_pattern;
+        request.path_filter = args.path_filter;
+        request.mode = args.mode;
+        request.context = args.context;
+        request.regex = regex;
+        request.limit = args.limit;
+        match self.services.search_code(&request) {
+            Ok(result) => to_value(result),
+            Err(ServiceError::Query(QueryError::InvalidPattern {
+                field: "pattern", ..
+            })) if regex => Err(
+                "invalid regex pattern (regex=true): check for unbalanced (), [], or {}".to_owned(),
+            ),
+            Err(error) => Err(compatibility_error(&self.services, error)),
+        }
     }
 
     fn trace_path(&self, args: TraceArguments) -> Result<Value, String> {
@@ -753,6 +813,7 @@ struct SearchArguments {
     qn_pattern: Option<String>,
     label: Option<String>,
     file_pattern: Option<String>,
+    semantic_query: Option<Vec<String>>,
     relationship: Option<String>,
     min_degree: Option<usize>,
     max_degree: Option<usize>,
@@ -765,6 +826,27 @@ struct SearchArguments {
     #[serde(default)]
     offset: usize,
     cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchCodeArguments {
+    pattern: String,
+    project: String,
+    file_pattern: Option<String>,
+    path_filter: Option<String>,
+    #[serde(default)]
+    mode: SearchCodeMode,
+    #[serde(default)]
+    context: usize,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default = "default_search_code_limit")]
+    limit: usize,
+}
+
+const fn default_search_code_limit() -> usize {
+    10
 }
 
 const fn default_search_limit() -> usize {
@@ -939,7 +1021,7 @@ mod tests {
 
         assert_eq!(
             value["result"]["tools"].as_array().expect("tools").len(),
-            19
+            20
         );
         assert_eq!(value["result"]["tools"][0]["name"], "index_repository");
     }

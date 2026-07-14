@@ -219,6 +219,11 @@ fn search_and_query_tools(project: &Value) -> Vec<ToolDefinition> {
                     "qn_pattern": {"type": "string"},
                     "label": {"type": "string"},
                     "file_pattern": {"type": "string"},
+                    "semantic_query": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Keyword array scored independently using per-keyword minimum cosine"
+                    },
                     "relationship": {"type": "string"},
                     "min_degree": {"type": "integer", "minimum": 0},
                     "max_degree": {"type": "integer", "minimum": 0},
@@ -229,6 +234,41 @@ fn search_and_query_tools(project: &Value) -> Vec<ToolDefinition> {
                     "cursor": {"type": "string"}
                 }),
                 &["project"],
+            ),
+        ),
+        ToolDefinition::new(
+            "search_code",
+            "Search code",
+            "Graph-augmented code search. Finds text patterns, deduplicates matches into their \
+             containing functions, and ranks structural definitions before tests. compact returns \
+             signatures and metadata; full adds a match-anchored source window capped at 60 lines; \
+             files returns only paths. Compare total_results with limit to detect truncation.",
+            object_schema(
+                &json!({
+                    "pattern": {"type": "string"},
+                    "project": project.clone(),
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Glob for included file names (for example *.go)"
+                    },
+                    "path_filter": {
+                        "type": "string",
+                        "description": "Regex filter on indexed file paths (for example ^src/)"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["compact", "full", "files"],
+                        "default": "compact"
+                    },
+                    "context": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Context lines around matches in compact mode"
+                    },
+                    "regex": {"type": "boolean", "default": false},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 10}
+                }),
+                &["pattern", "project"],
             ),
         ),
         ToolDefinition::new(

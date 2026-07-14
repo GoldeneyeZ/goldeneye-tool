@@ -29,6 +29,8 @@ fn run_server(input: &[u8], database: &Path, root: &Path) -> Output {
         .env("GOLDENEYE_DB_PATH", database)
         .env("GOLDENEYE_PROJECT_ROOT", root)
         .env("CBM_ALLOWED_ROOT", root)
+        .env("CBM_SEMANTIC_ENABLED", "1")
+        .env("CBM_SEMANTIC_THRESHOLD", "0.82")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -171,18 +173,19 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
         json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}),
         json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"index_status","arguments":{"project":project}}}),
         json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search_graph","arguments":{"project":project,"query":"helper","limit":5}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"search_code","arguments":{"project":project,"pattern":"pub helper","mode":"compact","limit":5}}}),
     ] {
         second_input.push_str(&value.to_string());
         second_input.push('\n');
     }
     let second = responses(&run_server(second_input.as_bytes(), &database, temp.path()));
-    assert_eq!(second.len(), 4);
+    assert_eq!(second.len(), 5);
     assert_eq!(
         second[0]["result"]["tools"]
             .as_array()
             .expect("tools")
             .len(),
-        18
+        20
     );
     assert_eq!(
         second[1]["result"]["structuredContent"]["projects"][0]["name"],
@@ -194,6 +197,14 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
             .as_u64()
             .expect("search total")
             > 0
+    );
+    assert_eq!(
+        second[4]["result"]["structuredContent"]["total_grep_matches"],
+        2
+    );
+    assert_eq!(
+        second[4]["result"]["structuredContent"]["results"][0]["node"],
+        "helper"
     );
 }
 

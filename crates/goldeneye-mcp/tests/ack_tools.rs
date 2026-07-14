@@ -151,6 +151,7 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
             "index_status",
             "get_graph_schema",
             "search_graph",
+            "search_code",
             "query_graph",
             "trace_path",
             "trace_call_path",
@@ -183,7 +184,7 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
     assert_eq!(second["result"]["tools"].as_array().expect("page").len(), 8);
     assert_eq!(second["result"]["nextCursor"], "16");
     let third = request(&server, 4, "tools/list", json!({"cursor": "16"}));
-    assert_eq!(third["result"]["tools"].as_array().expect("page").len(), 3);
+    assert_eq!(third["result"]["tools"].as_array().expect("page").len(), 4);
     assert!(third["result"].get("nextCursor").is_none());
 }
 
@@ -229,6 +230,25 @@ fn index_then_all_ack_read_tools_return_stable_structured_json() {
         .as_str()
         .expect("qualified name")
         .to_owned();
+
+    let code = call(
+        &server,
+        13,
+        "search_code",
+        json!({
+            "project": project,
+            "pattern": "pub helper",
+            "file_pattern": "*.rs",
+            "mode": "compact",
+            "context": 1,
+            "regex": false,
+            "limit": 10
+        }),
+    );
+    let code = assert_success(&code);
+    assert_eq!(code["total_grep_matches"], 2);
+    assert_eq!(code["results"][0]["node"], "helper");
+    assert!(code["results"][0]["context"].is_string());
 
     assert_query_trace_snippet_architecture(&server, &project, &qualified_name);
 
