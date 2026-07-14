@@ -5,7 +5,10 @@ use goldeneye_domain::{
     NodeLabel, ProjectId, ProjectRecord, ProjectRelativePath, QualifiedName, SourcePoint,
     SourceSpan,
 };
-use goldeneye_store::{CURRENT_SCHEMA_VERSION, Store, StoreError};
+use goldeneye_store::{
+    CURRENT_SCHEMA_VERSION, EditOperationId, EditOperationKind, EditPhase, NewEditJournalRecord,
+    Store, StoreError,
+};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -93,14 +96,52 @@ fn migrations_are_versioned_idempotent_and_introspectable() {
         "nodes",
         "edges",
         "nodes_fts",
+        "edit_journal",
     ] {
         assert!(schema.tables.contains(table), "missing table {table}");
+    }
+    for index in [
+        "edit_journal_project_path_idx",
+        "edit_journal_incomplete_idx",
+        "edit_journal_active_target_idx",
+    ] {
+        assert!(schema.indexes.contains(index), "missing index {index}");
     }
     drop(store);
 
     let reopened = Store::open(&path).expect("idempotent reopen");
     assert_eq!(
         reopened.schema_info().expect("schema").version,
+        CURRENT_SCHEMA_VERSION
+    );
+}
+
+#[test]
+fn edit_journal_migrates_an_existing_v2_database_and_reopens() {
+    let temp = TempDir::new().expect("temp dir");
+    let path = temp.path().join("v2.sqlite3");
+    drop(Store::open(&path).expect("seed current schema"));
+    let connection = Connection::open(&path).expect("open migration fixture");
+    connection
+        .execute_batch(
+            "DROP TABLE edit_journal; \
+             DELETE FROM schema_migrations WHERE version = 3; \
+             PRAGMA user_version = 2;",
+        )
+        .expect("downgrade fixture to v2");
+    drop(connection);
+
+    let migrated = Store::open(&path).expect("migrate v2 store");
+    let schema = migrated.schema_info().expect("migrated schema");
+    assert_eq!(schema.version, CURRENT_SCHEMA_VERSION);
+    assert!(schema.tables.contains("edit_journal"));
+    drop(migrated);
+    assert_eq!(
+        Store::open(&path)
+            .expect("idempotent migrated reopen")
+            .schema_info()
+            .expect("schema")
+            .version,
         CURRENT_SCHEMA_VERSION
     );
 }
@@ -777,4 +818,254 @@ fn duplicate_qualified_names_are_rejected_without_writing_partial_graph() {
         Err(StoreError::DuplicateQualifiedName(_))
     ));
     assert_eq!(store.counts(&project.id).expect("empty counts").nodes, 0);
+}
+
+fn update_journal(project: &ProjectId, operation_id: &str, path: &str) -> NewEditJournalRecord {
+    NewEditJournalRecord {
+        operation_id: EditOperationId::new(operation_id).expect("valid operation ID"),
+        operation_kind: EditOperationKind::Update,
+        project_id: project.clone(),
+        path: rel(path),
+        original_hash: Some(ContentHash::of(b"before")),
+        new_hash: Some(ContentHash::of(b"after")),
+        temp_path: Some(rel(".goldeneye/tmp/edit.tmp")),
+        backup_path: Some(rel(".goldeneye/backups/edit.bak")),
+        created_parent_paths: vec![rel("src/generated"), rel("src")],
+    }
+}
+
+#[test]
+fn edit_journal_roundtrip_and_crud_survive_reopen() {
+    let temp = TempDir::new().expect("temp dir");
+    let (mut store, path) = open_file_store(&temp);
+    let project = project("journal-roundtrip", "/repo/journal-roundtrip");
+    store.register_project(&project).expect("register project");
+    let draft = update_journal(&project.id, "operation-roundtrip", "src/lib.rs");
+
+    let created = store
+        .create_edit_operation(&draft)
+        .expect("create journal record");
+    assert_eq!(created.operation_id, draft.operation_id);
+    assert_eq!(created.record_version, 1);
+    assert_eq!(created.operation_kind, EditOperationKind::Update);
+    assert_eq!(created.project_id, project.id);
+    assert_eq!(created.path, rel("src/lib.rs"));
+    assert_eq!(created.original_hash, draft.original_hash);
+    assert_eq!(created.new_hash, draft.new_hash);
+    assert_eq!(created.temp_path, draft.temp_path);
+    assert_eq!(created.backup_path, draft.backup_path);
+    assert_eq!(created.created_parent_paths, draft.created_parent_paths);
+    assert_eq!(created.phase, EditPhase::Prepared);
+    assert!(!created.created_at.is_empty());
+    assert!(!created.updated_at.is_empty());
+    assert_eq!(created.last_error, None);
+    drop(store);
+
+    let mut reopened = Store::open(&path).expect("reopen store");
+    assert_eq!(
+        reopened
+            .get_edit_operation(&draft.operation_id)
+            .expect("read journal record"),
+        Some(created)
+    );
+    let with_error = reopened
+        .set_edit_operation_error(&draft.operation_id, Some("index failed"))
+        .expect("set error");
+    assert_eq!(with_error.last_error.as_deref(), Some("index failed"));
+    let cleared = reopened
+        .set_edit_operation_error(&draft.operation_id, None)
+        .expect("clear error");
+    assert_eq!(cleared.last_error, None);
+    assert!(
+        reopened
+            .delete_edit_operation(&draft.operation_id)
+            .expect("delete journal record")
+    );
+    assert!(
+        !reopened
+            .delete_edit_operation(&draft.operation_id)
+            .expect("idempotent delete")
+    );
+}
+
+#[test]
+fn edit_phase_transitions_are_monotonic_idempotent_and_stale_safe() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("journal-transitions", "/repo/journal-transitions");
+    store.register_project(&project).expect("register project");
+    let draft = update_journal(&project.id, "operation-transitions", "src/lib.rs");
+    store
+        .create_edit_operation(&draft)
+        .expect("create journal record");
+
+    assert!(matches!(
+        store.transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Prepared,
+            EditPhase::Indexed
+        ),
+        Err(StoreError::InvalidEditPhaseTransition {
+            from: EditPhase::Prepared,
+            to: EditPhase::Indexed
+        })
+    ));
+    let backup_ready = store
+        .transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Prepared,
+            EditPhase::BackupReady,
+        )
+        .expect("advance to backup-ready");
+    assert_eq!(backup_ready.phase, EditPhase::BackupReady);
+    let retry = store
+        .transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Prepared,
+            EditPhase::BackupReady,
+        )
+        .expect("idempotent transition retry");
+    assert_eq!(retry.phase, EditPhase::BackupReady);
+    assert!(matches!(
+        store.transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Prepared,
+            EditPhase::Replaced
+        ),
+        Err(StoreError::StaleEditPhase {
+            expected: EditPhase::Prepared,
+            actual: EditPhase::BackupReady
+        })
+    ));
+
+    for (expected, next) in [
+        (EditPhase::BackupReady, EditPhase::Replaced),
+        (EditPhase::Replaced, EditPhase::Indexed),
+        (EditPhase::Indexed, EditPhase::Committed),
+    ] {
+        let record = store
+            .transition_edit_operation(&draft.operation_id, expected, next)
+            .expect("valid forward transition");
+        assert_eq!(record.phase, next);
+    }
+    assert!(matches!(
+        store.transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Committed,
+            EditPhase::RolledBack
+        ),
+        Err(StoreError::InvalidEditPhaseTransition {
+            from: EditPhase::Committed,
+            to: EditPhase::RolledBack
+        })
+    ));
+
+    let rollback = update_journal(&project.id, "operation-rollback", "src/rollback.rs");
+    store
+        .create_edit_operation(&rollback)
+        .expect("create rollback record");
+    let rolled_back = store
+        .transition_edit_operation(
+            &rollback.operation_id,
+            EditPhase::Prepared,
+            EditPhase::RolledBack,
+        )
+        .expect("roll back prepared operation");
+    assert_eq!(rolled_back.phase, EditPhase::RolledBack);
+}
+
+#[test]
+fn incomplete_listing_and_active_target_guard_track_terminal_phases() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("journal-incomplete", "/repo/journal-incomplete");
+    store.register_project(&project).expect("register project");
+    let committed = update_journal(&project.id, "operation-committed", "src/committed.rs");
+    let rolled_back = update_journal(&project.id, "operation-rolled-back", "src/rolled.rs");
+    let pending = update_journal(&project.id, "operation-pending", "src/pending.rs");
+    for draft in [&committed, &rolled_back, &pending] {
+        store
+            .create_edit_operation(draft)
+            .expect("create journal record");
+    }
+    for (expected, next) in [
+        (EditPhase::Prepared, EditPhase::BackupReady),
+        (EditPhase::BackupReady, EditPhase::Replaced),
+        (EditPhase::Replaced, EditPhase::Indexed),
+        (EditPhase::Indexed, EditPhase::Committed),
+    ] {
+        store
+            .transition_edit_operation(&committed.operation_id, expected, next)
+            .expect("commit operation");
+    }
+    store
+        .transition_edit_operation(
+            &rolled_back.operation_id,
+            EditPhase::Prepared,
+            EditPhase::RolledBack,
+        )
+        .expect("roll back operation");
+    store
+        .transition_edit_operation(
+            &pending.operation_id,
+            EditPhase::Prepared,
+            EditPhase::BackupReady,
+        )
+        .expect("leave operation incomplete");
+
+    let incomplete = store
+        .list_incomplete_edit_operations()
+        .expect("list incomplete operations");
+    assert_eq!(incomplete.len(), 1);
+    assert_eq!(incomplete[0].operation_id, pending.operation_id);
+    let competing = update_journal(&project.id, "operation-competing", "src/pending.rs");
+    assert!(matches!(
+        store.create_edit_operation(&competing),
+        Err(StoreError::EditTargetBusy { .. })
+    ));
+    store
+        .transition_edit_operation(
+            &pending.operation_id,
+            EditPhase::BackupReady,
+            EditPhase::RolledBack,
+        )
+        .expect("finish pending rollback");
+    store
+        .create_edit_operation(&competing)
+        .expect("terminal record releases target");
+}
+
+#[test]
+fn failed_phase_update_rolls_back_without_partial_state() {
+    let temp = TempDir::new().expect("temp dir");
+    let (mut store, path) = open_file_store(&temp);
+    let project = project("journal-fault", "/repo/journal-fault");
+    store.register_project(&project).expect("register project");
+    let draft = update_journal(&project.id, "operation-fault", "src/lib.rs");
+    store
+        .create_edit_operation(&draft)
+        .expect("create journal record");
+    drop(store);
+
+    let connection = Connection::open(&path).expect("open fault injector");
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_edit_phase_update AFTER UPDATE OF phase ON edit_journal \
+             BEGIN SELECT RAISE(ABORT, 'injected phase failure'); END;",
+        )
+        .expect("install fault trigger");
+    drop(connection);
+
+    let mut reopened = Store::open(&path).expect("reopen store");
+    assert!(matches!(
+        reopened.transition_edit_operation(
+            &draft.operation_id,
+            EditPhase::Prepared,
+            EditPhase::BackupReady
+        ),
+        Err(StoreError::Sqlite(_))
+    ));
+    let unchanged = reopened
+        .get_edit_operation(&draft.operation_id)
+        .expect("read journal record")
+        .expect("journal record exists");
+    assert_eq!(unchanged.phase, EditPhase::Prepared);
 }

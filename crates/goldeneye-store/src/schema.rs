@@ -4,7 +4,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{SchemaInfo, StoreError};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -108,6 +108,53 @@ const MIGRATIONS: &[(u32, &str)] = &[
         END;
 
         INSERT INTO nodes_fts(nodes_fts) VALUES ('rebuild');
+        ",
+    ),
+    (
+        3,
+        r"
+        CREATE TABLE edit_journal (
+            operation_id TEXT PRIMARY KEY COLLATE BINARY,
+            record_version INTEGER NOT NULL DEFAULT 1 CHECK (record_version = 1),
+            operation_kind TEXT NOT NULL COLLATE BINARY
+                CHECK (operation_kind IN ('create', 'update', 'delete')),
+            project_id TEXT NOT NULL COLLATE BINARY,
+            path TEXT NOT NULL COLLATE BINARY,
+            original_hash TEXT CHECK (original_hash IS NULL OR length(original_hash) = 64),
+            new_hash TEXT CHECK (new_hash IS NULL OR length(new_hash) = 64),
+            temp_path TEXT COLLATE BINARY,
+            backup_path TEXT COLLATE BINARY,
+            created_parent_paths_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(created_parent_paths_json)
+                       AND json_type(created_parent_paths_json) = 'array'),
+            phase TEXT NOT NULL DEFAULT 'prepared' COLLATE BINARY
+                CHECK (phase IN (
+                    'prepared', 'backup_ready', 'replaced', 'indexed',
+                    'committed', 'rolled_back'
+                )),
+            created_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            last_error TEXT,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            CHECK (
+                (operation_kind = 'create' AND original_hash IS NULL AND new_hash IS NOT NULL)
+                OR
+                (operation_kind = 'update' AND original_hash IS NOT NULL AND new_hash IS NOT NULL)
+                OR
+                (operation_kind = 'delete' AND original_hash IS NOT NULL AND new_hash IS NULL)
+            )
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE INDEX edit_journal_project_path_idx
+            ON edit_journal(project_id, path, created_at, operation_id);
+        CREATE INDEX edit_journal_incomplete_idx
+            ON edit_journal(updated_at, operation_id)
+            WHERE phase NOT IN ('committed', 'rolled_back');
+        CREATE UNIQUE INDEX edit_journal_active_target_idx
+            ON edit_journal(project_id, path)
+            WHERE phase NOT IN ('committed', 'rolled_back');
         ",
     ),
 ];
