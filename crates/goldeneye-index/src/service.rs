@@ -443,6 +443,7 @@ where
         let next = AtomicUsize::new(0);
         let (sender, receiver) = mpsc::channel();
         let workers = self.options.max_workers.get().min(candidates.len());
+        let mode = self.options.discovery.mode;
         std::thread::scope(|scope| -> Result<(), IndexError> {
             let mut handles = Vec::with_capacity(workers);
             for _ in 0..workers {
@@ -461,7 +462,7 @@ where
                             break;
                         };
                         if sender
-                            .send((index, extract(provider.clone(), candidate)))
+                            .send((index, extract(provider.clone(), candidate, mode)))
                             .is_err()
                         {
                             break;

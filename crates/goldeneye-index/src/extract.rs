@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use goldeneye_discovery::IndexMode;
 use goldeneye_domain::{
     ByteSpan, EdgeKind, FileRecord, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId,
     NodeId, NodeLabel, ProjectId, ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan,
@@ -25,7 +26,11 @@ pub(crate) struct ExtractedFile {
     pub diagnostics: Option<FileSyntaxDiagnostics>,
 }
 
-pub(crate) fn extract<P>(provider: P, candidate: Candidate) -> Result<ExtractedFile, IndexError>
+pub(crate) fn extract<P>(
+    provider: P,
+    candidate: Candidate,
+    mode: IndexMode,
+) -> Result<ExtractedFile, IndexError>
 where
     P: GrammarProvider,
 {
@@ -50,6 +55,7 @@ where
         &candidate.record.id.path,
         &candidate.language,
         &snapshot,
+        mode,
     )?;
     extractor.run()?;
     let nodes = extractor.nodes;
@@ -95,6 +101,7 @@ struct Extractor<'a> {
     path: &'a ProjectRelativePath,
     language: &'a LanguageId,
     snapshot: &'a SyntaxSnapshot,
+    mode: IndexMode,
     source: &'a [u8],
     nodes: Vec<GraphNode>,
     edges: Vec<GraphEdge>,
@@ -111,6 +118,7 @@ impl<'a> Extractor<'a> {
         path: &'a ProjectRelativePath,
         language: &'a LanguageId,
         snapshot: &'a SyntaxSnapshot,
+        mode: IndexMode,
     ) -> Result<Self, IndexError> {
         let source = snapshot.source();
         let root = snapshot.root();
@@ -178,6 +186,7 @@ impl<'a> Extractor<'a> {
             path,
             language,
             snapshot,
+            mode,
             source,
             nodes,
             edges,
@@ -214,7 +223,7 @@ impl<'a> Extractor<'a> {
             return self.walk_children(node, &impl_scope);
         }
 
-        if is_call(self.language.as_str(), node.kind()) {
+        if is_call(self.mode, self.language.as_str(), node.kind()) {
             self.record_call(node, scope)?;
         }
 
@@ -227,9 +236,13 @@ impl<'a> Extractor<'a> {
                 scope.clone()
             };
 
-        if let Some(definition) =
-            classify(self.language.as_str(), node, &effective_scope, self.source)
-        {
+        if let Some(definition) = classify(
+            self.mode,
+            self.language.as_str(),
+            node,
+            &effective_scope,
+            self.source,
+        ) {
             let next_scope = self.add_definition(node, definition, &effective_scope)?;
             return self.walk_children(node, next_scope.as_ref().unwrap_or(&effective_scope));
         }
@@ -325,7 +338,12 @@ impl<'a> Extractor<'a> {
         let Some(source) = scope.callable.clone() else {
             return Ok(());
         };
-        let Some(callee) = node.child_by_field_name("function") else {
+        let callee = node.child_by_field_name("function").or_else(|| {
+            (self.mode != IndexMode::Fast)
+                .then(|| generic_call_target(node))
+                .flatten()
+        });
+        let Some(callee) = callee else {
             return Ok(());
         };
         let text = self.node_text(callee);
@@ -390,7 +408,26 @@ impl<'a> Extractor<'a> {
     }
 }
 
-fn classify(language: &str, node: Node<'_>, scope: &Scope, source: &[u8]) -> Option<Definition> {
+fn classify(
+    mode: IndexMode,
+    language: &str,
+    node: Node<'_>,
+    scope: &Scope,
+    source: &[u8],
+) -> Option<Definition> {
+    classify_known(language, node, scope, source).or_else(|| {
+        (mode != IndexMode::Fast)
+            .then(|| classify_generic(node, scope, source))
+            .flatten()
+    })
+}
+
+fn classify_known(
+    language: &str,
+    node: Node<'_>,
+    scope: &Scope,
+    source: &[u8],
+) -> Option<Definition> {
     let kind = node.kind();
     let (label, field) = match language {
         "rust" => match kind {
@@ -478,12 +515,238 @@ fn classify(language: &str, node: Node<'_>, scope: &Scope, source: &[u8]) -> Opt
     }
 }
 
-fn is_call(language: &str, kind: &str) -> bool {
-    match language {
+fn classify_generic(node: Node<'_>, scope: &Scope, source: &[u8]) -> Option<Definition> {
+    let kind = node.kind();
+    let label = generic_definition_label(kind, scope)?;
+    let name_node = generic_name_node(node, label)?;
+    let raw_name = if matches!(label, "Variable" | "Field") {
+        first_identifier(name_node).map_or_else(
+            || node_text(name_node, source),
+            |value| node_text(value, source),
+        )
+    } else {
+        node_text(name_node, source)
+    };
+    let name = raw_name
+        .trim_matches(|character: char| {
+            matches!(character, '"' | '\'' | '`' | '<' | '>' | ':' | ';')
+        })
+        .trim();
+    (!name.is_empty()).then(|| Definition {
+        label,
+        name: name.to_owned(),
+    })
+}
+
+fn generic_definition_label(kind: &str, scope: &Scope) -> Option<&'static str> {
+    if is_generic_method(kind) {
+        return Some("Method");
+    }
+    if is_generic_function(kind) {
+        return Some(if scope.kind == ScopeKind::Type {
+            "Method"
+        } else {
+            "Function"
+        });
+    }
+    generic_type_label(kind)
+        .or_else(|| is_generic_field(kind).then_some("Field"))
+        .or_else(|| is_generic_variable(kind).then_some("Variable"))
+        .or_else(|| is_generic_import(kind).then_some("Import"))
+}
+
+fn is_generic_method(kind: &str) -> bool {
+    matches!(
+        kind,
+        "method"
+            | "method_declaration"
+            | "method_definition"
+            | "method_signature"
+            | "constructor"
+            | "constructor_declaration"
+            | "constructor_definition"
+            | "destructor"
+            | "destructor_declaration"
+            | "secondary_constructor"
+    )
+}
+
+fn is_generic_function(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function"
+            | "function_declaration"
+            | "function_definition"
+            | "function_item"
+            | "function_signature"
+            | "function_signature_item"
+            | "function_statement"
+            | "function_clause"
+            | "function_def"
+            | "func_def"
+            | "method_elem"
+            | "subroutine"
+            | "subroutine_declaration"
+            | "subroutine_declaration_statement"
+            | "procedure"
+            | "procedure_declaration"
+            | "procedure_definition"
+            | "procedure_definition_item"
+            | "macro_definition"
+            | "macro_declaration"
+            | "macro_def"
+            | "rpc"
+    )
+}
+
+fn generic_type_label(kind: &str) -> Option<&'static str> {
+    match kind {
+        "class"
+        | "class_declaration"
+        | "class_definition"
+        | "class_statement"
+        | "class_specifier"
+        | "class_interface"
+        | "class_implementation" => Some("Class"),
+        "struct"
+        | "struct_item"
+        | "struct_declaration"
+        | "struct_definition"
+        | "struct_specifier"
+        | "structure"
+        | "structure_declaration" => Some("Struct"),
+        "enum" | "enum_item" | "enum_declaration" | "enum_definition" | "enum_specifier"
+        | "enum_statement" => Some("Enum"),
+        "trait" | "trait_item" | "trait_declaration" => Some("Trait"),
+        "interface"
+        | "interface_declaration"
+        | "interface_definition"
+        | "protocol_declaration"
+        | "protocol_definition" => Some("Interface"),
+        "type_alias" | "type_alias_declaration" | "type_alias_definition" | "type_item" => {
+            Some("TypeAlias")
+        }
+        "type"
+        | "type_declaration"
+        | "type_definition"
+        | "type_spec"
+        | "data_type"
+        | "newtype"
+        | "custom_type"
+        | "contract_declaration"
+        | "message"
+        | "service" => Some("Type"),
+        _ => None,
+    }
+}
+
+fn is_generic_field(kind: &str) -> bool {
+    matches!(
+        kind,
+        "field"
+            | "field_declaration"
+            | "field_definition"
+            | "public_field_definition"
+            | "property"
+            | "property_declaration"
+            | "property_definition"
+            | "record_field"
+            | "enum_member"
+    )
+}
+
+fn is_generic_variable(kind: &str) -> bool {
+    matches!(
+        kind,
+        "let_declaration"
+            | "variable_declaration"
+            | "variable_declarator"
+            | "variable_assignment"
+            | "short_var_declaration"
+            | "var_declaration"
+            | "var_spec"
+            | "assignment"
+            | "assignment_statement"
+            | "const_declaration"
+    )
+}
+
+fn is_generic_import(kind: &str) -> bool {
+    matches!(
+        kind,
+        "import"
+            | "import_declaration"
+            | "import_directive"
+            | "import_or_export"
+            | "import_spec"
+            | "import_statement"
+            | "import_from_statement"
+            | "include"
+            | "include_directive"
+            | "include_statement"
+            | "preproc_include"
+            | "preproc_import"
+            | "require_statement"
+            | "use_declaration"
+            | "use_statement"
+            | "using_directive"
+            | "using_statement"
+    )
+}
+
+fn generic_name_node<'tree>(node: Node<'tree>, label: &str) -> Option<Node<'tree>> {
+    let fields: &[&str] = if label == "Import" {
+        &["path", "module_name", "source", "argument", "name"]
+    } else if matches!(label, "Variable" | "Field") {
+        &[
+            "name",
+            "declarator",
+            "pattern",
+            "left",
+            "property",
+            "field",
+            "key",
+        ]
+    } else {
+        &["name", "declarator", "identifier", "type"]
+    };
+    fields
+        .iter()
+        .find_map(|field| node.child_by_field_name(field))
+        .or_else(|| first_identifier(node))
+}
+
+fn is_call(mode: IndexMode, language: &str, kind: &str) -> bool {
+    let known = match language {
         "python" => kind == "call",
         "rust" | "javascript" | "typescript" | "tsx" | "go" => kind == "call_expression",
         _ => false,
-    }
+    };
+    known
+        || (mode != IndexMode::Fast
+            && matches!(
+                kind,
+                "call"
+                    | "call_expression"
+                    | "function_call"
+                    | "function_call_expression"
+                    | "method_invocation"
+                    | "invocation_expression"
+                    | "new_expression"
+                    | "object_creation_expression"
+                    | "application_expression"
+                    | "apply_expression"
+                    | "command_call"
+                    | "subroutine_call"
+                    | "system_tf_call"
+            ))
+}
+
+fn generic_call_target(node: Node<'_>) -> Option<Node<'_>> {
+    ["callee", "name", "method", "command", "target"]
+        .into_iter()
+        .find_map(|field| node.child_by_field_name(field))
+        .or_else(|| first_identifier(node))
 }
 
 fn receiver_type(node: Node<'_>, source: &[u8]) -> Option<String> {
