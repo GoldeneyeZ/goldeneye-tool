@@ -1,0 +1,56 @@
+{ lib, stdenvNoCC, fetchurl }:
+
+let
+  artifacts = {
+    "x86_64-linux" = {
+      url = "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v{{VERSION}}/goldeneye-linux-x64.tar.gz";
+      hash = "{{LINUX_X64_SRI}}";
+    };
+    "aarch64-linux" = {
+      url = "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v{{VERSION}}/goldeneye-linux-arm64.tar.gz";
+      hash = "{{LINUX_ARM64_SRI}}";
+    };
+    "x86_64-darwin" = {
+      url = "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v{{VERSION}}/goldeneye-darwin-x64.tar.gz";
+      hash = "{{DARWIN_X64_SRI}}";
+    };
+    "aarch64-darwin" = {
+      url = "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v{{VERSION}}/goldeneye-darwin-arm64.tar.gz";
+      hash = "{{DARWIN_ARM64_SRI}}";
+    };
+  };
+  artifact = artifacts.${stdenvNoCC.hostPlatform.system}
+    or (throw "goldeneye-tool does not support ${stdenvNoCC.hostPlatform.system}");
+in
+stdenvNoCC.mkDerivation {
+  pname = "goldeneye-tool";
+  version = "{{VERSION}}";
+
+  src = fetchurl {
+    inherit (artifact) url hash;
+  };
+
+  sourceRoot = ".";
+  dontBuild = true;
+
+  installPhase = ''
+    runHook preInstall
+    install -Dm755 goldeneye "$out/bin/goldeneye"
+    install -Dm644 LICENSE "$out/share/doc/goldeneye-tool/LICENSE"
+    install -Dm644 NOTICE "$out/share/doc/goldeneye-tool/NOTICE"
+    runHook postInstall
+  '';
+
+  doInstallCheck = true;
+  installCheckPhase = ''
+    "$out/bin/goldeneye" --version | grep -F "goldeneye {{VERSION}}"
+  '';
+
+  meta = {
+    description = "Token-efficient code intelligence and editing tools for AI agents";
+    homepage = "https://github.com/GoldeneyeZ/goldeneye-tool";
+    license = lib.licenses.mit;
+    mainProgram = "goldeneye";
+    platforms = builtins.attrNames artifacts;
+  };
+}

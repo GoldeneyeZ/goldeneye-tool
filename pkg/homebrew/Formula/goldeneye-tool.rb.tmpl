@@ -1,0 +1,37 @@
+class GoldeneyeTool < Formula
+  desc "Token-efficient code intelligence and editing tools for AI agents"
+  homepage "https://github.com/GoldeneyeZ/goldeneye-tool"
+  version "{{VERSION}}"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v#{version}/goldeneye-darwin-arm64.tar.gz"
+      sha256 "{{DARWIN_ARM64_SHA256}}"
+    end
+    on_intel do
+      url "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v#{version}/goldeneye-darwin-x64.tar.gz"
+      sha256 "{{DARWIN_X64_SHA256}}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v#{version}/goldeneye-linux-arm64.tar.gz"
+      sha256 "{{LINUX_ARM64_SHA256}}"
+    end
+    on_intel do
+      url "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v#{version}/goldeneye-linux-x64.tar.gz"
+      sha256 "{{LINUX_X64_SHA256}}"
+    end
+  end
+
+  def install
+    bin.install "goldeneye"
+    doc.install "LICENSE", "NOTICE"
+  end
+
+  test do
+    assert_match "goldeneye #{version}", shell_output("#{bin}/goldeneye --version")
+  end
+end

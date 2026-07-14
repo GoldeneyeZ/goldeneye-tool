@@ -1,0 +1,33 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$packageName = 'goldeneye-tool'
+$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$version = '{{VERSION}}'
+$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+
+switch ($architecture) {
+  'x64' {
+    $asset = 'goldeneye-windows-x64.zip'
+    $checksum = '{{WINDOWS_X64_SHA256}}'
+  }
+  'arm64' {
+    $asset = 'goldeneye-windows-arm64.zip'
+    $checksum = '{{WINDOWS_ARM64_SHA256}}'
+  }
+  default { throw "Unsupported Windows architecture: $architecture" }
+}
+
+$url = "https://github.com/GoldeneyeZ/goldeneye-tool/releases/download/v$version/$asset"
+Install-ChocolateyZipPackage `
+  -PackageName $packageName `
+  -Url $url `
+  -UnzipLocation $toolsDir `
+  -Checksum $checksum `
+  -ChecksumType 'sha256'
+
+foreach ($required in @('goldeneye.exe', 'LICENSE', 'NOTICE')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $toolsDir $required) -PathType Leaf)) {
+    throw "Verified archive is missing $required"
+  }
+}
