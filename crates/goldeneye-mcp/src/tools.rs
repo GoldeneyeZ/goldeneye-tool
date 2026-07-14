@@ -161,6 +161,7 @@ fn implemented_tools() -> Vec<ToolDefinition> {
     tools.extend(search_and_query_tools(&project));
     tools.extend(trace_and_source_tools(&project, &trace_schema));
     tools.extend(edit_tools(&project));
+    tools.extend(compatibility_tools());
     tools
 }
 
@@ -460,6 +461,50 @@ fn edit_tools(project: &Value) -> Vec<ToolDefinition> {
             content_request,
         )
         .with_output_schema(mutation_output),
+    ]
+}
+
+fn compatibility_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::new(
+            "manage_adr",
+            "Manage ADR",
+            "Create or update Architecture Decision Records",
+            json!({
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["get", "update", "sections"]},
+                    "content": {"type": "string"},
+                    "sections": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["project"]
+            }),
+        ),
+        ToolDefinition::new(
+            "ingest_traces",
+            "Ingest traces",
+            "Ingest runtime traces to enhance the knowledge graph",
+            json!({
+                "type": "object",
+                "properties": {
+                    "traces": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "caller": {"type": "string"},
+                                "callee": {"type": "string"},
+                                "count": {"type": "integer"}
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "project": {"type": "string"}
+                },
+                "required": ["traces", "project"]
+            }),
+        ),
     ]
 }
 

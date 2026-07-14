@@ -4,9 +4,10 @@ use std::sync::Mutex;
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexStatusRequest,
-    InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
-    QueryGraphRequest, QueryValue, SearchGraphRequest, ServiceConfig, ServiceError,
-    ServiceErrorCode, Services, TraceDirection, TracePathRequest,
+    IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest, NodeContentRequest,
+    OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest, QueryValue,
+    SearchGraphRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
+    TracePathRequest,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -277,8 +278,49 @@ impl Server {
                         .map_err(service_error_message)?,
                 )
             }
+            "manage_adr" => self.manage_adr(arguments),
+            "ingest_traces" => self.ingest_traces(arguments),
             _ => Err(format!("Unknown tool: {name}")),
         }
+    }
+
+    fn manage_adr(&self, arguments: Value) -> Result<Value, String> {
+        let args: ManageAdrArguments = parse_arguments("manage_adr", arguments)?;
+        let Some(project) = args.project else {
+            return Err(missing_project_error());
+        };
+        let request = ManageAdrRequest {
+            project,
+            mode: args.mode,
+            content: args.content,
+            sections: args.sections,
+        };
+        let result = self
+            .services
+            .manage_adr(&request)
+            .map_err(|error| compatibility_error(&self.services, error))?;
+        to_value(result)
+    }
+
+    fn ingest_traces(&self, arguments: Value) -> Result<Value, String> {
+        let args: IngestTracesArguments = parse_arguments("ingest_traces", arguments)?;
+        let traces_received = args.traces.len();
+        let Some(project) = args.project else {
+            return Ok(json!({
+                "status": "accepted",
+                "traces_received": traces_received,
+                "note": "Runtime edge creation from traces not yet implemented"
+            }));
+        };
+        let request = IngestTracesRequest {
+            project: project_id("ingest_traces", project)?,
+            traces: args.traces,
+        };
+        let result = self
+            .services
+            .ingest_traces(&request)
+            .map_err(|error| compatibility_error(&self.services, error))?;
+        to_value(result)
     }
 
     fn index_repository(
@@ -496,6 +538,59 @@ fn project_id(tool: &str, project: String) -> Result<ProjectId, String> {
         .map_err(|error| format!("Invalid parameters for {tool}: invalid project: {error}"))
 }
 
+fn missing_project_error() -> String {
+    json!({
+        "error": "missing required argument: project",
+        "hint": concat!(
+            "Pass the project as the \"project\" argument, e.g. ",
+            "{\"project\":\"<name from list_projects>\"}. ",
+            "Run list_projects to see indexed projects."
+        )
+    })
+    .to_string()
+}
+
+fn compatibility_error(services: &Services, error: ServiceError) -> String {
+    if matches!(
+        error,
+        ServiceError::Query(QueryError::ProjectNotFound(_))
+            | ServiceError::Edit {
+                code: ServiceErrorCode::NotFound,
+                ..
+            }
+    ) {
+        return project_list_error(services, "project not found or not indexed");
+    }
+    service_error_message(error)
+}
+
+fn project_list_error(services: &Services, reason: &str) -> String {
+    let projects = services
+        .list_projects()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|project| project.project)
+        .collect::<Vec<_>>();
+    if projects.is_empty() {
+        json!({
+            "error": reason,
+            "hint": "No projects indexed yet. Call index_repository first."
+        })
+        .to_string()
+    } else {
+        json!({
+            "error": reason,
+            "hint": concat!(
+                "Use list_projects to see all indexed projects, then pass it as the ",
+                "\"project\" argument."
+            ),
+            "available_projects": projects,
+            "count": projects.len()
+        })
+        .to_string()
+    }
+}
+
 fn service_error_message(error: ServiceError) -> String {
     match error {
         ServiceError::Query(QueryError::ProjectNotFound(project)) => {
@@ -569,6 +664,22 @@ fn query_value(value: QueryValue) -> Result<Value, String> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EmptyArguments {}
+
+#[derive(Deserialize)]
+struct ManageAdrArguments {
+    project: Option<String>,
+    mode: Option<String>,
+    content: Option<String>,
+    #[serde(default)]
+    sections: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct IngestTracesArguments {
+    project: Option<String>,
+    #[serde(default)]
+    traces: Vec<Value>,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -778,7 +889,7 @@ mod tests {
 
         assert_eq!(
             value["result"]["tools"].as_array().expect("tools").len(),
-            10
+            18
         );
         assert_eq!(value["result"]["tools"][0]["name"], "index_repository");
     }

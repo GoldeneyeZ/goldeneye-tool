@@ -1,5 +1,6 @@
 //! `SQLite` persistence for Goldeneye's tool-neutral code graph.
 
+mod adr;
 mod schema;
 
 use std::{
@@ -20,6 +21,9 @@ use rusqlite::{
 use serde_json::Value;
 use thiserror::Error;
 
+pub use adr::{
+    ADR_MAX_LENGTH, ADR_MAX_SECTIONS, AdrSection, parse_adr_sections, render_adr_sections,
+};
 pub use schema::CURRENT_SCHEMA_VERSION;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -97,6 +101,12 @@ pub enum StoreError {
         expected: EditPhase,
         actual: EditPhase,
     },
+    #[error("no ADR found for project: {0:?}")]
+    AdrNotFound(ProjectId),
+    #[error("merged ADR exceeds {limit} chars ({actual} chars)")]
+    AdrTooLarge { limit: usize, actual: usize },
+    #[error("invalid runtime trace: {reason}")]
+    InvalidRuntimeTrace { reason: &'static str },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +150,52 @@ pub struct GraphCounts {
     pub files: u64,
     pub nodes: u64,
     pub edges: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdrRecord {
+    pub project: ProjectId,
+    pub content: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeTrace {
+    pub caller: String,
+    pub callee: String,
+    pub count: u64,
+}
+
+impl RuntimeTrace {
+    /// Creates one validated runtime edge observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for empty endpoints, embedded NUL bytes, or a zero count.
+    pub fn new(
+        source: impl Into<String>,
+        target: impl Into<String>,
+        count: u64,
+    ) -> Result<Self, StoreError> {
+        let trace = Self {
+            caller: source.into(),
+            callee: target.into(),
+            count,
+        };
+        validate_runtime_trace(&trace)?;
+        Ok(trace)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeTraceRecord {
+    pub project: ProjectId,
+    pub caller: String,
+    pub callee: String,
+    pub count: u64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -744,6 +800,136 @@ impl Store {
         transaction.commit()?;
         Ok(changed == 1)
     }
+
+    /// Stores an ADR for an indexed project, preserving its creation timestamp on update.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed not-found or storage error.
+    pub fn store_adr(&mut self, project: &ProjectId, content: &str) -> Result<(), StoreError> {
+        ensure_project_exists(&self.connection, project)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "INSERT INTO project_summaries(project_id, content) VALUES (?1, ?2) \
+             ON CONFLICT(project_id) DO UPDATE SET content = excluded.content, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            params![project.as_str(), content],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Deletes an ADR when one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when deletion fails.
+    pub fn delete_adr(&mut self, project: &ProjectId) -> Result<bool, StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
+            "DELETE FROM project_summaries WHERE project_id = ?1",
+            params![project.as_str()],
+        )?;
+        transaction.commit()?;
+        Ok(changed == 1)
+    }
+
+    /// Merges ADR sections using upstream canonical ordering and the 8,000-byte limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed not-found, size, or storage error.
+    pub fn update_adr_sections(
+        &mut self,
+        project: &ProjectId,
+        updates: &[AdrSection],
+    ) -> Result<AdrRecord, StoreError> {
+        let existing = self
+            .get_adr(project)?
+            .ok_or_else(|| StoreError::AdrNotFound(project.clone()))?;
+        let mut sections = parse_adr_sections(&existing.content);
+        for update in updates {
+            if let Some(section) = sections
+                .iter_mut()
+                .find(|section| section.name == update.name)
+            {
+                section.content.clone_from(&update.content);
+            } else if sections.len() < ADR_MAX_SECTIONS {
+                sections.push(update.clone());
+            }
+        }
+        let merged = render_adr_sections(&sections);
+        if merged.len() > ADR_MAX_LENGTH {
+            return Err(StoreError::AdrTooLarge {
+                limit: ADR_MAX_LENGTH,
+                actual: merged.len(),
+            });
+        }
+        self.store_adr(project, &merged)?;
+        self.get_adr(project)?
+            .ok_or_else(|| StoreError::AdrNotFound(project.clone()))
+    }
+
+    /// Atomically aggregates runtime edge observations for an indexed project.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation, not-found, overflow, or storage error.
+    pub fn ingest_runtime_traces(
+        &mut self,
+        project: &ProjectId,
+        traces: &[RuntimeTrace],
+    ) -> Result<usize, StoreError> {
+        ensure_project_exists(&self.connection, project)?;
+        let mut aggregated = BTreeMap::<(String, String), u64>::new();
+        for trace in traces {
+            validate_runtime_trace(trace)?;
+            let count = aggregated
+                .entry((trace.caller.clone(), trace.callee.clone()))
+                .or_default();
+            *count = count
+                .checked_add(trace.count)
+                .ok_or(StoreError::InvalidRuntimeTrace {
+                    reason: "count overflow",
+                })?;
+        }
+
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for ((caller, callee), count) in aggregated {
+            let existing = transaction
+                .query_row(
+                    "SELECT count FROM runtime_traces \
+                     WHERE project_id = ?1 AND caller = ?2 AND callee = ?3",
+                    params![project.as_str(), caller, callee],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let total = existing.map_or(Ok(count), |value| {
+                sqlite_u64("runtime trace count", value)?
+                    .checked_add(count)
+                    .ok_or(StoreError::InvalidRuntimeTrace {
+                        reason: "count overflow",
+                    })
+            })?;
+            let total = sqlite_integer("runtime trace count", total)?;
+            transaction.execute(
+                "INSERT INTO runtime_traces(project_id, caller, callee, count) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(project_id, caller, callee) DO UPDATE SET \
+                 count = excluded.count, \
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                params![project.as_str(), caller, callee, total],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(traces.len())
+    }
 }
 
 macro_rules! impl_read_api {
@@ -786,6 +972,27 @@ macro_rules! impl_read_api {
             /// Returns a store error when reading or decoding fails.
             pub fn list_projects(&self) -> Result<Vec<ProjectRecord>, StoreError> {
                 list_projects(&self.connection)
+            }
+
+            /// Finds the project ADR when one exists.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error when reading or decoding fails.
+            pub fn get_adr(&self, project: &ProjectId) -> Result<Option<AdrRecord>, StoreError> {
+                get_adr(&self.connection, project)
+            }
+
+            /// Lists aggregated runtime traces in stable caller/callee order.
+            ///
+            /// # Errors
+            ///
+            /// Returns a store error when reading or decoding fails.
+            pub fn list_runtime_traces(
+                &self,
+                project: &ProjectId,
+            ) -> Result<Vec<RuntimeTraceRecord>, StoreError> {
+                list_runtime_traces(&self.connection, project)
             }
 
             /// Finds a normalized file record by compound identity.
@@ -1425,6 +1632,91 @@ fn project_file_paths(
         ProjectRelativePath::new(value).map_err(corrupt_syntax("file path"))
     })
     .collect()
+}
+
+fn ensure_project_exists(connection: &Connection, project: &ProjectId) -> Result<(), StoreError> {
+    if get_project(connection, project)?.is_none() {
+        return Err(StoreError::ProjectNotFound(project.clone()));
+    }
+    Ok(())
+}
+
+fn get_adr(connection: &Connection, project: &ProjectId) -> Result<Option<AdrRecord>, StoreError> {
+    let raw = connection
+        .query_row(
+            "SELECT project_id, content, created_at, updated_at \
+             FROM project_summaries WHERE project_id = ?1",
+            params![project.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(|(project, content, created_at, updated_at)| {
+        Ok(AdrRecord {
+            project: ProjectId::new(project).map_err(corrupt_domain("ADR project ID"))?,
+            content,
+            created_at,
+            updated_at,
+        })
+    })
+    .transpose()
+}
+
+fn list_runtime_traces(
+    connection: &Connection,
+    project: &ProjectId,
+) -> Result<Vec<RuntimeTraceRecord>, StoreError> {
+    let mut statement = connection.prepare(
+        "SELECT project_id, caller, callee, count, created_at, updated_at \
+         FROM runtime_traces WHERE project_id = ?1 ORDER BY caller, callee",
+    )?;
+    let rows = statement.query_map(params![project.as_str()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (project, source, target, count, created_at, updated_at) = row?;
+        Ok(RuntimeTraceRecord {
+            project: ProjectId::new(project).map_err(corrupt_domain("runtime trace project ID"))?,
+            caller: source,
+            callee: target,
+            count: sqlite_u64("runtime trace count", count)?,
+            created_at,
+            updated_at,
+        })
+    })
+    .collect()
+}
+
+fn validate_runtime_trace(trace: &RuntimeTrace) -> Result<(), StoreError> {
+    if trace.caller.is_empty() || trace.callee.is_empty() {
+        return Err(StoreError::InvalidRuntimeTrace {
+            reason: "caller and callee must be non-empty",
+        });
+    }
+    if trace.caller.contains('\0') || trace.callee.contains('\0') {
+        return Err(StoreError::InvalidRuntimeTrace {
+            reason: "caller and callee must not contain NUL bytes",
+        });
+    }
+    if trace.count == 0 {
+        return Err(StoreError::InvalidRuntimeTrace {
+            reason: "count must be positive",
+        });
+    }
+    Ok(())
 }
 
 fn get_project(

@@ -182,7 +182,7 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
             .as_array()
             .expect("tools")
             .len(),
-        16
+        18
     );
     assert_eq!(
         second[1]["result"]["structuredContent"]["projects"][0]["name"],

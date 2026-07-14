@@ -2,6 +2,7 @@
 
 //! Tool-neutral orchestration over Goldeneye indexing, storage, and query crates.
 
+mod adr_traces;
 mod edit;
 
 use std::env;
@@ -16,6 +17,10 @@ use goldeneye_syntax::CoreGrammarProvider;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use adr_traces::{
+    ADR_EMPTY_HINT, IngestTracesRequest, IngestTracesResult, MAX_PERSISTED_TRACE_BATCH,
+    MAX_TRACE_ENDPOINT_BYTES, ManageAdrRequest, ManageAdrResult, parse_runtime_traces,
+};
 pub use edit::{
     CreateFileRequest, DeleteNodeRequest, EditMutationResult, EditParsePolicy, GraphMutation,
     InspectSyntaxRequest, InspectSyntaxResult, InspectionSize, MutationDiagnostics, MutationDiff,

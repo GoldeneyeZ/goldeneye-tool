@@ -4,7 +4,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{SchemaInfo, StoreError};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -155,6 +155,36 @@ const MIGRATIONS: &[(u32, &str)] = &[
         CREATE UNIQUE INDEX edit_journal_active_target_idx
             ON edit_journal(project_id, path)
             WHERE phase NOT IN ('committed', 'rolled_back');
+        ",
+    ),
+    (
+        4,
+        r"
+        CREATE TABLE project_summaries (
+            project_id TEXT PRIMARY KEY COLLATE BINARY,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE runtime_traces (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            caller TEXT NOT NULL COLLATE BINARY CHECK (length(caller) > 0),
+            callee TEXT NOT NULL COLLATE BINARY CHECK (length(callee) > 0),
+            count INTEGER NOT NULL CHECK (count > 0),
+            created_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            PRIMARY KEY (project_id, caller, callee),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE INDEX runtime_traces_project_count_idx
+            ON runtime_traces(project_id, count DESC, caller, callee);
         ",
     ),
 ];
