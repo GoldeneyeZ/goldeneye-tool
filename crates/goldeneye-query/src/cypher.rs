@@ -12,7 +12,12 @@ use crate::{
 };
 
 const MAX_QUERY_ROWS: usize = 10_000;
-const MAX_VARIABLE_HOPS: usize = 8;
+const MAX_QUERY_BYTES: usize = 1_048_576;
+const MAX_QUERY_TOKENS: usize = 16_384;
+const MAX_UNION_BRANCHES: usize = 32;
+const MAX_MATCH_PATTERNS: usize = 64;
+const MAX_PROJECTIONS: usize = 256;
+const MAX_VARIABLE_HOPS: usize = 10;
 const MAX_INTERMEDIATE_BINDINGS: usize = 100_000;
 
 pub(crate) fn execute(
@@ -26,9 +31,18 @@ pub(crate) fn execute(
             maximum: MAX_QUERY_ROWS,
         });
     }
+    if request.query.len() > MAX_QUERY_BYTES {
+        return Err(unsupported("query exceeds byte-size safety cap"));
+    }
     let tokens = lex(&request.query)?;
+    if tokens.len() > MAX_QUERY_TOKENS {
+        return Err(unsupported("query exceeds token-count safety cap"));
+    }
     reject_mutations(&tokens)?;
     let (branches, union_all) = split_union_tokens(tokens)?;
+    if branches.len() > MAX_UNION_BRANCHES {
+        return Err(unsupported("query exceeds UNION branch safety cap"));
+    }
     if union_all.is_empty() {
         let query = Parser::new(
             branches.into_iter().next().expect("query has one branch"),
@@ -90,7 +104,10 @@ fn execute_parsed(
     }
 
     if query.star {
-        query.projections = expand_star_projections(&query.matches);
+        query.projections = query.with_clause.as_ref().map_or_else(
+            || expand_star_projections(&query.matches),
+            expand_with_star_projections,
+        );
     }
     let columns = query
         .projections
@@ -443,13 +460,13 @@ struct WithClause {
     limit: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum MatchPattern {
     Node(NodePattern),
     Edge(Box<EdgeMatch>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct EdgeMatch {
     left: NodePattern,
     edge: EdgePattern,
@@ -463,7 +480,7 @@ struct NodePattern {
     properties: Vec<(String, QueryValue)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct EdgePattern {
     alias: Option<String>,
     kinds: Vec<String>,
@@ -485,6 +502,7 @@ enum Expression {
     Or(Box<Self>, Box<Self>),
     Xor(Box<Self>, Box<Self>),
     Not(Box<Self>),
+    Exists(Vec<MatchPattern>),
     Predicate(Box<Predicate>),
 }
 
@@ -683,6 +701,14 @@ impl Parser {
                 filter,
                 optional,
             });
+            if clauses
+                .iter()
+                .map(|clause| clause.patterns.len())
+                .sum::<usize>()
+                > MAX_MATCH_PATTERNS
+            {
+                return Err(unsupported("query exceeds MATCH pattern safety cap"));
+            }
             if self.consume_keyword("OPTIONAL") {
                 self.expect_keyword("MATCH")?;
                 optional = true;
@@ -745,11 +771,10 @@ impl Parser {
             let Some((edge, right)) = self.parse_pattern_relationship()? else {
                 break;
             };
-            if left.alias == right.alias
-                || edge
-                    .alias
-                    .as_deref()
-                    .is_some_and(|alias| alias == left.alias || alias == right.alias)
+            if edge
+                .alias
+                .as_deref()
+                .is_some_and(|alias| alias == left.alias || alias == right.alias)
             {
                 return Err(unsupported("aliases in a relationship must be distinct"));
             }
@@ -867,11 +892,7 @@ impl Parser {
                 min_hops = hops;
                 max_hops = hops;
             }
-            if min_hops > MAX_VARIABLE_HOPS {
-                return Err(unsupported(
-                    "relationship minimum hop count exceeds safety cap",
-                ));
-            }
+            min_hops = min_hops.min(MAX_VARIABLE_HOPS);
             max_hops = max_hops.min(MAX_VARIABLE_HOPS);
             if max_hops < min_hops {
                 return Err(self.error("relationship maximum hop count is below minimum"));
@@ -917,6 +938,12 @@ impl Parser {
     fn parse_not_expression(&mut self) -> Result<Expression, QueryError> {
         if self.consume_keyword("NOT") {
             return Ok(Expression::Not(Box::new(self.parse_not_expression()?)));
+        }
+        if self.consume_keyword("EXISTS") {
+            self.expect_symbol(Symbol::LeftBrace)?;
+            let patterns = self.parse_pattern_chain()?;
+            self.expect_symbol(Symbol::RightBrace)?;
+            return Ok(Expression::Exists(patterns));
         }
         if self.consume_symbol(Symbol::LeftParen) {
             let expression = self.parse_or_expression()?;
@@ -1052,6 +1079,9 @@ impl Parser {
         let mut projections = Vec::new();
         loop {
             projections.push(self.parse_projection()?);
+            if projections.len() > MAX_PROJECTIONS {
+                return Err(unsupported("query exceeds projection safety cap"));
+            }
             if !self.consume_symbol(Symbol::Comma) {
                 break;
             }
@@ -1318,6 +1348,19 @@ fn expand_star_projections(matches: &[MatchClause]) -> Vec<Projection> {
         .collect()
 }
 
+fn expand_with_star_projections(clause: &WithClause) -> Vec<Projection> {
+    clause
+        .projections
+        .iter()
+        .map(|projection| Projection {
+            expression: ProjectionExpression::Reference(Reference::Alias(
+                projection.column.clone(),
+            )),
+            column: projection.column.clone(),
+        })
+        .collect()
+}
+
 fn pattern_node_aliases(pattern: &MatchPattern) -> Vec<&str> {
     match pattern {
         MatchPattern::Node(node) => vec![node.alias.as_str()],
@@ -1387,6 +1430,8 @@ struct Binding<'a> {
     nodes: BTreeMap<String, &'a GraphNode>,
     edges: BTreeMap<String, &'a GraphEdge>,
     values: BTreeMap<String, QueryValue>,
+    all_nodes: Option<&'a [GraphNode]>,
+    all_edges: Option<&'a [GraphEdge]>,
 }
 
 fn execute_unwind<'a>(
@@ -1416,6 +1461,8 @@ fn execute_unwind<'a>(
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             values: BTreeMap::from([(clause.alias.clone(), value)]),
+            all_nodes: None,
+            all_edges: None,
         })
         .collect())
 }
@@ -1481,6 +1528,12 @@ fn execute_match_clauses<'a>(
 
 fn merge_bindings<'a>(base: &Binding<'a>, candidate: &Binding<'a>) -> Option<Binding<'a>> {
     let mut merged = base.clone();
+    if merged.all_nodes.is_none() {
+        merged.all_nodes = candidate.all_nodes;
+    }
+    if merged.all_edges.is_none() {
+        merged.all_edges = candidate.all_edges;
+    }
     for (alias, node) in &candidate.nodes {
         if merged
             .nodes
@@ -1545,7 +1598,7 @@ fn build_bindings_bounded<'a>(
     edges: &'a [GraphEdge],
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<Binding<'a>>, QueryError> {
-    let bindings = match pattern {
+    let mut bindings = match pattern {
         MatchPattern::Node(pattern) => nodes
             .iter()
             .filter(|node| node_matches(node, pattern, degrees))
@@ -1553,6 +1606,8 @@ fn build_bindings_bounded<'a>(
                 nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
                 edges: BTreeMap::new(),
                 values: BTreeMap::new(),
+                all_nodes: Some(nodes),
+                all_edges: Some(edges),
             })
             .collect(),
         MatchPattern::Edge(pattern) => {
@@ -1629,6 +1684,10 @@ fn build_bindings_bounded<'a>(
     if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
         return Err(unsupported("query exceeds intermediate binding safety cap"));
     }
+    for binding in &mut bindings {
+        binding.all_nodes = Some(nodes);
+        binding.all_edges = Some(edges);
+    }
     Ok(bindings)
 }
 
@@ -1645,6 +1704,9 @@ fn push_edge_binding<'a>(
     if !node_matches(left, left_pattern, degrees) || !node_matches(right, right_pattern, degrees) {
         return;
     }
+    if left_pattern.alias == right_pattern.alias && left.id != right.id {
+        return;
+    }
     let mut edges = BTreeMap::new();
     if let Some(alias) = &edge_pattern.alias {
         edges.insert(alias.clone(), edge);
@@ -1656,6 +1718,8 @@ fn push_edge_binding<'a>(
         ]),
         edges,
         values: BTreeMap::new(),
+        all_nodes: None,
+        all_edges: None,
     });
 }
 
@@ -1690,6 +1754,7 @@ fn build_variable_bindings<'a>(
         while let Some(frame) = stack.pop() {
             if frame.depth >= pattern.edge.min_hops
                 && node_matches(frame.current, &pattern.right, degrees)
+                && (pattern.left.alias != pattern.right.alias || frame.start.id == frame.current.id)
             {
                 let mut bound_edges = BTreeMap::new();
                 if let (Some(alias), Some(edge)) = (&pattern.edge.alias, frame.last_edge) {
@@ -1702,6 +1767,8 @@ fn build_variable_bindings<'a>(
                     ]),
                     edges: bound_edges,
                     values: BTreeMap::new(),
+                    all_nodes: Some(nodes),
+                    all_edges: Some(edges),
                 });
                 if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
                     return Err(unsupported("query exceeds intermediate binding safety cap"));
@@ -1796,8 +1863,41 @@ fn evaluate_expression(
         Expression::Xor(left, right) => Ok(evaluate_expression(left, binding, degrees)?
             ^ evaluate_expression(right, binding, degrees)?),
         Expression::Not(inner) => Ok(!evaluate_expression(inner, binding, degrees)?),
+        Expression::Exists(patterns) => evaluate_exists(patterns, binding, degrees),
         Expression::Predicate(predicate) => evaluate_predicate(predicate, binding, degrees),
     }
+}
+
+fn evaluate_exists(
+    patterns: &[MatchPattern],
+    binding: &Binding<'_>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<bool, QueryError> {
+    let (Some(nodes), Some(edges)) = (binding.all_nodes, binding.all_edges) else {
+        return Ok(false);
+    };
+    let mut partial = vec![binding.clone()];
+    for pattern in patterns {
+        let candidates = build_bindings_bounded(pattern, nodes, edges, degrees)?;
+        let mut next = Vec::new();
+        for binding in &partial {
+            for candidate in &candidates {
+                if let Some(merged) = merge_bindings(binding, candidate) {
+                    next.push(merged);
+                    if next.len() > MAX_INTERMEDIATE_BINDINGS {
+                        return Err(unsupported(
+                            "EXISTS exceeds intermediate binding safety cap",
+                        ));
+                    }
+                }
+            }
+        }
+        partial = next;
+        if partial.is_empty() {
+            return Ok(false);
+        }
+    }
+    Ok(!partial.is_empty())
 }
 
 fn evaluate_predicate(
@@ -1829,6 +1929,14 @@ fn evaluate_predicate(
     if matches!(left, QueryValue::Null) || matches!(right, QueryValue::Null) {
         return Ok(false);
     }
+    if matches!(&predicate.operator, PredicateOperator::Regex) {
+        let (QueryValue::String(value), QueryValue::String(pattern)) = (&left, &right) else {
+            return Ok(false);
+        };
+        let regex = Regex::new(pattern)
+            .map_err(|error| unsupported(&format!("invalid regular expression: {error}")))?;
+        return Ok(regex.is_match(value));
+    }
     Ok(match &predicate.operator {
         PredicateOperator::Equal => values_equal(&left, &right),
         PredicateOperator::NotEqual => !values_equal(&left, &right),
@@ -1836,9 +1944,7 @@ fn evaluate_predicate(
         PredicateOperator::LessEqual => compare_values(&left, &right) != Ordering::Greater,
         PredicateOperator::Greater => compare_values(&left, &right) == Ordering::Greater,
         PredicateOperator::GreaterEqual => compare_values(&left, &right) != Ordering::Less,
-        PredicateOperator::Regex => string_pair(&left, &right, |left, right| {
-            Regex::new(right).is_ok_and(|regex| regex.is_match(left))
-        }),
+        PredicateOperator::Regex => unreachable!(),
         PredicateOperator::In | PredicateOperator::NotIn => {
             let Operand::List(items) = predicate
                 .right
@@ -2430,6 +2536,16 @@ fn compare_values(left: &QueryValue, right: &QueryValue) -> Ordering {
 }
 
 fn compare_numeric(left: &QueryValue, right: &QueryValue) -> Option<Ordering> {
+    if let QueryValue::String(value) = left
+        && is_numeric_value(right)
+    {
+        return parse_numeric_value(value).and_then(|value| compare_numeric(&value, right));
+    }
+    if let QueryValue::String(value) = right
+        && is_numeric_value(left)
+    {
+        return parse_numeric_value(value).and_then(|value| compare_numeric(left, &value));
+    }
     Some(match (left, right) {
         (QueryValue::Integer(left), QueryValue::Integer(right)) => left.cmp(right),
         (QueryValue::Unsigned(left), QueryValue::Unsigned(right)) => left.cmp(right),
@@ -2448,6 +2564,24 @@ fn compare_numeric(left: &QueryValue, right: &QueryValue) -> Option<Ordering> {
         }
         _ => return None,
     })
+}
+
+const fn is_numeric_value(value: &QueryValue) -> bool {
+    matches!(
+        value,
+        QueryValue::Integer(_) | QueryValue::Unsigned(_) | QueryValue::Float(_)
+    )
+}
+
+fn parse_numeric_value(value: &str) -> Option<QueryValue> {
+    if value.contains('.') || value.contains('e') || value.contains('E') {
+        return value.parse().ok().map(QueryValue::Float);
+    }
+    value
+        .parse::<i64>()
+        .map(QueryValue::Integer)
+        .ok()
+        .or_else(|| value.parse::<u64>().map(QueryValue::Unsigned).ok())
 }
 
 fn compare_i64_u64(signed: i64, unsigned: u64) -> Ordering {
@@ -2664,6 +2798,10 @@ fn binding_from_with<'a>(
     source: Option<&Binding<'a>>,
 ) -> Binding<'a> {
     let mut binding = Binding::default();
+    if let Some(source) = source {
+        binding.all_nodes = source.all_nodes;
+        binding.all_edges = source.all_edges;
+    }
     for (projection, value) in projections.iter().zip(values) {
         if let ProjectionExpression::Reference(Reference::Alias(alias)) = &projection.expression
             && let Some(source) = source

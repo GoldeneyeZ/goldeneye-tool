@@ -22,7 +22,7 @@ fn upstream_with_rename_and_grouped_pipeline_are_supported() {
         .engine()
         .query_graph(&QueryGraphRequest::new(
             fixture.project.clone(),
-            "MATCH (f:Function)-[:CALLS]->(g:Function) WITH f.name AS caller, COUNT(g) AS cnt WHERE cnt >= 1 ORDER BY caller LIMIT 2 RETURN caller, cnt",
+            "MATCH (f:Function)-[:CALLS]->(g:Function) WITH f.name AS caller, COUNT(g) AS cnt WHERE cnt >= '1' ORDER BY caller LIMIT 2 RETURN caller, cnt",
         ))
         .expect("WITH aggregate pipeline");
     assert_eq!(
@@ -37,6 +37,26 @@ fn upstream_with_rename_and_grouped_pipeline_are_supported() {
                 QueryValue::Integer(1),
             ],
         ]
+    );
+}
+
+#[test]
+fn upstream_return_star_after_with_uses_the_carried_scope() {
+    let fixture = Fixture::seeded();
+    let result = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function {name: 'Alpha'}) WITH f.name AS name, f.start_line AS line RETURN *",
+        ))
+        .expect("RETURN * after WITH");
+    assert_eq!(result.columns, vec!["name", "line"]);
+    assert_eq!(
+        result.rows,
+        vec![vec![
+            QueryValue::String("Alpha".to_owned()),
+            QueryValue::Integer(1),
+        ]]
     );
 }
 

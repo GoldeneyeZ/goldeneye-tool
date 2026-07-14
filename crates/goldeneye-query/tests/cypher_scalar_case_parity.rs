@@ -90,7 +90,7 @@ fn upstream_searched_and_simple_case_expressions_are_supported() {
         .engine()
         .query_graph(&QueryGraphRequest::new(
             fixture.project.clone(),
-            "MATCH (f:Function {name: 'Alpha'}) RETURN CASE WHEN f.start_line > 2 THEN 'late' WHEN f.start_line = 1 THEN 'first' ELSE 'other' END AS position, CASE f.label WHEN 'Function' THEN 'callable' ELSE 'other' END AS kind",
+            "MATCH (f:Function {name: 'Alpha'}) RETURN CASE WHEN f.start_line > '2' THEN 'late' WHEN f.start_line = '1' THEN 'first' ELSE 'other' END AS position, CASE f.label WHEN 'Function' THEN 'callable' ELSE 'other' END AS kind",
         ))
         .expect("CASE expressions");
 

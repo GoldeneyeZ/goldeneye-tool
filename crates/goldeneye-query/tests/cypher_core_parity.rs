@@ -1,7 +1,7 @@
 mod common;
 
 use common::Fixture;
-use goldeneye_query::{QueryGraphRequest, QueryValue};
+use goldeneye_query::{QueryError, QueryGraphRequest, QueryValue};
 use serde_json::json;
 
 #[test]
@@ -170,6 +170,88 @@ fn upstream_anonymous_nodes_and_label_predicates_are_supported() {
         ))
         .expect("label predicate");
     assert_eq!(predicate.rows, vec![vec![QueryValue::Integer(5)]]);
+}
+
+#[test]
+fn upstream_exists_path_predicates_are_edge_type_and_direction_aware() {
+    let fixture = Fixture::seeded();
+    let outgoing = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) WHERE EXISTS { (f)-[:CALLS]->() } RETURN f.name",
+        ))
+        .expect("outgoing EXISTS");
+    assert_eq!(outgoing.rows.len(), 3);
+
+    let inbound = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) WHERE EXISTS { (f)<-[:CALLS]-() } RETURN f.name",
+        ))
+        .expect("inbound EXISTS");
+    assert_eq!(inbound.rows.len(), 2);
+
+    let no_inbound = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) WHERE NOT EXISTS { (f)<-[:CALLS]-() } RETURN f.name",
+        ))
+        .expect("negated EXISTS");
+    assert_eq!(no_inbound.rows.len(), 2);
+}
+
+#[test]
+fn upstream_repeated_aliases_unify_and_oversized_hop_bounds_are_clamped() {
+    let fixture = Fixture::seeded();
+    let self_loops = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (a)-[:CALLS]->(a) RETURN a.name",
+        ))
+        .expect("repeated alias unification");
+    assert!(self_loops.rows.is_empty());
+
+    let clamped = fixture
+        .engine()
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (a)-[:CALLS*150..150]->(b) RETURN b.name",
+        ))
+        .expect("oversized hop range clamps to the traversal ceiling");
+    assert!(clamped.rows.is_empty());
+}
+
+#[test]
+fn invalid_computed_reads_fail_loudly_and_wide_projection_is_bounded() {
+    let fixture = Fixture::seeded();
+    let engine = fixture.engine();
+    assert!(matches!(
+        engine.query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) WHERE f.name =~ '[' RETURN f.name",
+        )),
+        Err(QueryError::UnsupportedQuery { .. })
+    ));
+    assert!(matches!(
+        engine.query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (f:Function) RETURN noSuchFunction(f.name)",
+        )),
+        Err(QueryError::UnsupportedQuery { .. })
+    ));
+
+    let query = format!(
+        "MATCH (f:Function) RETURN {}",
+        (0..257).map(|_| "f.name").collect::<Vec<_>>().join(", ")
+    );
+    assert!(matches!(
+        engine.query_graph(&QueryGraphRequest::new(fixture.project.clone(), query)),
+        Err(QueryError::UnsupportedQuery { .. })
+    ));
 }
 
 fn text(value: &str) -> QueryValue {
