@@ -223,6 +223,12 @@ fn upstream_repeated_aliases_unify_and_oversized_hop_bounds_are_clamped() {
         ))
         .expect("oversized hop range clamps to the traversal ceiling");
     assert!(clamped.rows.is_empty());
+    assert!(
+        clamped
+            .warning
+            .as_deref()
+            .is_some_and(|warning| { warning.contains("clamped") && warning.contains("10") })
+    );
 }
 
 #[test]

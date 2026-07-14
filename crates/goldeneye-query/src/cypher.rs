@@ -68,9 +68,11 @@ pub(crate) fn execute(
     }
     let first_result = results.remove(0);
     let mut source_truncated = first_result.truncated;
+    let mut warnings = first_result.warning.into_iter().collect::<Vec<_>>();
     let mut rows = first_result.rows;
     for (all, result) in union_all.into_iter().zip(results) {
         source_truncated |= result.truncated;
+        warnings.extend(result.warning);
         rows.extend(result.rows);
         if !all {
             let mut seen = BTreeSet::new();
@@ -86,6 +88,7 @@ pub(crate) fn execute(
         rows,
         total,
         truncated,
+        warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
     })
 }
 
@@ -126,6 +129,7 @@ fn execute_parsed(
     let materialized_limit = row_cap.min(query_limit);
     let truncated = total > materialized_limit;
     rows.truncate(materialized_limit);
+    let warning = (!query.warnings.is_empty()).then(|| query.warnings.join("; "));
 
     Ok(QueryGraphResult {
         project: request.project.as_str().to_owned(),
@@ -133,6 +137,7 @@ fn execute_parsed(
         rows,
         total,
         truncated,
+        warning,
     })
 }
 
@@ -435,6 +440,7 @@ struct ParsedQuery {
     order: Vec<OrderClause>,
     skip: usize,
     limit: Option<usize>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -608,6 +614,7 @@ struct Parser {
     index: usize,
     end_position: usize,
     anonymous_nodes: usize,
+    warnings: Vec<String>,
 }
 
 impl Parser {
@@ -617,6 +624,7 @@ impl Parser {
             index: 0,
             end_position,
             anonymous_nodes: 0,
+            warnings: Vec::new(),
         }
     }
 
@@ -680,6 +688,7 @@ impl Parser {
             order,
             skip,
             limit,
+            warnings: self.warnings,
         })
     }
 
@@ -891,6 +900,11 @@ impl Parser {
             } else if let Some(hops) = first {
                 min_hops = hops;
                 max_hops = hops;
+            }
+            if min_hops > MAX_VARIABLE_HOPS || max_hops > MAX_VARIABLE_HOPS {
+                self.warnings.push(format!(
+                    "variable-length relationship bound {min_hops}..{max_hops} was clamped to {MAX_VARIABLE_HOPS} hops"
+                ));
             }
             min_hops = min_hops.min(MAX_VARIABLE_HOPS);
             max_hops = max_hops.min(MAX_VARIABLE_HOPS);
