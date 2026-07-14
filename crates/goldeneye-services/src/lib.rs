@@ -6,6 +6,7 @@ mod adr_traces;
 mod edit;
 mod git;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use goldeneye_discovery::IndexMode;
 use goldeneye_index::{IndexError, IndexOptions, IndexService, IndexStatus};
-use goldeneye_store::{Store, StoreError};
+use goldeneye_store::{
+    NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
+};
 use goldeneye_syntax::CoreGrammarProvider;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -108,9 +111,11 @@ impl ServiceConfig {
     #[must_use]
     pub fn with_semantic_config(mut self, enabled: bool, threshold: f32) -> Self {
         self.semantic_enabled = enabled;
-        self.semantic_threshold = valid_semantic_threshold(threshold)
-            .then_some(threshold)
-            .unwrap_or(DEFAULT_SEMANTIC_THRESHOLD);
+        self.semantic_threshold = if valid_semantic_threshold(threshold) {
+            threshold
+        } else {
+            DEFAULT_SEMANTIC_THRESHOLD
+        };
         self
     }
 
@@ -146,6 +151,10 @@ impl Default for ServiceConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRepositoryRequest {
     pub repo_path: PathBuf,
+    #[serde(default)]
+    pub mode: IndexRepositoryMode,
+    #[serde(default)]
+    pub persistence: bool,
 }
 
 impl IndexRepositoryRequest {
@@ -153,6 +162,39 @@ impl IndexRepositoryRequest {
     pub fn new(repo_path: impl Into<PathBuf>) -> Self {
         Self {
             repo_path: repo_path.into(),
+            mode: IndexRepositoryMode::default(),
+            persistence: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_mode(mut self, mode: IndexRepositoryMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_persistence(mut self, persistence: bool) -> Self {
+        self.persistence = persistence;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexRepositoryMode {
+    #[default]
+    Full,
+    Moderate,
+    Fast,
+}
+
+impl IndexRepositoryMode {
+    const fn discovery(self) -> IndexMode {
+        match self {
+            Self::Full => IndexMode::Full,
+            Self::Moderate => IndexMode::Moderate,
+            Self::Fast => IndexMode::Fast,
         }
     }
 }
@@ -294,6 +336,10 @@ pub enum ServiceError {
     Query(#[from] QueryError),
     #[error(transparent)]
     Git(#[from] goldeneye_git::GitError),
+    #[error(transparent)]
+    Artifact(#[from] goldeneye_artifact::ArtifactError),
+    #[error(transparent)]
+    CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
     #[error("{message}")]
     Edit {
         code: ServiceErrorCode,
@@ -312,14 +358,14 @@ impl ServiceError {
                 ServiceErrorCode::InvalidInput
             }
             Self::OutsideAllowedRoot => ServiceErrorCode::Forbidden,
-            Self::Cancelled | Self::Index(IndexError::Cancelled) => ServiceErrorCode::Cancelled,
-            Self::Store(_) => ServiceErrorCode::Storage,
-            Self::Index(_) => ServiceErrorCode::Index,
+            Self::Cancelled
+            | Self::Index(IndexError::Cancelled)
+            | Self::Git(goldeneye_git::GitError::Cancelled) => ServiceErrorCode::Cancelled,
+            Self::Store(_) | Self::Artifact(_) => ServiceErrorCode::Storage,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
-            Self::Git(goldeneye_git::GitError::Cancelled) => ServiceErrorCode::Cancelled,
             Self::Git(goldeneye_git::GitError::InvalidReference) => ServiceErrorCode::InvalidInput,
-            Self::Git(_) => ServiceErrorCode::Index,
+            Self::Index(_) | Self::Git(_) | Self::CrossLink(_) => ServiceErrorCode::Index,
             Self::Edit { code, .. } => *code,
         }
     }
@@ -365,7 +411,7 @@ impl Services {
         &self.config
     }
 
-    /// Indexes a repository in fast mode.
+    /// Indexes a repository using the requested full, moderate, or fast mode.
     ///
     /// # Errors
     ///
@@ -377,7 +423,7 @@ impl Services {
         self.index_repository_with_hooks(request, &OperationHooks::default())
     }
 
-    /// Indexes a repository in fast mode with cancellation and progress hooks.
+    /// Indexes a repository using the requested mode with cancellation and progress hooks.
     ///
     /// # Errors
     ///
@@ -392,11 +438,15 @@ impl Services {
         }
         hooks.report("resolving");
         let root = self.resolve_repository(&request.repo_path)?;
+        if !self.config.database_path.is_file() && goldeneye_artifact::artifact_exists(&root) {
+            hooks.report("importing_artifact");
+            let _ = goldeneye_artifact::import_artifact(&root, &self.config.database_path);
+        }
         hooks.report("opening_store");
         self.prepare_database()?;
         let store = Store::open(&self.config.database_path)?;
         let mut options = IndexOptions::default();
-        options.discovery.mode = IndexMode::Fast;
+        options.discovery.mode = request.mode.discovery();
         options.cancellation = hooks.cancellation.clone();
         let mut index = IndexService::new(store, CoreGrammarProvider, options);
         hooks.report("indexing");
@@ -418,6 +468,19 @@ impl Services {
                 return Err(ServiceError::Cancelled);
             }
             Err(error) => result.warnings.push(format!("git_history: {error}")),
+        }
+        hooks.report("semantic_index");
+        if let Err(error) = self.refresh_semantic_index_at(&result.project.id, request.mode) {
+            result.warnings.push(format!("semantic_index: {error}"));
+        }
+        if request.persistence || goldeneye_artifact::artifact_exists(&root) {
+            hooks.report("exporting_artifact");
+            goldeneye_artifact::export_artifact(
+                &self.config.database_path,
+                &root,
+                result.project.id.as_str(),
+                goldeneye_artifact::ArtifactQuality::Best,
+            )?;
         }
         hooks.report("complete");
         Ok(IndexRepositoryResult {
@@ -451,6 +514,32 @@ impl Services {
     /// Returns a typed storage/query failure.
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>, ServiceError> {
         Ok(self.query_engine()?.list_projects()?)
+    }
+
+    /// Deletes one persisted project and all project-scoped graph data.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage failure. A missing database or project returns `false`.
+    pub fn delete_project(&self, project: &ProjectId) -> Result<bool, ServiceError> {
+        if !self.config.database_path.is_file() {
+            return Ok(false);
+        }
+        Ok(Store::open(&self.config.database_path)?.delete_project(project)?)
+    }
+
+    /// Rebuilds derived cross-project route and channel edges for all persisted projects.
+    ///
+    /// # Errors
+    ///
+    /// Returns graph identity, storage, or derived-edge limit failures.
+    pub fn rebuild_cross_repo_intelligence(
+        &self,
+    ) -> Result<goldeneye_crosslink::CrossLinkOutcome, ServiceError> {
+        self.prepare_database()?;
+        Ok(goldeneye_crosslink::rebuild(&mut Store::open(
+            &self.config.database_path,
+        )?)?)
     }
 
     /// Returns persisted index status for one project.
@@ -594,6 +683,113 @@ impl Services {
         Ok(self.query_engine()?.get_architecture(request)?)
     }
 
+    fn refresh_semantic_index_at(
+        &self,
+        project: &ProjectId,
+        mode: IndexRepositoryMode,
+    ) -> Result<(), ServiceError> {
+        let query = Store::open_read_only(&self.config.database_path)?;
+        let nodes = query.list_nodes(project)?;
+        drop(query);
+        if mode == IndexRepositoryMode::Fast {
+            Store::open(&self.config.database_path)?.replace_semantic_index(
+                project,
+                &[],
+                &[],
+                &[],
+            )?;
+            return Ok(());
+        }
+
+        let model = goldeneye_query::PretrainedModel::load_bundled().ok();
+        let mut documents = Vec::new();
+        let mut document_frequency = BTreeMap::<String, usize>::new();
+        for node in nodes
+            .into_iter()
+            .filter(|node| {
+                !matches!(
+                    node.label.as_str(),
+                    "File" | "Folder" | "Module" | "Package" | "EnvVar"
+                )
+            })
+            .take(goldeneye_query::SEMANTIC_MAX_OCCURRENCES)
+        {
+            let text = semantic_document(&node);
+            let tokens =
+                goldeneye_query::tokenize_identifier(&text, goldeneye_query::MAX_STRUCTURAL_TOKENS);
+            if tokens.is_empty() {
+                continue;
+            }
+            for token in tokens.iter().map(String::as_str).collect::<BTreeSet<_>>() {
+                *document_frequency.entry(token.to_owned()).or_default() += 1;
+            }
+            documents.push((node, tokens));
+        }
+
+        let document_count = documents.len();
+        let mut token_vectors = Vec::with_capacity(document_frequency.len());
+        let mut token_weights = BTreeMap::<String, f32>::new();
+        for (token, frequency) in &document_frequency {
+            // Index limits keep both operands well below f32's exact integer range.
+            #[allow(clippy::cast_precision_loss)]
+            let idf = (((document_count + 1) as f32 / (*frequency + 1) as f32).ln() + 1.0).max(0.0);
+            token_weights.insert(token.clone(), idf);
+            let mut vector = goldeneye_query::SemanticVector::for_token(token, model.as_ref());
+            vector.normalize();
+            // IDF is non-negative and logarithmic; milli-units remain far below u32::MAX.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let idf_milli = (idf * 1_000.0).round().max(0.0) as u32;
+            token_vectors.push(TokenVectorRecord {
+                token: token.clone(),
+                vector: quantize_semantic(vector.values()),
+                idf_milli,
+            });
+        }
+
+        let mut node_vectors = Vec::with_capacity(documents.len());
+        let mut signatures = Vec::new();
+        for (node, tokens) in documents {
+            let mut vector = goldeneye_query::SemanticVector::zero();
+            for token in &tokens {
+                let token_vector =
+                    goldeneye_query::SemanticVector::for_token(token, model.as_ref());
+                vector.add_scaled(
+                    &token_vector,
+                    token_weights.get(token).copied().unwrap_or(1.0),
+                );
+            }
+            vector.normalize();
+            node_vectors.push(NodeVectorRecord {
+                node_id: node.id.clone(),
+                vector: quantize_semantic(vector.values()),
+            });
+
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            if let Some(signature) =
+                goldeneye_query::MinHashSignature::from_normalized_tokens(&token_refs)
+            {
+                let ast_profile = node.properties.get("ast_profile").map(|value| {
+                    value
+                        .as_str()
+                        .map_or_else(|| value.to_string(), ToOwned::to_owned)
+                });
+                signatures.push(NodeSignatureRecord {
+                    node_id: node.id,
+                    minhash_hex: signature.to_hex(),
+                    ast_profile,
+                });
+            }
+        }
+
+        Store::open(&self.config.database_path)?.replace_semantic_index(
+            project,
+            &node_vectors,
+            &token_vectors,
+            &signatures,
+        )?;
+        Ok(())
+    }
+
     fn prepare_database(&self) -> Result<(), ServiceError> {
         if let Some(parent) = self.config.database_path.parent()
             && !parent.as_os_str().is_empty()
@@ -647,6 +843,39 @@ impl Services {
     }
 }
 
+fn semantic_document(node: &goldeneye_domain::GraphNode) -> String {
+    let mut document = format!(
+        "{} {} {}",
+        node.label.as_str(),
+        node.name,
+        node.qualified_name.as_str()
+    );
+    for key in [
+        "signature",
+        "docstring",
+        "decorators",
+        "return_type",
+        "ast_profile",
+    ] {
+        if let Some(value) = node.properties.get(key) {
+            document.push(' ');
+            if let Some(value) = value.as_str() {
+                document.push_str(value);
+            } else {
+                document.push_str(&value.to_string());
+            }
+        }
+    }
+    document
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn quantize_semantic(values: &[f32; goldeneye_query::SEMANTIC_DIM]) -> StoredVector {
+    StoredVector::from_array(std::array::from_fn(|index| {
+        (values[index] * 127.0).clamp(-127.0, 127.0).trunc() as i8
+    }))
+}
+
 fn map_index_error(error: IndexError) -> ServiceError {
     if matches!(error, IndexError::Cancelled) {
         ServiceError::Cancelled
@@ -695,6 +924,8 @@ fn valid_semantic_threshold(value: f32) -> bool {
 
 #[cfg(test)]
 mod semantic_config_tests {
+    #![allow(clippy::float_cmp)]
+
     use std::ffi::OsString;
 
     use super::{

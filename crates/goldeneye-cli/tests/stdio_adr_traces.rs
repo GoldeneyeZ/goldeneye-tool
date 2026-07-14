@@ -50,6 +50,7 @@ fn response(output: &Output) -> Value {
     value
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn call_tool(database: &Path, root: &Path, id: u64, name: &str, arguments: Value) -> Value {
     let input = format!(
         "{}\n",
@@ -73,6 +74,7 @@ fn successful(result: &Value) -> &Value {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn stdio_adr_and_trace_tools_survive_clean_restarts() {
     let temp = TempDir::new().expect("temp dir");
     let root = temp.path().join("project");

@@ -1,3 +1,11 @@
+// The audited fixed-width quantizer intentionally narrows between its f32, f64, and packed
+// integer representations. Error-bound tests below validate those conversions.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+
 use std::sync::OnceLock;
 
 use xxhash_rust::xxh3::xxh3_64_with_seed;
@@ -139,6 +147,8 @@ fn fast_walsh_hadamard(values: &mut [f32; ROTSQ_DIM]) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)]
+
     use super::*;
 
     #[test]

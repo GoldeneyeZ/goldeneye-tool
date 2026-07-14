@@ -40,7 +40,7 @@ fn manage_adr_migrates_legacy_content_and_matches_upstream_modes() {
     .expect("legacy ADR");
 
     let migrated = services
-        .manage_adr(&ManageAdrRequest::new(project.clone()))
+        .manage_adr(&ManageAdrRequest::new(&project))
         .expect("migrate legacy ADR");
     assert_eq!(
         migrated.content.as_deref(),
@@ -119,7 +119,7 @@ fn manage_adr_returns_compact_no_adr_hint() {
     let (services, project, _, _) = registered_services(&temp);
 
     let result = services
-        .manage_adr(&ManageAdrRequest::new(project))
+        .manage_adr(&ManageAdrRequest::new(&project))
         .expect("empty ADR");
     assert_eq!(result.content.as_deref(), Some(""));
     assert_eq!(result.status.as_deref(), Some("no_adr"));
@@ -207,7 +207,7 @@ fn adr_and_trace_writes_enforce_registered_project_path_policy() {
 
     assert_eq!(
         services
-            .manage_adr(&ManageAdrRequest::new(project.clone()))
+            .manage_adr(&ManageAdrRequest::new(&project))
             .expect_err("ADR path policy")
             .code(),
         ServiceErrorCode::Forbidden

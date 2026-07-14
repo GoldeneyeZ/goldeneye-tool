@@ -608,3 +608,78 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         assert!(calls[0].properties["line"].as_u64().is_some());
     }
 }
+
+#[test]
+fn go_files_in_one_directory_share_a_directory_qualified_module() {
+    let temp = TempDir::new().expect("temp repo");
+    write(temp.path(), "cmd/main.go", "package main\nfunc main() {}\n");
+    write(
+        temp.path(),
+        "cmd/main_test.go",
+        "package main\nfunc TestMain() {}\n",
+    );
+    let mut index = service(IndexOptions::default());
+
+    let result = index
+        .index_repository(temp.path())
+        .expect("index Go package");
+    let prefix = result.project.id.as_str();
+    let mut modules = index
+        .store()
+        .list_nodes(&result.project.id)
+        .expect("project nodes")
+        .into_iter()
+        .filter(|node| node.label.as_str() == "Module")
+        .map(|node| node.qualified_name.as_str().to_owned())
+        .collect::<Vec<_>>();
+    modules.sort();
+
+    assert_eq!(modules, [format!("{prefix}.cmd")]);
+    for qualified_name in [
+        format!("{prefix}.cmd.main"),
+        format!("{prefix}.cmd.TestMain"),
+    ] {
+        assert!(
+            index
+                .store()
+                .node_by_qualified_name(
+                    &result.project.id,
+                    &goldeneye_domain::QualifiedName::new(qualified_name.clone())
+                        .expect("function QN"),
+                )
+                .expect("function lookup")
+                .is_some(),
+            "missing {qualified_name}"
+        );
+    }
+
+    remove(temp.path(), "cmd/main.go");
+    let refreshed = index
+        .index_repository(temp.path())
+        .expect("reindex remaining Go package file");
+    let module = index
+        .store()
+        .node_by_qualified_name(
+            &refreshed.project.id,
+            &goldeneye_domain::QualifiedName::new(format!("{prefix}.cmd")).expect("module QN"),
+        )
+        .expect("module lookup")
+        .expect("remaining module");
+    let test_main = index
+        .store()
+        .node_by_qualified_name(
+            &refreshed.project.id,
+            &goldeneye_domain::QualifiedName::new(format!("{prefix}.cmd.TestMain"))
+                .expect("function QN"),
+        )
+        .expect("function lookup")
+        .expect("remaining function");
+    assert!(
+        index
+            .store()
+            .edges_from(&refreshed.project.id, &module.id)
+            .expect("module edges")
+            .iter()
+            .any(|edge| edge.target == test_main.id)
+    );
+}

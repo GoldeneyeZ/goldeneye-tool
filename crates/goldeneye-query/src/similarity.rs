@@ -1,4 +1,4 @@
-use std::{fmt, num::ParseIntError};
+use std::{fmt::Write as _, num::ParseIntError};
 
 use thiserror::Error;
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
@@ -26,8 +26,8 @@ pub struct MinHashSignature {
 }
 
 /// Compatibility name for the signature emitted by the upstream `simhash`
-/// pipeline. The audited implementation uses weighted MinHash, not classic
-/// bit-majority SimHash.
+/// pipeline. The audited implementation uses weighted `MinHash`, not classic
+/// bit-majority `SimHash`.
 pub type SimHashSignature = MinHashSignature;
 
 impl MinHashSignature {
@@ -87,19 +87,23 @@ impl MinHashSignature {
             .zip(other.values)
             .filter(|(left, right)| **left == *right)
             .count();
-        matching as f64 / MINHASH_K as f64
+        f64::from(u32::try_from(matching).unwrap_or(u32::MAX)) / 64.0
     }
 
     #[must_use]
     pub fn to_hex(&self) -> String {
         let mut encoded = String::with_capacity(MINHASH_HEX_LEN);
-        use fmt::Write as _;
         for value in self.values {
             write!(&mut encoded, "{value:08x}").expect("writing to String cannot fail");
         }
         encoded
     }
 
+    /// Decodes the stable hexadecimal signature representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a length or hexadecimal chunk error when the encoding is invalid.
     pub fn from_hex(encoded: &str) -> Result<Self, MinHashDecodeError> {
         if encoded.len() != MINHASH_HEX_LEN {
             return Err(MinHashDecodeError::Length {
@@ -110,9 +114,8 @@ impl MinHashSignature {
         let mut values = [0_u32; MINHASH_K];
         for (index, value) in values.iter_mut().enumerate() {
             let start = index * 8;
-            *value = u32::from_str_radix(&encoded[start..start + 8], 16).map_err(|source| {
-                MinHashDecodeError::InvalidChunk { index, source }
-            })?;
+            *value = u32::from_str_radix(&encoded[start..start + 8], 16)
+                .map_err(|source| MinHashDecodeError::InvalidChunk { index, source })?;
         }
         Ok(Self { values })
     }
@@ -127,7 +130,7 @@ impl MinHashSignature {
                 bytes[start..start + size_of::<u32>()]
                     .copy_from_slice(&self.values[base + row].to_le_bytes());
             }
-            (xxh3_64(&bytes) & u64::from(u16::MAX)) as u16
+            u16::try_from(xxh3_64(&bytes) & u64::from(u16::MAX)).unwrap_or_default()
         })
     }
 }
@@ -182,11 +185,7 @@ pub fn normalize_leaf_kind(kind: &str) -> &str {
         "N"
     } else if matches!(
         kind,
-        "predefined_type"
-            | "primitive_type"
-            | "builtin_type"
-            | "type_annotation"
-            | "simple_type"
+        "predefined_type" | "primitive_type" | "builtin_type" | "type_annotation" | "simple_type"
     ) {
         "T"
     } else {
@@ -198,29 +197,27 @@ fn is_normalized_token(token: &str) -> bool {
     matches!(token.as_bytes(), [b'I' | b'S' | b'N' | b'T'])
 }
 
-fn update_weighted_signature(
-    signature: &mut [u32; MINHASH_K],
-    trigram: &[u8],
-    weight: usize,
-) {
+fn update_weighted_signature(signature: &mut [u32; MINHASH_K], trigram: &[u8], weight: usize) {
     for (index, minimum) in signature.iter_mut().enumerate() {
         for repetition in 0..weight {
-            let seed = (index * MAX_STRUCTURAL_WEIGHT + repetition) as u64;
-            let hash = xxh3_64_with_seed(trigram, seed) as u32;
+            let seed = u64::try_from(index * MAX_STRUCTURAL_WEIGHT + repetition)
+                .expect("bounded signature index fits u64");
+            let hash = u32::try_from(xxh3_64_with_seed(trigram, seed) & u64::from(u32::MAX))
+                .expect("masked weighted hash fits u32");
             *minimum = (*minimum).min(hash);
         }
     }
 }
 
 struct UniqueTrigramSet {
-    slots: [u64; UNIQUE_SET_SIZE],
+    slots: Box<[u64]>,
     count: usize,
 }
 
 impl Default for UniqueTrigramSet {
     fn default() -> Self {
         Self {
-            slots: [0; UNIQUE_SET_SIZE],
+            slots: vec![0; UNIQUE_SET_SIZE].into_boxed_slice(),
             count: 0,
         }
     }
@@ -229,7 +226,8 @@ impl Default for UniqueTrigramSet {
 impl UniqueTrigramSet {
     fn insert(&mut self, hash: u64) -> bool {
         let value = hash | 1;
-        let slot = hash as usize & UNIQUE_SET_MASK;
+        let slot = usize::try_from(hash & u64::try_from(UNIQUE_SET_MASK).expect("mask fits u64"))
+            .expect("masked slot fits usize");
         for probe in 0..UNIQUE_SET_SIZE {
             let index = (slot + probe) & UNIQUE_SET_MASK;
             if self.slots[index] == 0 {
@@ -247,6 +245,8 @@ impl UniqueTrigramSet {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)]
+
     use super::*;
 
     fn structural_tokens(prefix: &str) -> Vec<String> {
@@ -288,7 +288,9 @@ mod tests {
     #[test]
     fn signature_hex_and_lsh_bands_are_stable() {
         let signature = MinHashSignature::from_values(std::array::from_fn(|index| {
-            (index as u32).wrapping_mul(2_654_435_761)
+            u32::try_from(index)
+                .expect("signature index fits u32")
+                .wrapping_mul(2_654_435_761)
         }));
         let encoded = signature.to_hex();
 

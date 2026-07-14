@@ -1,3 +1,6 @@
+// Quantized ranking converts bounded persisted integer fields to floating-point scores.
+#![allow(clippy::cast_precision_loss)]
+
 use std::collections::BTreeMap;
 
 use goldeneye_domain::{GraphNode, NodeId};
@@ -81,14 +84,14 @@ pub(crate) fn semantic_search(
 
     let mut results = candidates
         .into_iter()
-        .map(|(record, node, first_score)| {
-            let score = keyword_vectors[1..]
+        .map(|(record, node, initial_score)| {
+            let combined_score = keyword_vectors[1..]
                 .iter()
                 .map(|keyword| quantized_cosine(&record.vector, keyword))
-                .fold(first_score, f64::min);
+                .fold(initial_score, f64::min);
             SemanticSearchHit {
                 node: node_summary(&node, None, &node_degrees, Vec::new()),
-                score,
+                score: combined_score,
             }
         })
         .collect::<Vec<_>>();

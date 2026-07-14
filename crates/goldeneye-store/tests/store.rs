@@ -227,12 +227,7 @@ fn semantic_replacement_is_validated_before_the_existing_snapshot_is_removed() {
         generation,
     );
     store
-        .replace_project_graph(
-            &project,
-            vec![source],
-            vec![function.clone()],
-            Vec::new(),
-        )
+        .replace_project_graph(&project, vec![source], vec![function.clone()], Vec::new())
         .expect("graph");
     let original = NodeVectorRecord {
         node_id: function.id,

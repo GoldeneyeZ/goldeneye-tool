@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+goldeneye-artifact = { path = "../goldeneye-artifact" }
+goldeneye-crosslink = { path = "../goldeneye-crosslink" }
 goldeneye-discovery = { path = "../goldeneye-discovery" }
 goldeneye-domain = { path = "../goldeneye-domain" }
 goldeneye-edit = { path = "../goldeneye-edit" }

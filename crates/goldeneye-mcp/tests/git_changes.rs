@@ -20,6 +20,7 @@ fn git(root: &std::path::Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn call(server: &Server, id: i64, arguments: Value) -> Value {
     let line = json!({
         "jsonrpc": "2.0",

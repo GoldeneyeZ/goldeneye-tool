@@ -1,14 +1,16 @@
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
-    DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest,
-    IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest,
-    NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest,
-    QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest, SemanticSearchRequest,
-    ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection, TracePathRequest,
+    DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
+    IndexRepositoryRequest, IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest,
+    ManageAdrRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
+    QueryGraphRequest, QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest,
+    SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
+    TracePathRequest,
 };
+use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -37,15 +39,29 @@ pub struct Server {
     tools: ToolRegistry,
     services: Services,
     active_index: Mutex<Option<(RequestId, CancellationToken)>>,
+    watcher: Arc<Watcher<ServiceIndexer>>,
+    watcher_runtime: Mutex<Option<WatchRuntime>>,
 }
 
 impl Server {
     #[must_use]
     pub fn new(services: Services) -> Self {
+        let watcher = Arc::new(Watcher::new(
+            WatcherConfig::default(),
+            ServiceIndexer::new(services.config().clone()),
+        ));
+        if let Ok(projects) = services.list_projects() {
+            for project in projects {
+                let _ = watcher.watch(project.project, project.root_path);
+            }
+        }
+        let watcher_runtime = watcher.spawn().ok();
         Self {
             tools: ToolRegistry::implemented(),
             services,
             active_index: Mutex::new(None),
+            watcher,
+            watcher_runtime: Mutex::new(watcher_runtime),
         }
     }
 
@@ -153,22 +169,62 @@ impl Server {
         }
     }
 
+    // Keeping the dispatch table contiguous makes the MCP name-to-handler contract auditable.
+    #[allow(clippy::too_many_lines)]
     fn dispatch(&self, name: &str, arguments: Value, id: &RequestId) -> Result<Value, String> {
         match name {
             "index_repository" => {
                 let args: IndexArguments = parse_arguments(name, arguments)?;
-                if args.mode.as_deref().is_some_and(|mode| mode != "fast") {
+                if args.mode.as_deref() == Some("cross-repo-intelligence") {
+                    let outcome = self
+                        .services
+                        .rebuild_cross_repo_intelligence()
+                        .map_err(service_error_message)?;
+                    return Ok(json!({
+                        "mode": "cross-repo-intelligence",
+                        "projects": outcome.projects,
+                        "edges": outcome.edges,
+                        "target_projects": args.target_projects.unwrap_or_default(),
+                    }));
+                }
+                if args.name.is_some() {
                     return Err(
-                        "Invalid parameters for index_repository: only fast mode is supported"
+                        "Invalid parameters for index_repository: project name overrides are not supported"
                             .to_owned(),
                     );
                 }
-                let request = IndexRepositoryRequest::new(args.repo_path);
+                let mode = match args.mode.as_deref().unwrap_or("full") {
+                    "full" => IndexRepositoryMode::Full,
+                    "moderate" => IndexRepositoryMode::Moderate,
+                    "fast" => IndexRepositoryMode::Fast,
+                    mode => {
+                        return Err(format!(
+                            "Invalid parameters for index_repository: unsupported mode {mode}"
+                        ));
+                    }
+                };
+                let request = IndexRepositoryRequest::new(args.repo_path)
+                    .with_mode(mode)
+                    .with_persistence(args.persistence);
                 self.index_repository(id, &request)
             }
             "list_projects" => {
                 let _: EmptyArguments = parse_arguments(name, arguments)?;
                 self.list_projects()
+            }
+            "delete_project" => {
+                let args: ProjectArguments = parse_arguments(name, arguments)?;
+                let project = project_id(name, args.project)?;
+                let deleted = self
+                    .services
+                    .delete_project(&project)
+                    .map_err(service_error_message)?;
+                if deleted {
+                    let _ = self.watcher.unwatch(project.as_str());
+                    Ok(json!({ "project": project.as_str(), "status": "deleted" }))
+                } else {
+                    Err(json!({ "project": project.as_str(), "status": "not_found" }).to_string())
+                }
             }
             "index_status" => {
                 let args: ProjectArguments = parse_arguments(name, arguments)?;
@@ -396,7 +452,9 @@ impl Server {
         {
             *active = None;
         }
-        to_value(result.map_err(service_error_message)?)
+        let result = result.map_err(service_error_message)?;
+        let _ = self.watcher.watch(&result.project, &result.root_path);
+        to_value(result)
     }
 
     fn list_projects(&self) -> Result<Value, String> {
@@ -629,6 +687,16 @@ impl Default for Server {
     }
 }
 
+impl Drop for Server {
+    fn drop(&mut self) {
+        if let Ok(runtime) = self.watcher_runtime.get_mut()
+            && let Some(runtime) = runtime.take()
+        {
+            runtime.stop();
+        }
+    }
+}
+
 fn parse_arguments<T: DeserializeOwned>(name: &str, value: Value) -> Result<T, String> {
     serde_json::from_value(value).map_err(|error| format!("Invalid parameters for {name}: {error}"))
 }
@@ -796,6 +864,10 @@ struct DetectChangesArguments {
 struct IndexArguments {
     repo_path: String,
     mode: Option<String>,
+    #[serde(default)]
+    persistence: bool,
+    target_projects: Option<Vec<String>>,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1019,11 +1091,10 @@ mod tests {
             .expect("request response");
         let value = serde_json::to_value(response).expect("serialize response");
 
-        assert_eq!(
-            value["result"]["tools"].as_array().expect("tools").len(),
-            20
-        );
-        assert_eq!(value["result"]["tools"][0]["name"], "index_repository");
+        let tools = value["result"]["tools"].as_array().expect("tools");
+        assert_eq!(tools.len(), 21);
+        assert_eq!(tools[0]["name"], "index_repository");
+        assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
     }
 
     #[test]

@@ -263,6 +263,12 @@ impl Services {
     ///
     /// Returns configuration, storage, authorization, or journal failures.
     pub fn open(config: crate::ServiceConfig) -> Result<(Self, RecoveryReport), ServiceError> {
+        if !config.database_path().is_file()
+            && goldeneye_artifact::artifact_exists(config.project_root())
+        {
+            let _ =
+                goldeneye_artifact::import_artifact(config.project_root(), config.database_path());
+        }
         let services = Self::new(config);
         let recovery = services.recover_edits()?;
         Ok((services, recovery))
@@ -490,6 +496,7 @@ impl Services {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn inspect_file(
     service: &mut DurableEditService<CoreGrammarProvider>,
     request: &InspectSyntaxRequest,
@@ -513,14 +520,16 @@ fn inspect_file(
         )
     })?;
     let authorizer = PathAuthorizer::new(allowed_roots).map_err(DurableEditError::from)?;
-    let authorized = authorizer
+    let authorized_path = authorizer
         .authorize(
             &project.root_path,
             request.path.as_str(),
             PathIntent::Update,
         )
         .map_err(DurableEditError::from)?;
-    let destination = authorized.revalidate().map_err(DurableEditError::from)?;
+    let destination = authorized_path
+        .revalidate()
+        .map_err(DurableEditError::from)?;
     let source = fs::read(destination.as_path()).map_err(|source| DurableEditError::Io {
         operation: "reading syntax source",
         path: destination.as_path().to_path_buf(),

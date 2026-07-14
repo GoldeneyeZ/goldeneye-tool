@@ -76,6 +76,7 @@ pub enum GitError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GitContext {
     pub input_path: String,
     pub is_git: bool,
@@ -198,6 +199,12 @@ struct Capture {
     stdout: Vec<u8>,
 }
 
+/// Resolves repository, worktree, branch, and revision metadata for a path.
+///
+/// # Errors
+///
+/// Returns a Git execution error when discovery is cancelled, times out, exceeds
+/// configured output limits, or cannot start/read Git.
 pub fn resolve_context(
     path: &Path,
     cancellation: &dyn Cancellation,
@@ -272,6 +279,12 @@ pub fn resolve_context(
     Ok(context)
 }
 
+/// Collects bounded file-change and co-change history for a repository.
+///
+/// # Errors
+///
+/// Returns a Git execution error when history collection is cancelled, times out,
+/// exceeds configured output limits, or cannot start/read Git.
 pub fn collect_history(
     root: &Path,
     cancellation: &dyn Cancellation,
@@ -343,14 +356,15 @@ pub fn parse_history_log(output: &str) -> GitHistory {
                 timestamp,
                 ..Commit::default()
             });
-        } else if !line.is_empty() && is_trackable_file(line) {
-            if let Some(commit) = current.as_mut() {
-                if commit.files.len() < MAX_FILES_PER_COMMIT + 1 {
-                    commit.files.insert(line.to_owned());
-                }
-                if commit.files.len() > MAX_FILES_PER_COMMIT {
-                    commit.too_large = true;
-                }
+        } else if !line.is_empty()
+            && is_trackable_file(line)
+            && let Some(commit) = current.as_mut()
+        {
+            if commit.files.len() < MAX_FILES_PER_COMMIT + 1 {
+                commit.files.insert(line.to_owned());
+            }
+            if commit.files.len() > MAX_FILES_PER_COMMIT {
+                commit.too_large = true;
             }
         }
     }
@@ -376,7 +390,8 @@ pub fn parse_history_log(output: &str) -> GitHistory {
             let left = temporal.get(&file_a)?.0;
             let right = temporal.get(&file_b)?.0;
             let denominator = left.min(right);
-            let coupling_score = co_changes as f64 / denominator as f64;
+            let coupling_score = f64::from(u32::try_from(co_changes).ok()?)
+                / f64::from(u32::try_from(denominator).ok()?);
             (coupling_score >= MIN_COUPLING_SCORE).then_some(GitCoChange {
                 file_a,
                 file_b,
@@ -420,6 +435,12 @@ pub fn is_trackable_file(path: &str) -> bool {
     !LOCK_FILES.contains(&basename) && !SUFFIXES.iter().any(|suffix| path.ends_with(suffix))
 }
 
+/// Detects committed, local, staged, and untracked changes relative to a reference.
+///
+/// # Errors
+///
+/// Returns [`GitError::InvalidReference`] for an unsafe reference, or a Git
+/// execution error when collection fails, is cancelled, times out, or exceeds limits.
 pub fn detect_changes(
     root: &Path,
     options: &DetectChangesOptions,
@@ -467,7 +488,7 @@ pub fn detect_changes(
     add_status_paths(&status.stdout, &mut files);
 
     let failure = (!base.status.success() && files.is_empty()).then(|| GitFailure {
-        status: status_code(&base.status),
+        status: status_code(base.status),
         reference: reference.to_owned(),
     });
     Ok(DetectedChanges {
@@ -690,7 +711,7 @@ fn join_reader(
         .map_err(GitError::Output)
 }
 
-fn status_code(status: &ExitStatus) -> i32 {
+fn status_code(status: ExitStatus) -> i32 {
     status.code().unwrap_or(-1)
 }
 
@@ -706,17 +727,19 @@ fn canonical_repository_root(
 ) -> String {
     let common = absolute_common
         .filter(|value| Path::new(value).is_absolute())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let value = Path::new(common_dir);
-            if value.is_absolute() {
-                value.to_path_buf()
-            } else if common_dir.is_empty() {
-                worktree_root.to_path_buf()
-            } else {
-                input.join(value)
-            }
-        });
+        .map_or_else(
+            || {
+                let value = Path::new(common_dir);
+                if value.is_absolute() {
+                    value.to_path_buf()
+                } else if common_dir.is_empty() {
+                    worktree_root.to_path_buf()
+                } else {
+                    input.join(value)
+                }
+            },
+            PathBuf::from,
+        );
     let common = common.canonicalize().unwrap_or(common);
     let root = if common.file_name().is_some_and(|name| name == ".git") {
         common.parent().unwrap_or(&common).to_path_buf()
@@ -767,6 +790,7 @@ mod tests {
         is_trackable_file, parse_history_log, parse_hunks, parse_name_status, parse_range,
         resolve_context,
     };
+    use std::fmt::Write as _;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
@@ -798,13 +822,15 @@ mod tests {
     fn history_parity_filters_scores_and_skips_large_commits() {
         let mut log = String::new();
         for timestamp in 1..=3 {
-            log.push_str(&format!(
-                "COMMIT:{timestamp}:{timestamp}\na.rs\nb.rs\nCargo.lock\n"
-            ));
+            writeln!(
+                log,
+                "COMMIT:{timestamp}:{timestamp}\na.rs\nb.rs\nCargo.lock"
+            )
+            .expect("write synthetic log");
         }
         log.push_str("COMMIT:large:9\n");
         for index in 0..=20 {
-            log.push_str(&format!("large/{index}.rs\n"));
+            writeln!(log, "large/{index}.rs").expect("write synthetic path");
         }
         let history = parse_history_log(&log);
         assert_eq!(history.files.len(), 2);

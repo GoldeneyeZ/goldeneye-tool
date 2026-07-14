@@ -32,7 +32,7 @@ pub struct ManageAdrRequest {
 
 impl ManageAdrRequest {
     #[must_use]
-    pub fn new(project: ProjectId) -> Self {
+    pub fn new(project: &ProjectId) -> Self {
         Self {
             project: project.as_str().to_owned(),
             mode: None,

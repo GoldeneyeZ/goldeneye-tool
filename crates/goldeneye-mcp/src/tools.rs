@@ -175,11 +175,14 @@ fn index_and_metadata_tools(project_only: &Value) -> Vec<ToolDefinition> {
         ToolDefinition::new(
             "index_repository",
             "Index repository",
-            "Index one allowed repository in fast mode and persist its graph.",
+            "Index one allowed repository, persist its graph, or rebuild cross-project intelligence.",
             object_schema(
                 &json!({
                     "repo_path": {"type": "string", "description": "Path to the repository"},
-                    "mode": {"type": "string", "enum": ["fast"], "default": "fast"}
+                    "mode": {"type": "string", "enum": ["full", "moderate", "fast", "cross-repo-intelligence"], "default": "full"},
+                    "target_projects": {"type": "array", "items": {"type": "string"}, "description": "Projects used by cross-repo intelligence; all projects are rebuilt when omitted"},
+                    "name": {"type": "string", "description": "Reserved project-name override"},
+                    "persistence": {"type": "boolean", "default": false, "description": "Write a shared .codebase-memory artifact after indexing"}
                 }),
                 &["repo_path"],
             ),
@@ -189,6 +192,12 @@ fn index_and_metadata_tools(project_only: &Value) -> Vec<ToolDefinition> {
             "List projects",
             "List persisted indexed projects.",
             object_schema(&json!({}), &[]),
+        ),
+        ToolDefinition::new(
+            "delete_project",
+            "Delete project",
+            "Delete one persisted project and all project-scoped graph data.",
+            object_schema(project_only, &["project"]),
         ),
         ToolDefinition::new(
             "index_status",
@@ -328,6 +337,8 @@ fn trace_and_source_tools(project: &Value, trace_schema: &Value) -> Vec<ToolDefi
     ]
 }
 
+// Tool schemas stay together so protocol snapshots can review the complete edit surface.
+#[allow(clippy::too_many_lines)]
 fn edit_tools(project: &Value) -> Vec<ToolDefinition> {
     let path = json!({
         "type": "string",

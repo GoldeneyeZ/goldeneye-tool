@@ -27,6 +27,7 @@ pub(crate) struct Candidate {
 
 pub(crate) struct ExtractedFile {
     pub record: FileRecord,
+    pub source: Arc<[u8]>,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
     pub calls: Vec<ExtractedCall>,
@@ -74,6 +75,7 @@ where
     let imports = extractor.pending_imports;
     Ok(ExtractedFile {
         record: candidate.record,
+        source: candidate.source,
         nodes,
         edges,
         calls,

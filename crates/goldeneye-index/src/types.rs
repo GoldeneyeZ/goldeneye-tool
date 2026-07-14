@@ -114,6 +114,8 @@ pub struct FileRefreshResult {
 #[derive(Debug, Error)]
 pub enum IndexError {
     #[error(transparent)]
+    CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
+    #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
     Store(#[from] StoreError),

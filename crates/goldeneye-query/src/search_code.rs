@@ -1,3 +1,6 @@
+// This routine is kept linear to preserve the upstream ranking pipeline's phase ordering.
+#![allow(clippy::too_many_lines)]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -335,7 +338,7 @@ fn compile_content_pattern(pattern: &str, use_regex: bool) -> Result<Regex, Quer
         pattern.to_owned()
     } else if pattern.bytes().any(|byte| matches!(byte, b' ' | b'\t')) {
         pattern
-            .split(|character| matches!(character, ' ' | '\t'))
+            .split([' ', '\t'])
             .filter(|word| !word.is_empty())
             .map(regex::escape)
             .collect::<Vec<_>>()

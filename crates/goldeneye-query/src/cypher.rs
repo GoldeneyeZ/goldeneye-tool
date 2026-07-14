@@ -1,3 +1,14 @@
+// Cypher coercion deliberately mirrors upstream JavaScript/SQLite numeric semantics; the
+// parser/evaluator conformance suite covers these bounded conversions and state machines.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::type_complexity
+)]
+
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -39,7 +50,7 @@ pub(crate) fn execute(
         return Err(unsupported("query exceeds token-count safety cap"));
     }
     reject_mutations(&tokens)?;
-    let (branches, union_all) = split_union_tokens(tokens)?;
+    let (branches, union_all) = split_union_tokens(&tokens)?;
     if branches.len() > MAX_UNION_BRANCHES {
         return Err(unsupported("query exceeds UNION branch safety cap"));
     }
@@ -373,7 +384,7 @@ fn reject_mutations(tokens: &[Token]) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn split_union_tokens(tokens: Vec<Token>) -> Result<(Vec<Vec<Token>>, Vec<bool>), QueryError> {
+fn split_union_tokens(tokens: &[Token]) -> Result<(Vec<Vec<Token>>, Vec<bool>), QueryError> {
     let mut branches = Vec::new();
     let mut modes = Vec::new();
     let mut current = Vec::new();
@@ -842,21 +853,19 @@ impl Parser {
             }
         }
         let mut properties = Vec::new();
-        if self.consume_symbol(Symbol::LeftBrace) {
-            if !self.consume_symbol(Symbol::RightBrace) {
-                loop {
-                    let key = self.parse_identifier("inline property name")?;
-                    self.expect_symbol(Symbol::Colon)?;
-                    let Operand::Literal(value) = self.parse_operand()? else {
-                        return Err(self.error("inline properties require literal values"));
-                    };
-                    properties.push((key, *value));
-                    if !self.consume_symbol(Symbol::Comma) {
-                        break;
-                    }
+        if self.consume_symbol(Symbol::LeftBrace) && !self.consume_symbol(Symbol::RightBrace) {
+            loop {
+                let key = self.parse_identifier("inline property name")?;
+                self.expect_symbol(Symbol::Colon)?;
+                let Operand::Literal(value) = self.parse_operand()? else {
+                    return Err(self.error("inline properties require literal values"));
+                };
+                properties.push((key, *value));
+                if !self.consume_symbol(Symbol::Comma) {
+                    break;
                 }
-                self.expect_symbol(Symbol::RightBrace)?;
             }
+            self.expect_symbol(Symbol::RightBrace)?;
         }
         self.expect_symbol(Symbol::RightParen)?;
         Ok(NodePattern {
@@ -1803,16 +1812,14 @@ fn build_variable_bindings<'a>(
                     continue;
                 }
                 let next_ids: Vec<&NodeId> = match pattern.edge.direction {
-                    EdgeDirection::Outbound if edge.source == frame.current.id => {
+                    EdgeDirection::Outbound | EdgeDirection::Undirected
+                        if edge.source == frame.current.id =>
+                    {
                         vec![&edge.target]
                     }
-                    EdgeDirection::Inbound if edge.target == frame.current.id => {
-                        vec![&edge.source]
-                    }
-                    EdgeDirection::Undirected if edge.source == frame.current.id => {
-                        vec![&edge.target]
-                    }
-                    EdgeDirection::Undirected if edge.target == frame.current.id => {
+                    EdgeDirection::Inbound | EdgeDirection::Undirected
+                        if edge.target == frame.current.id =>
+                    {
                         vec![&edge.source]
                     }
                     _ => Vec::new(),
@@ -1923,7 +1930,7 @@ fn evaluate_predicate(
     if let PredicateOperator::HasLabel(labels) = &predicate.operator {
         return Ok(matches!(
             left,
-            QueryValue::Node(ref node) if labels.iter().any(|label| node.label == *label)
+            QueryValue::Node(ref node) if labels.contains(&node.label)
         ));
     }
     if matches!(&predicate.operator, PredicateOperator::IsNull) {
@@ -1958,7 +1965,6 @@ fn evaluate_predicate(
         PredicateOperator::LessEqual => compare_values(&left, &right) != Ordering::Greater,
         PredicateOperator::Greater => compare_values(&left, &right) == Ordering::Greater,
         PredicateOperator::GreaterEqual => compare_values(&left, &right) != Ordering::Less,
-        PredicateOperator::Regex => unreachable!(),
         PredicateOperator::In | PredicateOperator::NotIn => {
             let Operand::List(items) = predicate
                 .right
@@ -1987,7 +1993,8 @@ fn evaluate_predicate(
         PredicateOperator::EndsWith => {
             string_pair(&left, &right, |left, right| left.ends_with(right))
         }
-        PredicateOperator::HasLabel(_)
+        PredicateOperator::Regex
+        | PredicateOperator::HasLabel(_)
         | PredicateOperator::IsNull
         | PredicateOperator::IsNotNull => unreachable!(),
     })
@@ -2031,8 +2038,8 @@ fn evaluate_scalar_function(
             .into_iter()
             .find(|value| !matches!(value, QueryValue::Null))
             .unwrap_or(QueryValue::Null),
-        "tolower" => unary_string(&values, |value| value.to_lowercase()),
-        "toupper" => unary_string(&values, |value| value.to_uppercase()),
+        "tolower" => unary_string(&values, str::to_lowercase),
+        "toupper" => unary_string(&values, str::to_uppercase),
         "tostring" => values
             .first()
             .and_then(query_value_string)
@@ -2146,9 +2153,9 @@ fn query_value_string(value: &QueryValue) -> Option<String> {
 fn query_value_integer(value: &QueryValue) -> QueryValue {
     match value {
         QueryValue::Integer(value) => QueryValue::Integer(*value),
-        QueryValue::Unsigned(value) => i64::try_from(*value)
-            .map(QueryValue::Integer)
-            .unwrap_or(QueryValue::Null),
+        QueryValue::Unsigned(value) => {
+            i64::try_from(*value).map_or(QueryValue::Null, QueryValue::Integer)
+        }
         QueryValue::Float(value)
             if value.is_finite() && *value >= i64::MIN as f64 && *value <= i64::MAX as f64 =>
         {
@@ -2156,8 +2163,7 @@ fn query_value_integer(value: &QueryValue) -> QueryValue {
         }
         QueryValue::String(value) => value
             .parse::<i64>()
-            .map(QueryValue::Integer)
-            .unwrap_or(QueryValue::Null),
+            .map_or(QueryValue::Null, QueryValue::Integer),
         QueryValue::Bool(value) => QueryValue::Integer(i64::from(*value)),
         _ => QueryValue::Null,
     }
@@ -2170,8 +2176,7 @@ fn query_value_float(value: &QueryValue) -> QueryValue {
         QueryValue::Float(value) => QueryValue::Float(*value),
         QueryValue::String(value) => value
             .parse::<f64>()
-            .map(QueryValue::Float)
-            .unwrap_or(QueryValue::Null),
+            .map_or(QueryValue::Null, QueryValue::Float),
         QueryValue::Bool(value) => QueryValue::Float(if *value { 1.0 } else { 0.0 }),
         _ => QueryValue::Null,
     }
@@ -2196,9 +2201,7 @@ fn value_size(value: &QueryValue) -> QueryValue {
         QueryValue::Json(serde_json::Value::Object(values)) => values.len(),
         _ => return QueryValue::Null,
     };
-    i64::try_from(size)
-        .map(QueryValue::Integer)
-        .unwrap_or(QueryValue::Null)
+    i64::try_from(size).map_or(QueryValue::Null, QueryValue::Integer)
 }
 
 fn substring_value(values: &[QueryValue]) -> QueryValue {

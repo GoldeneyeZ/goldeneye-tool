@@ -24,6 +24,7 @@ fn indexed_server(temp: &TempDir) -> (Server, String) {
     (Server::new(services), indexed.project)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn call(server: &Server, id: i64, name: &str, arguments: Value) -> Value {
     let line = json!({
         "jsonrpc": "2.0",
@@ -50,7 +51,7 @@ fn successful(result: &Value) -> &Value {
 fn registry_exposes_exact_upstream_adr_and_trace_schemas() {
     let registry = ToolRegistry::implemented();
     let all = registry.page(None).expect("all tools");
-    assert_eq!(all.tools.len(), 20);
+    assert_eq!(all.tools.len(), 21);
     let manage = all
         .tools
         .iter()
@@ -104,7 +105,7 @@ fn registry_exposes_exact_upstream_adr_and_trace_schemas() {
         registry.page(Some("8")).expect("second page").tools.len(),
         8
     );
-    assert_eq!(registry.page(Some("16")).expect("last page").tools.len(), 4);
+    assert_eq!(registry.page(Some("16")).expect("last page").tools.len(), 5);
 }
 
 #[test]

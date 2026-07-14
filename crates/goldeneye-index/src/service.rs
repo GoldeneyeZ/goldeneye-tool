@@ -81,6 +81,7 @@ where
     ///
     /// Returns a typed discovery, I/O, syntax, identity, cancellation, bound, or store error.
     /// No graph mutation occurs until all required parses and graph validation succeed.
+    #[allow(clippy::too_many_lines)]
     pub fn index_repository(&mut self, root: impl AsRef<Path>) -> Result<IndexResult, IndexError> {
         self.ensure_not_cancelled()?;
         let report = discover(root.as_ref(), &self.options.discovery)?;
@@ -174,6 +175,7 @@ where
             .store
             .replace_project_graph(&project, files, nodes, edges)?;
         project.generation = outcome.generation;
+        goldeneye_crosslink::rebuild(&mut self.store)?;
         let counts = self.store.counts(&project.id)?;
         Ok(IndexResult {
             status: IndexStatus::Indexed,
@@ -244,6 +246,7 @@ where
                 .store
                 .replace_project_graph(&project, files, nodes, edges)?;
             project.generation = outcome.generation;
+            goldeneye_crosslink::rebuild(&mut self.store)?;
             return self.refresh_result(
                 project_id,
                 path,
@@ -295,6 +298,7 @@ where
             .store
             .replace_project_graph(&project, files, nodes, edges)?;
         project.generation = outcome.generation;
+        goldeneye_crosslink::rebuild(&mut self.store)?;
         self.refresh_result(
             project_id,
             path,
@@ -336,8 +340,13 @@ where
         let mut pending_calls = Vec::new();
         let mut pending_relations = Vec::new();
         let mut pending_imports = Vec::new();
+        let mut source_files = Vec::new();
         for file in &files {
             let graph = if let Some(mut extracted) = parsed.remove(&file.id.path) {
+                source_files.push(crate::enrichment::SourceFile {
+                    path: extracted.record.id.path.clone(),
+                    source: Arc::clone(&extracted.source),
+                });
                 pending_calls.append(&mut extracted.calls);
                 pending_relations.append(&mut extracted.relations);
                 pending_imports.append(&mut extracted.imports);
@@ -357,6 +366,7 @@ where
             nodes.extend(graph.nodes);
             edges.extend(graph.edges);
         }
+        deduplicate_shared_modules(&mut nodes);
         let node_ids = nodes
             .iter()
             .map(|node| node.id.clone())
@@ -366,16 +376,24 @@ where
             &project.id,
             &nodes,
             &mut edges,
-            pending_calls,
+            pending_calls.clone(),
             pending_relations,
-            pending_imports,
+            pending_imports.clone(),
+        )?;
+        crate::enrichment::apply_project(
+            &project.id,
+            &mut nodes,
+            &mut edges,
+            &pending_calls,
+            &pending_imports,
+            &source_files,
         )?;
         Ok((files, nodes, edges))
     }
 
     fn reuse_file_graph(&self, file: &FileId) -> Result<FileGraph, IndexError> {
-        let nodes = self.store.nodes_for_file(file)?;
-        let node_ids = nodes
+        let mut nodes = self.store.nodes_for_file(file)?;
+        let mut node_ids = nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
@@ -384,6 +402,34 @@ where
         for node in &nodes {
             for edge in self.store.edges_from(&file.project, &node.id)? {
                 if !node_ids.contains(&edge.source) {
+                    continue;
+                }
+                let identity = (
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    edge.kind.clone(),
+                    edge.discriminator.clone(),
+                );
+                if identities.insert(identity) {
+                    edges.push(edge);
+                }
+            }
+        }
+        let referenced_modules = edges
+            .iter()
+            .filter(|edge| edge.kind.as_str() == "DEFINES" && !node_ids.contains(&edge.target))
+            .map(|edge| edge.target.clone())
+            .collect::<BTreeSet<_>>();
+        for module_id in referenced_modules {
+            let Some(module) = self.store.get_node(&file.project, &module_id)? else {
+                continue;
+            };
+            if module.label.as_str() != "Module" || !node_ids.insert(module.id.clone()) {
+                continue;
+            }
+            nodes.push(module);
+            for edge in self.store.edges_from(&file.project, &module_id)? {
+                if !node_ids.contains(&edge.target) {
                     continue;
                 }
                 let identity = (
@@ -561,6 +607,14 @@ where
             Ok(())
         }
     }
+}
+
+fn deduplicate_shared_modules(nodes: &mut Vec<GraphNode>) {
+    let mut seen = BTreeSet::new();
+    nodes.retain(|node| {
+        node.label.as_str() != "Module"
+            || seen.insert((node.id.clone(), node.qualified_name.as_str().to_owned()))
+    });
 }
 
 fn relative_path(path: &Path) -> Result<ProjectRelativePath, IndexError> {

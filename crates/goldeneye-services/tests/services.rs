@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp)]
+
 use std::fs;
 use std::sync::{Arc, Mutex};
 

@@ -10,6 +10,7 @@ license = "MIT"
 repository = "https://github.com/GoldeneyeZ/goldeneye-tool"
 
 [workspace.dependencies]
+atomic-write-file = "=0.3.0"
 cap-primitives = "=4.0.2"
 cc = "=1.2.67"
 serde = { version = "1.0", features = ["derive"] }
@@ -21,6 +22,7 @@ regex = "1.13"
 tempfile = "3.27.0"
 toml = "0.9"
 tree-sitter-language = "=0.1.7"
+zstd = "0.13.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

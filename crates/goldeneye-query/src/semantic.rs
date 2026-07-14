@@ -1,3 +1,11 @@
+// Semantic hashing and quantization use deliberately bounded numeric narrowing; vector,
+// checksum, and determinism tests cover the representation boundaries.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
+
 use std::{
     collections::HashMap,
     fs,
@@ -370,6 +378,11 @@ pub struct PretrainedModel {
 }
 
 impl PretrainedModel {
+    /// Loads and checksum-verifies the pretrained token/vector assets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, checksum, shape, token, or vector-length error for invalid assets.
     pub fn load(directory: impl AsRef<Path>) -> Result<Self, PretrainedModelError> {
         let directory = directory.as_ref();
         let vector_path = directory.join("code_vectors.bin");
@@ -416,7 +429,7 @@ impl PretrainedModel {
         }
         let vectors = vector_bytes[PRETRAINED_HEADER_LEN..]
             .iter()
-            .map(|byte| *byte as i8)
+            .map(|byte| i8::from_ne_bytes([*byte]))
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Ok(Self {
@@ -425,6 +438,11 @@ impl PretrainedModel {
         })
     }
 
+    /// Loads the pretrained model from Goldeneye's bundled asset directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same verified asset errors as [`Self::load`].
     pub fn load_bundled() -> Result<Self, PretrainedModelError> {
         Self::load(Self::bundled_directory())
     }
@@ -508,6 +526,8 @@ pub enum PretrainedModelError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)]
+
     use super::*;
 
     #[test]

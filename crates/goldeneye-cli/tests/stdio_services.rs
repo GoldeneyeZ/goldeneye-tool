@@ -63,6 +63,7 @@ fn responses(output: &Output) -> Vec<Value> {
         .collect()
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn call_tool(database: &Path, root: &Path, id: u64, name: &str, arguments: Value) -> Value {
     let input = format!(
         "{}\n",
@@ -180,13 +181,9 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
     }
     let second = responses(&run_server(second_input.as_bytes(), &database, temp.path()));
     assert_eq!(second.len(), 5);
-    assert_eq!(
-        second[0]["result"]["tools"]
-            .as_array()
-            .expect("tools")
-            .len(),
-        20
-    );
+    let tools = second[0]["result"]["tools"].as_array().expect("tools");
+    assert_eq!(tools.len(), 21);
+    assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
     assert_eq!(
         second[1]["result"]["structuredContent"]["projects"][0]["name"],
         project
@@ -209,6 +206,7 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_ack_reads() {
     let temp = TempDir::new().expect("temp directory");
     let repo = temp.path().join("fixture");
