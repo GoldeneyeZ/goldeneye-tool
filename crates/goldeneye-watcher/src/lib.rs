@@ -89,7 +89,7 @@ impl ServiceIndexer {
 }
 
 impl Indexer for ServiceIndexer {
-    fn index(&self, _project: &str, root: &Path) -> Result<IndexDisposition, String> {
+    fn index(&self, project: &str, root: &Path) -> Result<IndexDisposition, String> {
         if self
             .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -99,6 +99,7 @@ impl Indexer for ServiceIndexer {
         }
         let result = Services::new(self.config.clone()).index_repository(&IndexRepositoryRequest {
             repo_path: root.to_owned(),
+            name: Some(project.to_owned()),
             mode: IndexRepositoryMode::Fast,
             persistence: false,
         });

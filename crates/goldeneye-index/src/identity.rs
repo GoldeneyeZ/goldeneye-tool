@@ -29,6 +29,15 @@ pub fn project_id_for_root(root: impl AsRef<Path>) -> Result<ProjectId, IndexErr
     project_id_from_normalized_root(&root)
 }
 
+/// Sanitizes an explicit project-name override using the pinned upstream mapping.
+///
+/// # Errors
+///
+/// Returns a domain identity error when the sanitized value is invalid.
+pub fn project_id_for_name(name: &str) -> Result<ProjectId, IndexError> {
+    project_id_from_normalized_root(name)
+}
+
 /// Builds a generation-zero project record for an existing repository root.
 ///
 /// # Errors

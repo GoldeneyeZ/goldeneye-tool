@@ -181,7 +181,7 @@ fn index_and_metadata_tools(project_only: &Value) -> Vec<ToolDefinition> {
                     "repo_path": {"type": "string", "description": "Path to the repository"},
                     "mode": {"type": "string", "enum": ["full", "moderate", "fast", "cross-repo-intelligence"], "default": "full"},
                     "target_projects": {"type": "array", "items": {"type": "string"}, "description": "Projects used by cross-repo intelligence; all projects are rebuilt when omitted"},
-                    "name": {"type": "string", "description": "Reserved project-name override"},
+                    "name": {"type": "string", "description": "Optional sanitized project-name override"},
                     "persistence": {"type": "boolean", "default": false, "description": "Write a shared .codebase-memory artifact after indexing"}
                 }),
                 &["repo_path"],

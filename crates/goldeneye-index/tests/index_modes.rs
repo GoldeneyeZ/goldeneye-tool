@@ -47,6 +47,7 @@ fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
         max_workers: NonZeroUsize::new(1).expect("one worker"),
         max_files: None,
         cancellation: CancellationToken::new(),
+        project_id_override: None,
     };
     let mut service = IndexService::new(
         Store::open_in_memory().expect("memory store"),

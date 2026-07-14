@@ -165,6 +165,36 @@ fn index_then_every_read_surface_paginates_and_reopens() {
 }
 
 #[test]
+fn project_name_override_is_sanitized_and_persisted() {
+    let temp = TempDir::new().expect("temp directory");
+    let allowed = temp.path().join("allowed");
+    let repo = allowed.join("fixture");
+    write_fixture(&repo);
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo).with_name("Team API"))
+        .expect("index named project");
+
+    assert_eq!(indexed.project, "Team-API");
+    assert_eq!(
+        services.list_projects().expect("projects")[0].project,
+        "Team-API"
+    );
+    assert!(
+        services
+            .index_status(&IndexStatusRequest::new(
+                ProjectId::new("Team-API").expect("project ID"),
+            ))
+            .expect("named project status")
+            .nodes
+            > 0
+    );
+}
+
+#[test]
 fn allowed_root_unknown_project_and_cancellation_are_typed() {
     let temp = TempDir::new().expect("temp directory");
     let allowed = temp.path().join("allowed");

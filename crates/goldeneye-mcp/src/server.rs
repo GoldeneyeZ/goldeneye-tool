@@ -187,12 +187,6 @@ impl Server {
                         "target_projects": args.target_projects.unwrap_or_default(),
                     }));
                 }
-                if args.name.is_some() {
-                    return Err(
-                        "Invalid parameters for index_repository: project name overrides are not supported"
-                            .to_owned(),
-                    );
-                }
                 let mode = match args.mode.as_deref().unwrap_or("full") {
                     "full" => IndexRepositoryMode::Full,
                     "moderate" => IndexRepositoryMode::Moderate,
@@ -203,9 +197,12 @@ impl Server {
                         ));
                     }
                 };
-                let request = IndexRepositoryRequest::new(args.repo_path)
+                let mut request = IndexRepositoryRequest::new(args.repo_path)
                     .with_mode(mode)
                     .with_persistence(args.persistence);
+                if let Some(name) = args.name {
+                    request = request.with_name(name);
+                }
                 self.index_repository(id, &request)
             }
             "list_projects" => {
@@ -981,9 +978,13 @@ struct ArchitectureArguments {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::{LATEST_PROTOCOL_VERSION, Server};
     use crate::protocol::RequestId;
+    use goldeneye_services::{ServiceConfig, Services};
     use serde_json::json;
+    use tempfile::TempDir;
 
     #[test]
     fn initialize_returns_upstream_identity_and_latest_protocol() {
@@ -1095,6 +1096,38 @@ mod tests {
         assert_eq!(tools.len(), 21);
         assert_eq!(tools[0]["name"], "index_repository");
         assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
+    }
+
+    #[test]
+    fn index_repository_applies_project_name_override() {
+        let temp = TempDir::new().expect("temp directory");
+        let allowed = temp.path().join("allowed");
+        let repository = allowed.join("fixture");
+        fs::create_dir_all(repository.join("src")).expect("source directory");
+        fs::write(repository.join("src/lib.rs"), "pub fn ready() {}\n").expect("source file");
+        let server = Server::new(Services::new(
+            ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        ));
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "index_repository",
+                "arguments": {
+                    "repo_path": repository,
+                    "name": "Team API",
+                    "mode": "fast"
+                }
+            }
+        })
+        .to_string();
+
+        let response = server.handle_line(&request).expect("request response");
+        let value = serde_json::to_value(response).expect("serialize response");
+
+        assert_eq!(value["result"]["structuredContent"]["project"], "Team-API");
+        assert_eq!(value["result"]["isError"], false);
     }
 
     #[test]

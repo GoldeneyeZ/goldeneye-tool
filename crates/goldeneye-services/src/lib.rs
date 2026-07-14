@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use goldeneye_discovery::IndexMode;
-use goldeneye_index::{IndexError, IndexOptions, IndexService, IndexStatus};
+use goldeneye_index::{IndexError, IndexOptions, IndexService, IndexStatus, project_id_for_name};
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
@@ -152,6 +152,8 @@ impl Default for ServiceConfig {
 pub struct IndexRepositoryRequest {
     pub repo_path: PathBuf,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub mode: IndexRepositoryMode,
     #[serde(default)]
     pub persistence: bool,
@@ -162,9 +164,16 @@ impl IndexRepositoryRequest {
     pub fn new(repo_path: impl Into<PathBuf>) -> Self {
         Self {
             repo_path: repo_path.into(),
+            name: None,
             mode: IndexRepositoryMode::default(),
             persistence: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     #[must_use]
@@ -448,6 +457,13 @@ impl Services {
         let mut options = IndexOptions::default();
         options.discovery.mode = request.mode.discovery();
         options.cancellation = hooks.cancellation.clone();
+        options.project_id_override = request
+            .name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .map(project_id_for_name)
+            .transpose()
+            .map_err(map_index_error)?;
         let mut index = IndexService::new(store, CoreGrammarProvider, options);
         hooks.report("indexing");
         let mut result = index

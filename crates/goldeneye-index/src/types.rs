@@ -42,6 +42,7 @@ pub struct IndexOptions {
     pub max_workers: NonZeroUsize,
     pub max_files: Option<usize>,
     pub cancellation: CancellationToken,
+    pub project_id_override: Option<ProjectId>,
 }
 
 impl Default for IndexOptions {
@@ -58,6 +59,7 @@ impl Default for IndexOptions {
             max_workers: NonZeroUsize::new(workers).expect("worker count is at least one"),
             max_files: None,
             cancellation: CancellationToken::new(),
+            project_id_override: None,
         }
     }
 }

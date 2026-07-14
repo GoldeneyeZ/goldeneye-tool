@@ -142,6 +142,7 @@ fn full_options() -> IndexOptions {
         max_workers: NonZeroUsize::new(1).expect("one worker"),
         max_files: None,
         cancellation: CancellationToken::new(),
+        project_id_override: None,
     }
 }
 

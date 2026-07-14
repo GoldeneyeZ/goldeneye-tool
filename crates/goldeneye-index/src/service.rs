@@ -89,6 +89,9 @@ where
         self.ensure_not_cancelled()?;
 
         let mut project = canonical_project(root.as_ref())?;
+        if let Some(project_id) = &self.options.project_id_override {
+            project = ProjectRecord::new(project_id.clone(), project.root_path.clone())?;
+        }
         let stored_project = self.store.get_project(&project.id)?;
         if let Some(stored) = &stored_project {
             project.generation = stored.generation;

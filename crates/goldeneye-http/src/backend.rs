@@ -239,6 +239,7 @@ impl GoldeneyeBackend {
         }
 
         let body: Body = request.json()?;
+        let name_override = (!body.project_name.is_empty()).then(|| body.project_name.clone());
         let root = body
             .root_path
             .canonicalize()
@@ -286,6 +287,7 @@ impl GoldeneyeBackend {
                 let result =
                     Services::new(config.clone()).index_repository(&IndexRepositoryRequest {
                         repo_path: thread_root.clone(),
+                        name: name_override,
                         mode: body.mode,
                         persistence: body.persistence || persistence_enabled(),
                     });
