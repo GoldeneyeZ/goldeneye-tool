@@ -4,7 +4,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{SchemaInfo, StoreError};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -217,6 +217,44 @@ const MIGRATIONS: &[(u32, &str)] = &[
             ON git_cochanges(project_id, file_b, file_a);
         CREATE INDEX git_cochanges_score_idx
             ON git_cochanges(project_id, coupling_score DESC, file_a, file_b);
+        ",
+    ),
+    (
+        6,
+        r"
+        CREATE TABLE node_vectors (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            node_id TEXT NOT NULL COLLATE BINARY,
+            vector BLOB NOT NULL CHECK (length(vector) = 768),
+            PRIMARY KEY (project_id, node_id),
+            FOREIGN KEY (project_id, node_id)
+                REFERENCES nodes(project_id, node_id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE token_vectors (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            token TEXT NOT NULL COLLATE BINARY CHECK (length(token) > 0),
+            vector BLOB NOT NULL CHECK (length(vector) = 768),
+            idf_milli INTEGER NOT NULL CHECK (idf_milli >= 0),
+            PRIMARY KEY (project_id, token),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE node_signatures (
+            project_id TEXT NOT NULL COLLATE BINARY,
+            node_id TEXT NOT NULL COLLATE BINARY,
+            minhash_hex TEXT NOT NULL COLLATE BINARY
+                CHECK (length(minhash_hex) = 512),
+            ast_profile TEXT,
+            PRIMARY KEY (project_id, node_id),
+            FOREIGN KEY (project_id, node_id)
+                REFERENCES nodes(project_id, node_id) ON DELETE CASCADE
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE INDEX node_vectors_project_idx
+            ON node_vectors(project_id);
+        CREATE INDEX node_signatures_project_idx
+            ON node_signatures(project_id);
         ",
     ),
 ];

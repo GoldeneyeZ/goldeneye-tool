@@ -7,7 +7,7 @@ use goldeneye_domain::{
 };
 use goldeneye_store::{
     CURRENT_SCHEMA_VERSION, EditOperationId, EditOperationKind, EditPhase, NewEditJournalRecord,
-    Store, StoreError,
+    NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -97,6 +97,9 @@ fn migrations_are_versioned_idempotent_and_introspectable() {
         "edges",
         "nodes_fts",
         "edit_journal",
+        "node_vectors",
+        "token_vectors",
+        "node_signatures",
     ] {
         assert!(schema.tables.contains(table), "missing table {table}");
     }
@@ -104,6 +107,8 @@ fn migrations_are_versioned_idempotent_and_introspectable() {
         "edit_journal_project_path_idx",
         "edit_journal_incomplete_idx",
         "edit_journal_active_target_idx",
+        "node_vectors_project_idx",
+        "node_signatures_project_idx",
     ] {
         assert!(schema.indexes.contains(index), "missing index {index}");
     }
@@ -113,6 +118,147 @@ fn migrations_are_versioned_idempotent_and_introspectable() {
     assert_eq!(
         reopened.schema_info().expect("schema").version,
         CURRENT_SCHEMA_VERSION
+    );
+}
+
+#[test]
+fn semantic_artifacts_round_trip_and_cascade_with_the_project() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("semantic", "D:/semantic");
+    store.register_project(&project).expect("project");
+    let generation = store.begin_generation(&project.id).expect("generation");
+    let source = file(&project.id, "src/lib.rs", generation, b"fn find_user() {}");
+    let function = node(
+        &project.id,
+        "function:find_user",
+        "Function",
+        "find_user",
+        "crate::find_user",
+        "src/lib.rs",
+        generation,
+    );
+    store
+        .replace_project_graph(
+            &project.id,
+            vec![source],
+            vec![function.clone()],
+            Vec::new(),
+        )
+        .expect("graph");
+
+    let mut node_values = [0_i8; 768];
+    node_values[3] = 127;
+    let mut token_values = [0_i8; 768];
+    token_values[3] = 64;
+    let signature = "01234567".repeat(64);
+    let outcome = store
+        .replace_semantic_index(
+            &project.id,
+            &[NodeVectorRecord {
+                node_id: function.id.clone(),
+                vector: StoredVector::from_array(node_values),
+            }],
+            &[TokenVectorRecord {
+                token: "find".to_owned(),
+                vector: StoredVector::from_array(token_values),
+                idf_milli: 1_750,
+            }],
+            &[NodeSignatureRecord {
+                node_id: function.id.clone(),
+                minhash_hex: signature.clone(),
+                ast_profile: Some("1,2,3".to_owned()),
+            }],
+        )
+        .expect("semantic artifacts");
+
+    assert_eq!(outcome.node_vectors, 1);
+    assert_eq!(outcome.token_vectors, 1);
+    assert_eq!(outcome.node_signatures, 1);
+    assert_eq!(
+        store.list_node_vectors(&project.id).expect("node vectors"),
+        vec![NodeVectorRecord {
+            node_id: function.id.clone(),
+            vector: StoredVector::from_array(node_values),
+        }]
+    );
+    assert_eq!(
+        store
+            .get_token_vector(&project.id, "find")
+            .expect("token vector"),
+        Some(TokenVectorRecord {
+            token: "find".to_owned(),
+            vector: StoredVector::from_array(token_values),
+            idf_milli: 1_750,
+        })
+    );
+    assert_eq!(
+        store.list_node_signatures(&project.id).expect("signatures"),
+        vec![NodeSignatureRecord {
+            node_id: function.id,
+            minhash_hex: signature,
+            ast_profile: Some("1,2,3".to_owned()),
+        }]
+    );
+
+    assert!(store.delete_project(&project.id).expect("delete project"));
+    assert!(
+        store
+            .list_node_vectors(&project.id)
+            .expect("cascaded vectors")
+            .is_empty()
+    );
+    assert!(
+        store
+            .list_node_signatures(&project.id)
+            .expect("cascaded signatures")
+            .is_empty()
+    );
+}
+
+#[test]
+fn semantic_replacement_is_validated_before_the_existing_snapshot_is_removed() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("semantic-validation", "D:/semantic-validation");
+    store.register_project(&project).expect("project");
+    let generation = store.begin_generation(&project.id).expect("generation");
+    let source = file(&project.id, "src/lib.rs", generation, b"fn stable() {}");
+    let function = node(
+        &project.id,
+        "function:stable",
+        "Function",
+        "stable",
+        "crate::stable",
+        "src/lib.rs",
+        generation,
+    );
+    store
+        .replace_project_graph(
+            &project.id,
+            vec![source],
+            vec![function.clone()],
+            Vec::new(),
+        )
+        .expect("graph");
+    let original = NodeVectorRecord {
+        node_id: function.id,
+        vector: StoredVector::from_array([1_i8; 768]),
+    };
+    store
+        .replace_semantic_index(&project.id, std::slice::from_ref(&original), &[], &[])
+        .expect("initial snapshot");
+
+    let invalid = TokenVectorRecord {
+        token: String::new(),
+        vector: StoredVector::from_array([0_i8; 768]),
+        idf_milli: 1_000,
+    };
+    assert!(matches!(
+        store.replace_semantic_index(&project.id, &[], &[invalid], &[]),
+        Err(StoreError::InvalidSemanticRecord { .. })
+    ));
+    assert_eq!(
+        store.list_node_vectors(&project.id).expect("snapshot"),
+        vec![original]
     );
 }
 

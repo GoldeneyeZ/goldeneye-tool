@@ -27,6 +27,8 @@ pub use adr::{
 pub use schema::CURRENT_SCHEMA_VERSION;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
+pub const STORED_VECTOR_DIM: usize = 768;
+pub const MINHASH_SIGNATURE_HEX_LEN: usize = 512;
 const NODE_COLUMNS: &str = "project_id, node_id, label, name, qualified_name, file_path, \
     start_byte, end_byte, start_row, start_column, end_row, end_column, generation, properties_json";
 const QUALIFIED_NODE_COLUMNS: &str = "nodes.project_id, nodes.node_id, nodes.label, nodes.name, \
@@ -109,6 +111,8 @@ pub enum StoreError {
     InvalidRuntimeTrace { reason: &'static str },
     #[error("invalid Git history record: {reason}")]
     InvalidGitHistory { reason: &'static str },
+    #[error("invalid semantic index record: {reason}")]
+    InvalidSemanticRecord { reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +226,63 @@ pub struct GitHistoryOutcome {
     pub couplings: usize,
     pub enriched_files: usize,
     pub enriched_edges: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredVector([i8; STORED_VECTOR_DIM]);
+
+impl StoredVector {
+    #[must_use]
+    pub const fn from_array(values: [i8; STORED_VECTOR_DIM]) -> Self {
+        Self(values)
+    }
+
+    #[must_use]
+    pub const fn values(&self) -> &[i8; STORED_VECTOR_DIM] {
+        &self.0
+    }
+
+    fn to_blob(&self) -> Vec<u8> {
+        self.0.iter().map(|value| value.to_ne_bytes()[0]).collect()
+    }
+
+    fn from_blob(blob: Vec<u8>, field: &'static str) -> Result<Self, StoreError> {
+        let bytes: [u8; STORED_VECTOR_DIM] =
+            blob.try_into()
+                .map_err(|value: Vec<u8>| StoreError::CorruptData {
+                    field,
+                    reason: format!("expected {STORED_VECTOR_DIM} bytes, found {}", value.len()),
+                })?;
+        Ok(Self(bytes.map(|value| i8::from_ne_bytes([value]))))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeVectorRecord {
+    pub node_id: NodeId,
+    pub vector: StoredVector,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenVectorRecord {
+    pub token: String,
+    pub vector: StoredVector,
+    /// Inverse-document frequency multiplied by 1,000, matching upstream storage.
+    pub idf_milli: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeSignatureRecord {
+    pub node_id: NodeId,
+    pub minhash_hex: String,
+    pub ast_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SemanticIndexOutcome {
+    pub node_vectors: usize,
+    pub token_vectors: usize,
+    pub node_signatures: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1074,6 +1135,79 @@ impl Store {
             enriched_edges,
         })
     }
+
+    /// Atomically replaces all persisted semantic vectors and structural signatures.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation, project-not-found, foreign-key, overflow, or storage error.
+    pub fn replace_semantic_index(
+        &mut self,
+        project: &ProjectId,
+        node_vectors: &[NodeVectorRecord],
+        token_vectors: &[TokenVectorRecord],
+        node_signatures: &[NodeSignatureRecord],
+    ) -> Result<SemanticIndexOutcome, StoreError> {
+        validate_semantic_index(node_vectors, token_vectors, node_signatures)?;
+        ensure_project_exists(&self.connection, project)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "DELETE FROM node_vectors WHERE project_id = ?1",
+            params![project.as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM token_vectors WHERE project_id = ?1",
+            params![project.as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM node_signatures WHERE project_id = ?1",
+            params![project.as_str()],
+        )?;
+
+        for record in node_vectors {
+            transaction.execute(
+                "INSERT INTO node_vectors(project_id, node_id, vector) VALUES (?1, ?2, ?3)",
+                params![
+                    project.as_str(),
+                    record.node_id.as_str(),
+                    record.vector.to_blob(),
+                ],
+            )?;
+        }
+        for record in token_vectors {
+            transaction.execute(
+                "INSERT INTO token_vectors(project_id, token, vector, idf_milli) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    project.as_str(),
+                    record.token,
+                    record.vector.to_blob(),
+                    i64::from(record.idf_milli),
+                ],
+            )?;
+        }
+        for record in node_signatures {
+            transaction.execute(
+                "INSERT INTO node_signatures(\
+                   project_id, node_id, minhash_hex, ast_profile\
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    project.as_str(),
+                    record.node_id.as_str(),
+                    record.minhash_hex,
+                    record.ast_profile,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(SemanticIndexOutcome {
+            node_vectors: node_vectors.len(),
+            token_vectors: token_vectors.len(),
+            node_signatures: node_signatures.len(),
+        })
+    }
 }
 
 macro_rules! impl_read_api {
@@ -1315,6 +1449,69 @@ macro_rules! impl_read_api {
                 count_search_nodes(&self.connection, project, query)
             }
 
+            /// Lists persisted node vectors in stable node-ID order.
+            ///
+            /// # Errors
+            ///
+            /// Returns a storage or decode error.
+            pub fn list_node_vectors(
+                &self,
+                project: &ProjectId,
+            ) -> Result<Vec<NodeVectorRecord>, StoreError> {
+                list_node_vectors(&self.connection, project)
+            }
+
+            /// Finds one persisted node vector by stable node ID.
+            ///
+            /// # Errors
+            ///
+            /// Returns a storage or decode error.
+            pub fn get_node_vector(
+                &self,
+                project: &ProjectId,
+                node: &NodeId,
+            ) -> Result<Option<NodeVectorRecord>, StoreError> {
+                get_node_vector(&self.connection, project, node)
+            }
+
+            /// Finds one enriched token vector by exact case-sensitive token.
+            ///
+            /// # Errors
+            ///
+            /// Returns a storage or decode error.
+            pub fn get_token_vector(
+                &self,
+                project: &ProjectId,
+                token: &str,
+            ) -> Result<Option<TokenVectorRecord>, StoreError> {
+                get_token_vector(&self.connection, project, token)
+            }
+
+            /// Lists structural signatures in stable node-ID order.
+            ///
+            /// # Errors
+            ///
+            /// Returns a storage or decode error.
+            pub fn list_node_signatures(
+                &self,
+                project: &ProjectId,
+            ) -> Result<Vec<NodeSignatureRecord>, StoreError> {
+                list_node_signatures(&self.connection, project)
+            }
+
+            /// Finds one structural signature by stable node ID.
+            ///
+            /// # Errors
+            ///
+            /// Returns a storage or decode error.
+            pub fn get_node_signature(
+                &self,
+                project: &ProjectId,
+                node: &NodeId,
+            ) -> Result<Option<NodeSignatureRecord>, StoreError> {
+                get_node_signature(&self.connection, project, node)
+            }
+
             /// Counts normalized graph records for a project.
             ///
             /// # Errors
@@ -1354,6 +1551,199 @@ macro_rules! impl_read_api {
 
 impl_read_api!(Store);
 impl_read_api!(QueryStore);
+
+fn validate_semantic_index(
+    node_vectors: &[NodeVectorRecord],
+    token_vectors: &[TokenVectorRecord],
+    node_signatures: &[NodeSignatureRecord],
+) -> Result<(), StoreError> {
+    let mut vector_nodes = BTreeSet::new();
+    for record in node_vectors {
+        if !vector_nodes.insert(&record.node_id) {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: format!("duplicate node vector for {:?}", record.node_id),
+            });
+        }
+    }
+
+    let mut tokens = BTreeSet::new();
+    for record in token_vectors {
+        if record.token.is_empty() || record.token.contains('\0') {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: "token must be non-empty and contain no NUL bytes".to_owned(),
+            });
+        }
+        if !tokens.insert(&record.token) {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: format!("duplicate token vector for {:?}", record.token),
+            });
+        }
+    }
+
+    let mut signature_nodes = BTreeSet::new();
+    for record in node_signatures {
+        if !signature_nodes.insert(&record.node_id) {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: format!("duplicate node signature for {:?}", record.node_id),
+            });
+        }
+        if record.minhash_hex.len() != MINHASH_SIGNATURE_HEX_LEN
+            || !record
+                .minhash_hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: format!(
+                    "MinHash signature for {:?} must contain {MINHASH_SIGNATURE_HEX_LEN} hex digits",
+                    record.node_id
+                ),
+            });
+        }
+        if record
+            .ast_profile
+            .as_ref()
+            .is_some_and(|profile| profile.contains('\0'))
+        {
+            return Err(StoreError::InvalidSemanticRecord {
+                reason: format!("AST profile for {:?} contains a NUL byte", record.node_id),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn list_node_vectors(
+    connection: &Connection,
+    project: &ProjectId,
+) -> Result<Vec<NodeVectorRecord>, StoreError> {
+    let mut statement = connection.prepare(
+        "SELECT node_id, vector FROM node_vectors \
+         WHERE project_id = ?1 ORDER BY node_id COLLATE BINARY",
+    )?;
+    let rows = statement.query_map(params![project.as_str()], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+    })?;
+    rows.map(|row| {
+        let (node_id, vector) = row?;
+        Ok(NodeVectorRecord {
+            node_id: NodeId::new(node_id).map_err(corrupt_domain("node vector ID"))?,
+            vector: StoredVector::from_blob(vector, "node vector")?,
+        })
+    })
+    .collect()
+}
+
+fn get_node_vector(
+    connection: &Connection,
+    project: &ProjectId,
+    node: &NodeId,
+) -> Result<Option<NodeVectorRecord>, StoreError> {
+    let raw = connection
+        .query_row(
+            "SELECT node_id, vector FROM node_vectors \
+             WHERE project_id = ?1 AND node_id = ?2",
+            params![project.as_str(), node.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+        )
+        .optional()?;
+    raw.map(|(node_id, vector)| {
+        Ok(NodeVectorRecord {
+            node_id: NodeId::new(node_id).map_err(corrupt_domain("node vector ID"))?,
+            vector: StoredVector::from_blob(vector, "node vector")?,
+        })
+    })
+    .transpose()
+}
+
+fn get_token_vector(
+    connection: &Connection,
+    project: &ProjectId,
+    token: &str,
+) -> Result<Option<TokenVectorRecord>, StoreError> {
+    let raw = connection
+        .query_row(
+            "SELECT token, vector, idf_milli FROM token_vectors \
+             WHERE project_id = ?1 AND token = ?2",
+            params![project.as_str(), token],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(|(token, vector, idf_milli)| {
+        Ok(TokenVectorRecord {
+            token,
+            vector: StoredVector::from_blob(vector, "token vector")?,
+            idf_milli: u32::try_from(sqlite_u64("token vector IDF", idf_milli)?).map_err(|_| {
+                StoreError::CorruptData {
+                    field: "token vector IDF",
+                    reason: format!("value {idf_milli} does not fit u32"),
+                }
+            })?,
+        })
+    })
+    .transpose()
+}
+
+fn list_node_signatures(
+    connection: &Connection,
+    project: &ProjectId,
+) -> Result<Vec<NodeSignatureRecord>, StoreError> {
+    let mut statement = connection.prepare(
+        "SELECT node_id, minhash_hex, ast_profile FROM node_signatures \
+         WHERE project_id = ?1 ORDER BY node_id COLLATE BINARY",
+    )?;
+    let rows = statement.query_map(params![project.as_str()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (node_id, minhash_hex, ast_profile) = row?;
+        Ok(NodeSignatureRecord {
+            node_id: NodeId::new(node_id).map_err(corrupt_domain("node signature ID"))?,
+            minhash_hex,
+            ast_profile,
+        })
+    })
+    .collect()
+}
+
+fn get_node_signature(
+    connection: &Connection,
+    project: &ProjectId,
+    node: &NodeId,
+) -> Result<Option<NodeSignatureRecord>, StoreError> {
+    let raw = connection
+        .query_row(
+            "SELECT node_id, minhash_hex, ast_profile FROM node_signatures \
+             WHERE project_id = ?1 AND node_id = ?2",
+            params![project.as_str(), node.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(|(node_id, minhash_hex, ast_profile)| {
+        Ok(NodeSignatureRecord {
+            node_id: NodeId::new(node_id).map_err(corrupt_domain("node signature ID"))?,
+            minhash_hex,
+            ast_profile,
+        })
+    })
+    .transpose()
+}
 
 fn configure_writable(connection: &Connection, in_memory: bool) -> Result<(), StoreError> {
     connection.pragma_update(None, "foreign_keys", true)?;
