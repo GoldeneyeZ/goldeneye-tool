@@ -329,6 +329,10 @@ where
         let mut nodes = vec![project_graph_node, branch];
         for file in &files {
             let graph = if let Some(extracted) = parsed.remove(&file.id.path) {
+                // Raw calls remain bounded to extraction and are intentionally
+                // not persisted until a definition/hybrid resolver can target them.
+                let _raw_calls = extracted.calls;
+                let _raw_relations = extracted.relations;
                 FileGraph {
                     nodes: extracted.nodes,
                     edges: extracted.edges,

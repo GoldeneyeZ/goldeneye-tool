@@ -80,7 +80,7 @@ fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
 }
 
 #[test]
-fn fast_preserves_core_only_extraction_while_moderate_and_full_enable_generic_breadth() {
+fn audited_languages_do_not_fall_back_to_unrelated_generic_node_kinds() {
     let temp = TempDir::new().expect("temp repository");
     write_fixture(temp.path());
 
@@ -90,14 +90,9 @@ fn fast_preserves_core_only_extraction_while_moderate_and_full_enable_generic_br
 
     for mode in [IndexMode::Moderate, IndexMode::Full] {
         let (labels, has_calls) = index_mode(temp.path(), mode);
-        assert!(labels.iter().any(|label| label == "Struct"));
-        assert_eq!(
-            labels
-                .iter()
-                .filter(|label| label.as_str() == "Function")
-                .count(),
-            2
-        );
-        assert!(has_calls);
+        assert_eq!(labels, ["Field", "File", "Module"]);
+        assert!(!labels.iter().any(|label| label == "Function"));
+        assert!(!labels.iter().any(|label| label == "Struct"));
+        assert!(!has_calls);
     }
 }

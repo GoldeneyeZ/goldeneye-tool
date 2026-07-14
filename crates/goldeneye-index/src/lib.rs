@@ -2,6 +2,7 @@
 
 mod extract;
 mod identity;
+mod language_specs;
 mod service;
 mod types;
 
