@@ -128,18 +128,39 @@ fn execute_parsed(
         .iter()
         .map(|projection| projection.column.clone())
         .collect();
-    let mut rows = materialize_rows(&query, bindings, &degrees)?;
-    if query.distinct {
-        let mut seen = BTreeSet::new();
-        rows.retain(|row| seen.insert(row_key(row)));
-    }
-    let skipped = query.skip.min(rows.len());
-    rows.drain(..skipped);
-    let total = rows.len();
     let query_limit = query.limit.unwrap_or(usize::MAX);
     let materialized_limit = row_cap.min(query_limit);
-    let truncated = total > materialized_limit;
-    rows.truncate(materialized_limit);
+    let has_aggregate = query.projections.iter().any(|projection| {
+        matches!(
+            projection.expression,
+            ProjectionExpression::Aggregate { .. }
+        )
+    });
+    let (rows, total, truncated) = if !has_aggregate && !query.distinct && query.order.is_empty() {
+        let projected = bindings.into_iter().map(|binding| {
+            query
+                .projections
+                .iter()
+                .map(|projection| {
+                    evaluate_projection_expression(&projection.expression, &binding, &degrees)
+                })
+                .collect::<Result<Vec<_>, _>>()
+        });
+        let bounded = collect_bounded_rows(projected, query.skip, materialized_limit)?;
+        (bounded.rows, bounded.total, bounded.truncated)
+    } else {
+        let mut rows = materialize_rows(&query, bindings, &degrees)?;
+        if query.distinct {
+            let mut seen = BTreeSet::new();
+            rows.retain(|row| seen.insert(row_key(row)));
+        }
+        let skipped = query.skip.min(rows.len());
+        rows.drain(..skipped);
+        let total = rows.len();
+        let truncated = total > materialized_limit;
+        rows.truncate(materialized_limit);
+        (rows, total, truncated)
+    };
     let warning = (!query.warnings.is_empty()).then(|| query.warnings.join("; "));
 
     Ok(QueryGraphResult {
@@ -3109,4 +3130,100 @@ fn numeric_value(value: &QueryValue) -> Result<f64, QueryError> {
 
 fn row_key(row: &[QueryValue]) -> String {
     serde_json::to_string(row).unwrap_or_else(|_| format!("{row:?}"))
+}
+
+struct BoundedRows {
+    rows: Vec<Vec<QueryValue>>,
+    total: usize,
+    truncated: bool,
+    #[cfg(test)]
+    peak_retained: usize,
+}
+
+fn collect_bounded_rows(
+    rows: impl IntoIterator<Item = Result<Vec<QueryValue>, QueryError>>,
+    skip: usize,
+    limit: usize,
+) -> Result<BoundedRows, QueryError> {
+    let retain_limit = skip.saturating_add(limit);
+    let mut retained: BTreeMap<String, Vec<Vec<QueryValue>>> = BTreeMap::new();
+    let mut retained_count = 0_usize;
+    let mut total_before_skip = 0_usize;
+    #[cfg(test)]
+    let mut peak_retained = 0_usize;
+
+    for row in rows {
+        let row = row?;
+        total_before_skip = total_before_skip.saturating_add(1);
+        if retain_limit == 0 {
+            continue;
+        }
+        retained.entry(row_key(&row)).or_default().push(row);
+        retained_count += 1;
+        if retained_count > retain_limit {
+            let greatest_key = retained
+                .last_key_value()
+                .map(|(key, _)| key.clone())
+                .expect("a retained row has a greatest key");
+            let remove_bucket = {
+                let bucket = retained
+                    .get_mut(&greatest_key)
+                    .expect("greatest row bucket exists");
+                bucket.pop();
+                bucket.is_empty()
+            };
+            if remove_bucket {
+                retained.remove(&greatest_key);
+            }
+            retained_count -= 1;
+        }
+        #[cfg(test)]
+        {
+            peak_retained = peak_retained.max(retained_count);
+        }
+    }
+
+    let skipped = skip.min(total_before_skip);
+    let total = total_before_skip - skipped;
+    let mut rows = retained
+        .into_values()
+        .flatten()
+        .collect::<Vec<Vec<QueryValue>>>();
+    rows.drain(..skipped.min(rows.len()));
+    rows.truncate(limit);
+    Ok(BoundedRows {
+        rows,
+        total,
+        truncated: total > limit,
+        #[cfg(test)]
+        peak_retained,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_bounded_rows, row_key};
+    use crate::types::QueryValue;
+
+    #[test]
+    fn simple_limit_retains_only_bounded_rows_without_changing_result_metadata() {
+        let input = (0..100)
+            .rev()
+            .map(|value| Ok(vec![QueryValue::Integer(value)]))
+            .collect::<Vec<_>>();
+        let mut expected = (0..100)
+            .rev()
+            .map(|value| vec![QueryValue::Integer(value)])
+            .collect::<Vec<_>>();
+        expected.sort_by_key(|row| row_key(row));
+        expected.drain(..1);
+        expected.truncate(3);
+
+        let bounded = collect_bounded_rows(input, 1, 3).expect("bounded rows");
+
+        assert_eq!(bounded.rows, expected);
+        assert_eq!(bounded.total, 99);
+        assert!(bounded.truncated);
+        assert!(bounded.peak_retained <= 4);
+    }
 }

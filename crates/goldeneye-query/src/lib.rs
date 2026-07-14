@@ -15,7 +15,7 @@ mod types;
 pub use ast_profile::{
     AST_PROFILE_DIMS, AST_PROFILE_MAX_ENCODED_LEN, AstProfile, AstProfileParseError,
 };
-pub use engine::QueryEngine;
+pub use engine::{QueryCache, QueryEngine};
 pub use rotsq::{
     ROTSQ_BITS, ROTSQ_CODE_BYTES, ROTSQ_DIM, ROTSQ_INPUT_DIM, ROTSQ_LEVELS, RotatedScalarCode,
 };

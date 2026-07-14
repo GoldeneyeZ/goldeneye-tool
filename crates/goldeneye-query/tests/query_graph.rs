@@ -123,6 +123,22 @@ fn max_rows_skip_and_limit_bound_materialization() {
 }
 
 #[test]
+fn simple_limit_without_order_preserves_rows_total_and_truncation() {
+    let fixture = Fixture::seeded();
+    let engine = fixture.engine();
+    let result = engine
+        .query_graph(&QueryGraphRequest::new(
+            fixture.project.clone(),
+            "MATCH (n) RETURN n.name LIMIT 1",
+        ))
+        .expect("bounded query without explicit order");
+
+    assert_eq!(result.rows, vec![vec![text("Alpha")]]);
+    assert_eq!(result.total, 7);
+    assert!(result.truncated);
+}
+
+#[test]
 fn mutating_syntax_fails_closed_without_false_literal_hits() {
     let fixture = Fixture::seeded();
     let engine = fixture.engine();

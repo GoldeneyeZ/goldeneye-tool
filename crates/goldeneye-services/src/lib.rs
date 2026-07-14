@@ -384,6 +384,7 @@ impl ServiceError {
 pub struct Services {
     config: ServiceConfig,
     edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService<CoreGrammarProvider>>>>,
+    query: Arc<goldeneye_query::QueryCache>,
 }
 
 impl std::fmt::Debug for Services {
@@ -401,6 +402,7 @@ impl Services {
         Self {
             config,
             edit: Arc::new(Mutex::new(None)),
+            query: Arc::new(goldeneye_query::QueryCache::default()),
         }
     }
 
@@ -823,8 +825,9 @@ impl Services {
 
     fn query_engine(&self) -> Result<goldeneye_query::QueryEngine, ServiceError> {
         self.prepare_database()?;
-        Ok(goldeneye_query::QueryEngine::open(
+        Ok(goldeneye_query::QueryEngine::open_with_cache(
             &self.config.database_path,
+            Arc::clone(&self.query),
         )?)
     }
 

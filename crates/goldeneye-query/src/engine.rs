@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::sync::{Arc, Mutex};
 
-use goldeneye_domain::{ContentHash, FileId, GraphEdge, GraphNode, NodeId, ProjectId};
+use goldeneye_domain::{ContentHash, FileId, Generation, GraphEdge, GraphNode, NodeId, ProjectId};
 use goldeneye_store::{QueryStore, SearchHit, Store};
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -25,6 +26,85 @@ const MAX_SNIPPET_LINES: usize = 10_000;
 
 pub struct QueryEngine {
     store: QueryStore,
+    cache: Arc<QueryCache>,
+}
+
+#[derive(Default)]
+pub struct QueryCache {
+    graphs: Mutex<BTreeMap<ProjectId, Arc<ProjectGraph>>>,
+}
+
+struct ProjectGraph {
+    generation: u64,
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+    degrees: BTreeMap<NodeId, (usize, usize)>,
+    edges_by_node: BTreeMap<NodeId, Vec<usize>>,
+    define_counts: BTreeMap<NodeId, usize>,
+    nodes_by_name: BTreeMap<String, Vec<usize>>,
+}
+
+impl QueryCache {
+    fn get_or_load(
+        &self,
+        project: &ProjectId,
+        generation: Generation,
+        mut load: impl FnMut() -> Result<(Vec<GraphNode>, Vec<GraphEdge>), QueryError>,
+    ) -> Result<Arc<ProjectGraph>, QueryError> {
+        let mut graphs = self
+            .graphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(graph) = graphs
+            .get(project)
+            .filter(|graph| graph.generation == generation.value())
+        {
+            return Ok(Arc::clone(graph));
+        }
+        let (nodes, edges) = load()?;
+        let graph = Arc::new(ProjectGraph::new(generation, nodes, edges));
+        graphs.insert(project.clone(), Arc::clone(&graph));
+        Ok(graph)
+    }
+}
+
+impl ProjectGraph {
+    fn new(generation: Generation, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> Self {
+        let degrees = degrees(&edges);
+        let mut edges_by_node = BTreeMap::<NodeId, Vec<usize>>::new();
+        let mut define_counts = BTreeMap::<NodeId, usize>::new();
+        let mut nodes_by_name = BTreeMap::<String, Vec<usize>>::new();
+        for (index, node) in nodes.iter().enumerate() {
+            nodes_by_name
+                .entry(node.name.clone())
+                .or_default()
+                .push(index);
+        }
+        for (index, edge) in edges.iter().enumerate() {
+            edges_by_node
+                .entry(edge.source.clone())
+                .or_default()
+                .push(index);
+            if edge.target != edge.source {
+                edges_by_node
+                    .entry(edge.target.clone())
+                    .or_default()
+                    .push(index);
+            }
+            if edge.kind.as_str() == "DEFINES" {
+                *define_counts.entry(edge.source.clone()).or_default() += 1;
+            }
+        }
+        Self {
+            generation: generation.value(),
+            nodes,
+            edges,
+            degrees,
+            edges_by_node,
+            define_counts,
+            nodes_by_name,
+        }
+    }
 }
 
 impl QueryEngine {
@@ -34,14 +114,30 @@ impl QueryEngine {
     ///
     /// Returns a query error when the database is missing or cannot be opened safely.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, QueryError> {
+        Self::open_with_cache(path, Arc::new(QueryCache::default()))
+    }
+
+    /// Opens an existing graph database with a process-shared graph cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error when the database is missing or cannot be opened safely.
+    pub fn open_with_cache(
+        path: impl AsRef<std::path::Path>,
+        cache: Arc<QueryCache>,
+    ) -> Result<Self, QueryError> {
         Ok(Self {
             store: Store::open_read_only(path)?,
+            cache,
         })
     }
 
     #[must_use]
-    pub const fn from_store(store: QueryStore) -> Self {
-        Self { store }
+    pub fn from_store(store: QueryStore) -> Self {
+        Self {
+            store,
+            cache: Arc::new(QueryCache::default()),
+        }
     }
 
     /// Lists indexed projects in bytewise project-ID order.
@@ -95,20 +191,20 @@ impl QueryEngine {
         &self,
         request: &GraphSchemaRequest,
     ) -> Result<GraphSchemaResult, QueryError> {
-        self.require_project(&request.project)?;
-        let nodes = self.store.list_nodes(&request.project)?;
-        let edges = self.store.list_edges(&request.project)?;
+        let graph = self.cached_graph(&request.project)?;
         let schema = self.store.schema_info()?;
         Ok(GraphSchemaResult {
             project: request.project.as_str().to_owned(),
             schema_version: schema.version,
             node_labels: schema_entries(
-                nodes
+                graph
+                    .nodes
                     .iter()
                     .map(|node| (node.label.as_str(), node.properties.keys())),
             ),
             edge_types: schema_entries(
-                edges
+                graph
+                    .edges
                     .iter()
                     .map(|edge| (edge.kind.as_str(), edge.properties.keys())),
             ),
@@ -124,7 +220,7 @@ impl QueryEngine {
         &self,
         request: &SearchGraphRequest,
     ) -> Result<SearchGraphPage, QueryError> {
-        self.require_project(&request.project)?;
+        let graph = self.cached_graph(&request.project)?;
         if request.page.limit == 0 || request.page.limit > MAX_PAGE_SIZE {
             return Err(QueryError::InvalidPageLimit {
                 actual: request.page.limit,
@@ -140,9 +236,7 @@ impl QueryEngine {
         )?;
         let file = compile_pattern("file_pattern", request.file_pattern.as_deref())?;
 
-        let edges = self.store.list_edges(&request.project)?;
-        let degrees = degrees(&edges);
-        let mut candidates = self.search_candidates(request)?;
+        let mut candidates = self.search_candidates(request, &graph)?;
         candidates.retain(|candidate| {
             matches_search_filters(
                 &candidate.node,
@@ -150,8 +244,8 @@ impl QueryEngine {
                 name.as_ref(),
                 qualified_name.as_ref(),
                 file.as_ref(),
-                &edges,
-                &degrees,
+                &graph.edges,
+                &graph.degrees,
             )
         });
         candidates.sort_by(|left, right| {
@@ -163,10 +257,10 @@ impl QueryEngine {
         let total = candidates.len();
         let end = offset.saturating_add(request.page.limit).min(total);
         let connected_nodes = if request.include_connected {
-            self.store
-                .list_nodes(&request.project)?
-                .into_iter()
-                .map(|node| (node.id, node.name))
+            graph
+                .nodes
+                .iter()
+                .map(|node| (node.id.clone(), node.name.clone()))
                 .collect()
         } else {
             BTreeMap::new()
@@ -179,10 +273,15 @@ impl QueryEngine {
                 let connected_names = connected_names(
                     &candidate.node,
                     request.relationship.as_deref().unwrap_or("CALLS"),
-                    &edges,
+                    &graph.edges,
                     &connected_nodes,
                 );
-                node_summary(&candidate.node, candidate.rank, &degrees, connected_names)
+                node_summary(
+                    &candidate.node,
+                    candidate.rank,
+                    &graph.degrees,
+                    connected_names,
+                )
             })
             .collect();
         let has_more = end < total;
@@ -201,7 +300,7 @@ impl QueryEngine {
     ///
     /// Returns a query error for invalid bounds, ambiguous/missing symbols, or store failures.
     pub fn trace_path(&self, request: &TracePathRequest) -> Result<TracePathResult, QueryError> {
-        self.require_project(&request.project)?;
+        let graph = self.cached_graph(&request.project)?;
         if request.depth == 0 || request.depth > MAX_TRACE_DEPTH {
             return Err(QueryError::InvalidTraceDepth {
                 actual: request.depth,
@@ -214,19 +313,16 @@ impl QueryEngine {
                 maximum: MAX_TRACE_LIMIT,
             });
         }
-        let nodes = self.store.list_nodes(&request.project)?;
-        let edges = self.store.list_edges(&request.project)?;
-        let degrees = degrees(&edges);
         let origin = resolve_symbol(
             &request.function_name,
-            &nodes,
-            &degrees,
+            &graph.nodes,
+            &graph.degrees,
             ResolveMode::Callable,
         )?;
-        let (paths, truncated) = trace_breadth_first(&origin, &nodes, &edges, request);
+        let (paths, truncated) = trace_breadth_first(&origin, &graph, request);
         Ok(TracePathResult {
             project: request.project.as_str().to_owned(),
-            origin: node_summary(&origin, None, &degrees, Vec::new()),
+            origin: node_summary(&origin, None, &graph.degrees, Vec::new()),
             direction: request.direction,
             paths,
             truncated,
@@ -255,12 +351,15 @@ impl QueryEngine {
         request: &CodeSnippetRequest,
     ) -> Result<CodeSnippetResult, QueryError> {
         let project = self.require_project(&request.project)?;
+        let graph = self.cached_graph(&request.project)?;
         validate_snippet_limit("max_bytes", request.max_bytes, MAX_SNIPPET_BYTES)?;
         validate_snippet_limit("max_lines", request.max_lines, MAX_SNIPPET_LINES)?;
-        let nodes = self.store.list_nodes(&request.project)?;
-        let edges = self.store.list_edges(&request.project)?;
-        let degrees = degrees(&edges);
-        let symbol = resolve_symbol(&request.qualified_name, &nodes, &degrees, ResolveMode::Any)?;
+        let symbol = resolve_symbol(
+            &request.qualified_name,
+            &graph.nodes,
+            &graph.degrees,
+            ResolveMode::Any,
+        )?;
         let file_path =
             symbol
                 .file_path
@@ -321,7 +420,7 @@ impl QueryEngine {
         let end_line = start_line + u64::try_from(line_count.saturating_sub(1)).unwrap_or(u64::MAX);
         Ok(CodeSnippetResult {
             project: request.project.as_str().to_owned(),
-            symbol: node_summary(&symbol, None, &degrees, Vec::new()),
+            symbol: node_summary(&symbol, None, &graph.degrees, Vec::new()),
             source,
             file_path: file_path.as_str().to_owned(),
             start_byte: start,
@@ -342,12 +441,12 @@ impl QueryEngine {
         request: &ArchitectureRequest,
     ) -> Result<ArchitectureResult, QueryError> {
         let project = self.require_project(&request.project)?;
-        let nodes = self.store.list_nodes(&request.project)?;
-        let edges = self.store.list_edges(&request.project)?;
-        let degrees = degrees(&edges);
+        let graph = self.cached_graph(&request.project)?;
+        let nodes = &graph.nodes;
+        let edges = &graph.edges;
 
         let mut languages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for node in &nodes {
+        for node in nodes {
             let Some(language) = node
                 .properties
                 .get("language")
@@ -377,10 +476,7 @@ impl QueryEngine {
                 name: node.name.clone(),
                 qualified_name: node.qualified_name.as_str().to_owned(),
                 file_path: node.file_path.as_ref().map(|path| path.as_str().to_owned()),
-                defined_symbols: edges
-                    .iter()
-                    .filter(|edge| edge.source == node.id && edge.kind.as_str() == "DEFINES")
-                    .count(),
+                defined_symbols: graph.define_counts.get(&node.id).copied().unwrap_or(0),
             })
             .collect();
         let type_labels = [
@@ -395,7 +491,7 @@ impl QueryEngine {
         let types = nodes
             .iter()
             .filter(|node| type_labels.contains(&node.label.as_str()))
-            .map(|node| node_summary(node, None, &degrees, Vec::new()))
+            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
             .collect();
         let entry_points = nodes
             .iter()
@@ -414,11 +510,11 @@ impl QueryEngine {
                         .as_ref()
                         .is_some_and(|path| path.as_str().to_lowercase().contains("test"))
             })
-            .map(|node| node_summary(node, None, &degrees, Vec::new()))
+            .map(|node| node_summary(node, None, &graph.degrees, Vec::new()))
             .take(20)
             .collect();
         let mut edge_counts: BTreeMap<String, u64> = BTreeMap::new();
-        for edge in &edges {
+        for edge in edges {
             *edge_counts
                 .entry(edge.kind.as_str().to_owned())
                 .or_default() += 1;
@@ -449,10 +545,8 @@ impl QueryEngine {
     /// Returns a query error for mutation attempts, unsupported/syntax-invalid queries, absent
     /// projects, invalid row bounds, or store failures.
     pub fn query_graph(&self, request: &QueryGraphRequest) -> Result<QueryGraphResult, QueryError> {
-        self.require_project(&request.project)?;
-        let nodes = self.store.list_nodes(&request.project)?;
-        let edges = self.store.list_edges(&request.project)?;
-        crate::cypher::execute(request, &nodes, &edges)
+        let graph = self.cached_graph(&request.project)?;
+        crate::cypher::execute(request, &graph.nodes, &graph.edges)
     }
 
     /// Searches indexed source and collapses line matches to their tightest graph nodes.
@@ -509,15 +603,47 @@ impl QueryEngine {
             .ok_or_else(|| QueryError::ProjectNotFound(project.clone()))
     }
 
+    fn cached_graph(&self, project: &ProjectId) -> Result<Arc<ProjectGraph>, QueryError> {
+        loop {
+            let before = self.require_project(project)?.generation;
+            let graph = self.cache.get_or_load(project, before, || {
+                Ok((
+                    self.store.list_nodes(project)?,
+                    self.store.list_edges(project)?,
+                ))
+            })?;
+            let after = self.require_project(project)?.generation;
+            if before == after {
+                return Ok(graph);
+            }
+        }
+    }
+
     fn search_candidates(
         &self,
         request: &SearchGraphRequest,
+        graph: &ProjectGraph,
     ) -> Result<Vec<Candidate>, QueryError> {
         let Some(query) = request.query.as_deref().filter(|query| !query.is_empty()) else {
-            return Ok(self
-                .store
-                .list_nodes(&request.project)?
-                .into_iter()
+            if let Some(name) = request
+                .name_pattern
+                .as_deref()
+                .and_then(exact_pattern_literal)
+            {
+                return Ok(graph
+                    .nodes_by_name
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|index| graph.nodes.get(*index))
+                    .cloned()
+                    .map(|node| Candidate { node, rank: None })
+                    .collect());
+            }
+            return Ok(graph
+                .nodes
+                .iter()
+                .cloned()
                 .map(|node| Candidate { node, rank: None })
                 .collect());
         };
@@ -587,6 +713,15 @@ fn compile_pattern(
             Regex::new(pattern).map_err(|source| QueryError::InvalidPattern { field, source })
         })
         .transpose()
+}
+
+fn exact_pattern_literal(pattern: &str) -> Option<&str> {
+    let literal = pattern.strip_prefix('^')?.strip_suffix('$')?;
+    (!literal.is_empty()
+        && literal
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
+    .then_some(literal)
 }
 
 pub(crate) fn degrees(edges: &[GraphEdge]) -> BTreeMap<NodeId, (usize, usize)> {
@@ -866,10 +1001,11 @@ fn resolve_eligible(node: &GraphNode, mode: ResolveMode) -> bool {
 
 fn trace_breadth_first(
     origin: &GraphNode,
-    nodes: &[GraphNode],
-    edges: &[GraphEdge],
+    graph: &ProjectGraph,
     request: &TracePathRequest,
 ) -> (Vec<TraceHop>, bool) {
+    let nodes = &graph.nodes;
+    let edges = &graph.edges;
     let nodes_by_id: BTreeMap<&NodeId, &GraphNode> =
         nodes.iter().map(|node| (&node.id, node)).collect();
     let edge_types: BTreeSet<&str> = request.edge_types.iter().map(String::as_str).collect();
@@ -881,8 +1017,12 @@ fn trace_breadth_first(
     'depth: for hop in 1..=request.depth {
         let mut candidates = Vec::new();
         for current in &frontier {
-            for edge in edges
-                .iter()
+            for edge in graph
+                .edges_by_node
+                .get(current)
+                .into_iter()
+                .flatten()
+                .filter_map(|index| edges.get(*index))
                 .filter(|edge| edge_types.contains(edge.kind.as_str()))
             {
                 let related = match request.direction {
@@ -980,4 +1120,45 @@ fn hash_hex(hash: &ContentHash) -> String {
         write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
     }
     encoded
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use std::{cell::Cell, sync::Arc};
+
+    use goldeneye_domain::{Generation, ProjectId};
+
+    use super::{QueryCache, exact_pattern_literal};
+
+    #[test]
+    fn exact_pattern_literal_only_accepts_anchored_identifier_names() {
+        assert_eq!(exact_pattern_literal("^fs_search$"), Some("fs_search"));
+        assert_eq!(exact_pattern_literal("fs_search"), None);
+        assert_eq!(exact_pattern_literal("^fs_.*$"), None);
+    }
+
+    #[test]
+    fn graph_cache_reuses_one_generation_and_reloads_the_next() {
+        let cache = QueryCache::default();
+        let project = ProjectId::new("demo").expect("project ID");
+        let loads = Cell::new(0_u8);
+        let mut load = || {
+            loads.set(loads.get() + 1);
+            Ok((Vec::new(), Vec::new()))
+        };
+
+        let first = cache
+            .get_or_load(&project, Generation::new(1), &mut load)
+            .expect("first graph load");
+        let reused = cache
+            .get_or_load(&project, Generation::new(1), &mut load)
+            .expect("cached graph load");
+        let replaced = cache
+            .get_or_load(&project, Generation::new(2), &mut load)
+            .expect("replacement graph load");
+
+        assert!(Arc::ptr_eq(&first, &reused));
+        assert!(!Arc::ptr_eq(&first, &replaced));
+        assert_eq!(loads.get(), 2);
+    }
 }
