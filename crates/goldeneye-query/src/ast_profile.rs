@@ -71,9 +71,9 @@ impl AstProfile {
     pub fn to_vector(self) -> [f32; AST_PROFILE_DIMS] {
         let fields = self.as_array();
         let denominators = [
-            100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 20.0, 200.0, 100.0, 100.0,
-            100.0, 100.0, 100.0, 100.0, 100.0, 20.0, 100.0, 100.0, 100.0, 200.0,
-            200.0, 200.0, 200.0, 2_000.0, 2_000.0,
+            100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 20.0, 200.0, 100.0, 100.0, 100.0, 100.0,
+            100.0, 100.0, 100.0, 20.0, 100.0, 100.0, 100.0, 200.0, 200.0, 200.0, 200.0, 2_000.0,
+            2_000.0,
         ];
         std::array::from_fn(|index| f32::from(fields[index]) / denominators[index])
     }
@@ -110,10 +110,12 @@ impl FromStr for AstProfile {
         }
         let mut fields = [0_u16; AST_PROFILE_DIMS];
         for (index, part) in parts.into_iter().enumerate() {
-            fields[index] = part.parse().map_err(|_| AstProfileParseError::InvalidField {
-                index,
-                value: part.to_owned(),
-            })?;
+            fields[index] = part
+                .parse()
+                .map_err(|_| AstProfileParseError::InvalidField {
+                    index,
+                    value: part.to_owned(),
+                })?;
         }
         Ok(Self {
             if_count: fields[0],
@@ -204,6 +206,10 @@ mod tests {
     #[test]
     fn profile_parser_rejects_malformed_or_incomplete_input() {
         assert!("not,a,profile".parse::<AstProfile>().is_err());
-        assert!("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0".parse::<AstProfile>().is_err());
+        assert!(
+            "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+                .parse::<AstProfile>()
+                .is_err()
+        );
     }
 }

@@ -178,10 +178,12 @@ pub fn tokenize_identifier(name: &str, max_tokens: usize) -> Vec<String> {
         if tokens.len() >= max_tokens {
             break;
         }
-        let delimiter = matches!(byte, b'.' | b'/' | b'_' | b'-' | b' ' | b'(' | b')' | b',' | b':');
-        let camel_break = index > 0
-            && byte.is_ascii_uppercase()
-            && bytes[index - 1].is_ascii_lowercase();
+        let delimiter = matches!(
+            byte,
+            b'.' | b'/' | b'_' | b'-' | b' ' | b'(' | b')' | b',' | b':'
+        );
+        let camel_break =
+            index > 0 && byte.is_ascii_uppercase() && bytes[index - 1].is_ascii_lowercase();
         if delimiter || camel_break {
             flush_token(&mut buffer, &mut tokens, max_tokens);
             if delimiter {
@@ -252,7 +254,12 @@ impl SemanticVector {
     }
 
     pub fn normalize(&mut self) {
-        let magnitude = self.values.iter().map(|value| value * value).sum::<f32>().sqrt();
+        let magnitude = self
+            .values
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
         if magnitude < SEMANTIC_DENOMINATOR_EPSILON {
             return;
         }
@@ -344,9 +351,11 @@ pub fn module_proximity(path_a: &str, path_b: &str) -> f32 {
         .take_while(|(left, right)| left == right)
         .filter(|(byte, _)| *byte == b'/')
         .count();
-    let maximum_components = path_a.bytes().filter(|byte| *byte == b'/').count().max(
-        path_b.bytes().filter(|byte| *byte == b'/').count(),
-    );
+    let maximum_components = path_a
+        .bytes()
+        .filter(|byte| *byte == b'/')
+        .count()
+        .max(path_b.bytes().filter(|byte| *byte == b'/').count());
     if maximum_components == 0 {
         1.0
     } else {
@@ -384,7 +393,10 @@ impl PretrainedModel {
         let token_text = String::from_utf8(token_bytes)?;
         let mut token_indices = HashMap::with_capacity(count);
         for (index, token) in token_text.lines().enumerate() {
-            if token_indices.insert(Box::<str>::from(token), index).is_some() {
+            if token_indices
+                .insert(Box::<str>::from(token), index)
+                .is_some()
+            {
                 return Err(PretrainedModelError::DuplicateToken(token.to_owned()));
             }
         }
@@ -489,7 +501,9 @@ mod tests {
     fn tokenizer_matches_camel_delimiter_and_abbreviation_rules() {
         assert_eq!(
             tokenize_identifier("handleHttp_request.ctx-err", 16),
-            ["handle", "http", "request", "ctx", "err", "context", "error"]
+            [
+                "handle", "http", "request", "ctx", "err", "context", "error"
+            ]
         );
         assert_eq!(tokenize_identifier("HTTPServer", 8), ["httpserver"]);
         assert_eq!(tokenize_identifier("a_b_c", 2), ["a", "b"]);
@@ -521,12 +535,7 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, other);
         assert!(
-            first
-                .values
-                .iter()
-                .filter(|value| **value != 0.0)
-                .count()
-                <= SEMANTIC_SPARSE_NON_ZERO
+            first.values.iter().filter(|value| **value != 0.0).count() <= SEMANTIC_SPARSE_NON_ZERO
         );
     }
 
