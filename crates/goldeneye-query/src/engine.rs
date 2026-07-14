@@ -10,8 +10,9 @@ use crate::types::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
     CodeSnippetResult, CountSummary, GraphSchemaRequest, GraphSchemaResult, IndexStatusRequest,
     IndexStatusResult, NodeSummary, ProjectSummary, QueryError, QueryGraphRequest,
-    QueryGraphResult, SchemaEntry, SearchGraphPage, SearchGraphRequest, TraceDirection, TraceHop,
-    TracePathRequest, TracePathResult,
+    QueryGraphResult, SchemaEntry, SearchCodeRequest, SearchCodeResult, SearchGraphPage,
+    SearchGraphRequest, SemanticSearchRequest, SemanticSearchResult, SimilaritySearchRequest,
+    SimilaritySearchResult, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
 };
 
 const MAX_PAGE_SIZE: usize = 200;
@@ -454,6 +455,51 @@ impl QueryEngine {
         crate::cypher::execute(request, &nodes, &edges)
     }
 
+    /// Searches indexed source and collapses line matches to their tightest graph nodes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error for invalid patterns, missing projects, unsafe paths, or source I/O.
+    pub fn search_code(&self, request: &SearchCodeRequest) -> Result<SearchCodeResult, QueryError> {
+        crate::search_code::execute(&self.store, request)
+    }
+
+    /// Ranks callable/type nodes by the minimum cosine across semantic keywords.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error for invalid bounds, missing projects, or corrupt stored vectors.
+    pub fn semantic_search(
+        &self,
+        request: &SemanticSearchRequest,
+    ) -> Result<SemanticSearchResult, QueryError> {
+        crate::semantic_query::semantic_search(&self.store, request)
+    }
+
+    /// Finds nodes whose persisted weighted-MinHash signature resembles one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error for resolution, bounds, missing signatures, or corrupt artifacts.
+    pub fn similarity_search(
+        &self,
+        request: &SimilaritySearchRequest,
+    ) -> Result<SimilaritySearchResult, QueryError> {
+        crate::semantic_query::similarity_search(&self.store, request)
+    }
+
+    /// Compatibility alias with the agent-facing operation name.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::similarity_search`].
+    pub fn find_similar(
+        &self,
+        request: &SimilaritySearchRequest,
+    ) -> Result<SimilaritySearchResult, QueryError> {
+        self.similarity_search(request)
+    }
+
     fn require_project(
         &self,
         project: &ProjectId,
@@ -543,7 +589,7 @@ fn compile_pattern(
         .transpose()
 }
 
-fn degrees(edges: &[GraphEdge]) -> BTreeMap<NodeId, (usize, usize)> {
+pub(crate) fn degrees(edges: &[GraphEdge]) -> BTreeMap<NodeId, (usize, usize)> {
     let mut degrees = BTreeMap::new();
     for edge in edges {
         degrees.entry(edge.source.clone()).or_insert((0, 0)).1 += 1;
@@ -719,12 +765,12 @@ fn format_cursor(fingerprint: &str, offset: usize) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum ResolveMode {
+pub(crate) enum ResolveMode {
     Any,
     Callable,
 }
 
-fn resolve_symbol(
+pub(crate) fn resolve_symbol(
     query: &str,
     nodes: &[GraphNode],
     degrees: &BTreeMap<NodeId, (usize, usize)>,

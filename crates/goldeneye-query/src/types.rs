@@ -86,6 +86,26 @@ pub enum QueryError {
     CypherSyntax { position: usize, message: String },
     #[error("query row limit must be between 1 and {maximum}, got {actual}")]
     InvalidQueryRowLimit { actual: usize, maximum: usize },
+    #[error("search pattern must not be empty")]
+    EmptySearchPattern,
+    #[error("search_code limit must be between 1 and {maximum}, got {actual}")]
+    InvalidSearchCodeLimit { actual: usize, maximum: usize },
+    #[error("path or file_pattern contains invalid characters")]
+    InvalidSearchPathArgument,
+    #[error("indexed source path escapes the project root: {path}")]
+    SourceOutsideProject { path: PathBuf },
+    #[error("semantic search requires between 1 and {maximum} non-empty keywords")]
+    InvalidSemanticKeywords { maximum: usize },
+    #[error("semantic search limit must be between 1 and {maximum}, got {actual}")]
+    InvalidSemanticLimit { actual: usize, maximum: usize },
+    #[error("similarity threshold must be between 0 and 1, got {actual}")]
+    InvalidSimilarityThreshold { actual: f64 },
+    #[error("similarity search limit must be between 1 and {maximum}, got {actual}")]
+    InvalidSimilarityLimit { actual: usize, maximum: usize },
+    #[error("no persisted structural signature for symbol: {qualified_name}")]
+    SignatureNotFound { qualified_name: String },
+    #[error("persisted semantic artifact is corrupt: {reason}")]
+    CorruptSemanticArtifact { reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +244,164 @@ pub struct SearchGraphPage {
     pub total: usize,
     pub has_more: bool,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchCodeMode {
+    #[default]
+    Compact,
+    Full,
+    Files,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchCodeRequest {
+    pub project: ProjectId,
+    pub pattern: String,
+    pub file_pattern: Option<String>,
+    pub path_filter: Option<String>,
+    pub mode: SearchCodeMode,
+    pub context: usize,
+    pub regex: bool,
+    pub limit: usize,
+}
+
+impl SearchCodeRequest {
+    #[must_use]
+    pub fn new(project: ProjectId, pattern: impl Into<String>) -> Self {
+        Self {
+            project,
+            pattern: pattern.into(),
+            file_pattern: None,
+            path_filter: None,
+            mode: SearchCodeMode::Compact,
+            context: 0,
+            regex: false,
+            limit: 10,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchCodeHit {
+    pub node: String,
+    pub qualified_name: String,
+    pub label: String,
+    pub file: String,
+    pub start_line: u64,
+    pub end_line: u64,
+    pub in_degree: usize,
+    pub out_degree: usize,
+    pub match_lines: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_start: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_start: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawCodeMatch {
+    pub file: String,
+    pub line: u64,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchCodeMatchesResult {
+    pub results: Vec<SearchCodeHit>,
+    pub raw_matches: Vec<RawCodeMatch>,
+    pub directories: BTreeMap<String, usize>,
+    pub total_grep_matches: usize,
+    pub total_results: usize,
+    pub raw_match_count: usize,
+    pub elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dedup_ratio: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchCodeFilesResult {
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SearchCodeResult {
+    Matches(SearchCodeMatchesResult),
+    Files(SearchCodeFilesResult),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticSearchRequest {
+    pub project: ProjectId,
+    pub keywords: Vec<String>,
+    pub limit: usize,
+}
+
+impl SemanticSearchRequest {
+    #[must_use]
+    pub const fn new(project: ProjectId, keywords: Vec<String>) -> Self {
+        Self {
+            project,
+            keywords,
+            limit: 16,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemanticSearchHit {
+    pub node: NodeSummary,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemanticSearchResult {
+    pub project: String,
+    pub keyword_count: usize,
+    pub results: Vec<SemanticSearchHit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilaritySearchRequest {
+    pub project: ProjectId,
+    pub qualified_name: String,
+    pub threshold: f64,
+    pub limit: usize,
+}
+
+impl SimilaritySearchRequest {
+    #[must_use]
+    pub fn new(project: ProjectId, qualified_name: impl Into<String>) -> Self {
+        Self {
+            project,
+            qualified_name: qualified_name.into(),
+            threshold: 0.95,
+            limit: 10,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilaritySearchHit {
+    pub node: NodeSummary,
+    pub similarity: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilaritySearchResult {
+    pub project: String,
+    pub origin: NodeSummary,
+    pub results: Vec<SimilaritySearchHit>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,7 +6,9 @@ mod ast_profile;
 mod cypher;
 mod engine;
 mod rotsq;
+mod search_code;
 mod semantic;
+mod semantic_query;
 mod similarity;
 mod types;
 
@@ -15,8 +17,7 @@ pub use ast_profile::{
 };
 pub use engine::QueryEngine;
 pub use rotsq::{
-    ROTSQ_BITS, ROTSQ_CODE_BYTES, ROTSQ_DIM, ROTSQ_INPUT_DIM, ROTSQ_LEVELS,
-    RotatedScalarCode,
+    ROTSQ_BITS, ROTSQ_CODE_BYTES, ROTSQ_DIM, ROTSQ_INPUT_DIM, ROTSQ_LEVELS, RotatedScalarCode,
 };
 pub use semantic::{
     PRETRAINED_DIM, PRETRAINED_TOKEN_COUNT, PRETRAINED_TOKENS_SHA256, PRETRAINED_VECTOR_SHA256,
@@ -35,6 +36,9 @@ pub use types::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
     CodeSnippetResult, CountSummary, EdgeSummary, GraphSchemaRequest, GraphSchemaResult,
     IndexStatusRequest, IndexStatusResult, NodeSummary, PageRequest, ProjectSummary, QueryError,
-    QueryGraphRequest, QueryGraphResult, QueryValue, SchemaEntry, SearchGraphPage,
-    SearchGraphRequest, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
+    QueryGraphRequest, QueryGraphResult, QueryValue, RawCodeMatch, SchemaEntry,
+    SearchCodeFilesResult, SearchCodeHit, SearchCodeMatchesResult, SearchCodeMode,
+    SearchCodeRequest, SearchCodeResult, SearchGraphPage, SearchGraphRequest, SemanticSearchHit,
+    SemanticSearchRequest, SemanticSearchResult, SimilaritySearchHit, SimilaritySearchRequest,
+    SimilaritySearchResult, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
 };
