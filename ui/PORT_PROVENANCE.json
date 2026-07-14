@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "upstream": {
+    "repository": "https://github.com/DeusData/codebase-memory-mcp",
+    "commit": "2469ecc3a7a2f80debe296e1f17a1efcfdb9450c",
+    "source": "graph-ui/",
+    "license": "MIT",
+    "checksums": "UPSTREAM_SOURCES.sha256"
+  },
+  "adaptations": [
+    "Goldeneye branding and storage keys",
+    "single configurable API base-path joiner",
+    "deterministic source and distribution manifests",
+    "browserless contract, escaping, and camera-layout fixtures",
+    "verbatim production dependency license bundle"
+  ]
+}
