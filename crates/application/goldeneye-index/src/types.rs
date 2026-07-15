@@ -10,8 +10,9 @@ use goldeneye_domain::{
     DomainError, Generation, GraphIdentityError, ProjectId, ProjectRecord, ProjectRelativePath,
     SyntaxIdentityError,
 };
-use goldeneye_ports::{GraphCounts, IndexMode, PortError, RepositoryDiscoveryOptions};
-use goldeneye_syntax::{SyntaxDiagnostic, SyntaxError};
+use goldeneye_ports::{
+    GraphCounts, IndexFileSyntaxDiagnostics, IndexMode, PortError, RepositoryDiscoveryOptions,
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Default)]
@@ -70,13 +71,7 @@ pub enum IndexStatus {
     RejectedSyntax,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileSyntaxDiagnostics {
-    pub path: ProjectRelativePath,
-    pub total: usize,
-    pub truncated: bool,
-    pub details: Vec<SyntaxDiagnostic>,
-}
+pub type FileSyntaxDiagnostics = IndexFileSyntaxDiagnostics;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexResult {
@@ -132,7 +127,7 @@ pub enum IndexError {
     Syntax {
         path: ProjectRelativePath,
         #[source]
-        source: SyntaxError,
+        source: PortError,
     },
     #[error("invalid graph identity: {0}")]
     GraphIdentity(#[from] GraphIdentityError),

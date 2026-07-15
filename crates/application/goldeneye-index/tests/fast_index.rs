@@ -10,6 +10,7 @@ use goldeneye_index::{
 };
 use goldeneye_store::Store;
 use goldeneye_syntax::CoreGrammarProvider;
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
 
 type NodeSnapshot = Vec<(String, String, String, Option<String>)>;
@@ -25,17 +26,17 @@ fn remove(root: &Path, path: &str) {
     fs::remove_file(root.join(path)).expect("remove fixture");
 }
 
-fn service(options: IndexOptions) -> IndexService<CoreGrammarProvider, Store> {
+fn service(options: IndexOptions) -> IndexService<Store> {
     IndexService::new(
         Store::open_in_memory().expect("memory store"),
-        CoreGrammarProvider,
+        TreeSitterIndexExtractor::new(CoreGrammarProvider),
         options,
         FileSystemDiscovery,
     )
 }
 
 fn nodes_for(
-    service: &IndexService<CoreGrammarProvider, Store>,
+    service: &IndexService<Store>,
     project: &goldeneye_domain::ProjectId,
     path: &str,
 ) -> Vec<goldeneye_domain::GraphNode> {
@@ -50,7 +51,7 @@ fn nodes_for(
 }
 
 fn graph_snapshot(
-    service: &IndexService<CoreGrammarProvider, Store>,
+    service: &IndexService<Store>,
     project: &goldeneye_domain::ProjectId,
 ) -> (NodeSnapshot, EdgeSnapshot) {
     let mut nodes = Vec::new();
@@ -443,7 +444,7 @@ fn targeted_refresh_recomputes_cross_file_calls() {
     let result = index.index_repository(temp.path()).expect("index");
     let target_path = ProjectRelativePath::new("target.py").expect("target path");
 
-    let call_count = |index: &IndexService<CoreGrammarProvider, Store>| {
+    let call_count = |index: &IndexService<Store>| {
         nodes_for(index, &result.project.id, "caller.py")
             .into_iter()
             .flat_map(|node| {

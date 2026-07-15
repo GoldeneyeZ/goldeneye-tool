@@ -18,6 +18,7 @@ goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-edit = { path = "../../application/goldeneye-edit" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
 goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
+goldeneye-tree-sitter-index = { path = "../../adapters/goldeneye-tree-sitter-index" }
 tempfile.workspace = true
 
 [lints]

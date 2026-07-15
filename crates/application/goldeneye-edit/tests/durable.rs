@@ -14,6 +14,7 @@ use goldeneye_edit::{
 use goldeneye_index::{IndexOptions, IndexService};
 use goldeneye_store::Store;
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine, all_named_locators};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
 
 struct Fixture {
@@ -35,7 +36,7 @@ impl Fixture {
         let store = Store::open(&database).expect("open store");
         let mut index = IndexService::new(
             store,
-            CoreGrammarProvider,
+            TreeSitterIndexExtractor::new(CoreGrammarProvider),
             IndexOptions::default(),
             FileSystemDiscovery,
         );
@@ -53,7 +54,7 @@ impl Fixture {
         let store = Store::open(&self.database).expect("reopen store");
         let index = IndexService::new(
             store,
-            CoreGrammarProvider,
+            TreeSitterIndexExtractor::new(CoreGrammarProvider),
             IndexOptions::default(),
             FileSystemDiscovery,
         );

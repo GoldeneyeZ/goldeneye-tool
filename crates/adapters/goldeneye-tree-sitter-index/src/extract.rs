@@ -2,39 +2,26 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use goldeneye_domain::{
-    ByteSpan, EdgeKind, FileRecord, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId,
-    NodeId, NodeLabel, ProjectId, ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan,
+    ByteSpan, EdgeKind, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId, NodeId,
+    NodeLabel, ProjectId, ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan,
 };
-use goldeneye_ports::IndexMode;
-use goldeneye_syntax::{GrammarProvider, SyntaxEngine, SyntaxSnapshot};
+use goldeneye_ports::{
+    IndexDiagnosticKind, IndexExtractedCall as ExtractedCall, IndexExtractedFile as ExtractedFile,
+    IndexExtractedImport as ExtractedImport, IndexExtractedRelation as ExtractedRelation,
+    IndexExtractionRequest as Candidate, IndexFileSyntaxDiagnostics as FileSyntaxDiagnostics,
+    IndexMode, IndexSyntaxDiagnostic,
+};
+use goldeneye_syntax::{DiagnosticKind, GrammarProvider, SyntaxEngine, SyntaxSnapshot};
 use serde_json::{Value, json};
 use tree_sitter::Node;
 
+use crate::error::ExtractionError as IndexError;
 use crate::language_specs::{LanguageSpec, language_spec};
-use crate::{FileSyntaxDiagnostics, IndexError};
 
 const MAX_PENDING_CALLS_PER_FILE: usize = 4_096;
 const MAX_PENDING_RELATIONS_PER_FILE: usize = 1_024;
 const MAX_PENDING_IMPORTS_PER_FILE: usize = 1_024;
 const MAX_TYPE_BINDINGS_PER_SCOPE: usize = 2_048;
-
-#[derive(Clone)]
-pub(crate) struct Candidate {
-    pub record: FileRecord,
-    pub language: LanguageId,
-    pub source: Arc<[u8]>,
-}
-
-pub(crate) struct ExtractedFile {
-    pub record: FileRecord,
-    pub source: Arc<[u8]>,
-    pub nodes: Vec<GraphNode>,
-    pub edges: Vec<GraphEdge>,
-    pub calls: Vec<ExtractedCall>,
-    pub relations: Vec<ExtractedRelation>,
-    pub imports: Vec<ExtractedImport>,
-    pub diagnostics: Option<FileSyntaxDiagnostics>,
-}
 
 pub(crate) fn extract<P>(
     provider: P,
@@ -58,7 +45,18 @@ where
         path: candidate.record.id.path.clone(),
         total: snapshot.diagnostic_total(),
         truncated: snapshot.diagnostics_truncated(),
-        details: snapshot.diagnostics().to_vec(),
+        details: snapshot
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| IndexSyntaxDiagnostic {
+                kind: match diagnostic.kind {
+                    DiagnosticKind::Error => IndexDiagnosticKind::Error,
+                    DiagnosticKind::Missing => IndexDiagnosticKind::Missing,
+                },
+                node_kind: diagnostic.node_kind.clone(),
+                span: diagnostic.span,
+            })
+            .collect(),
     });
     let mut extractor = Extractor::new(
         &candidate.record.id.project,
@@ -103,37 +101,6 @@ struct Scope {
 struct Definition {
     label: &'static str,
     name: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ExtractedCall {
-    pub source: NodeId,
-    pub file: ProjectRelativePath,
-    pub language: LanguageId,
-    pub caller_qn: String,
-    pub callee_name: String,
-    pub short_name: String,
-    pub receiver_type: Option<String>,
-    pub start_byte: u64,
-    pub line: u64,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ExtractedRelation {
-    pub source: NodeId,
-    pub file: ProjectRelativePath,
-    pub language: LanguageId,
-    pub kind: &'static str,
-    pub target_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ExtractedImport {
-    pub file: ProjectRelativePath,
-    pub language: LanguageId,
-    pub alias: String,
-    pub module_path: String,
 }
 
 struct Extractor<'a> {
@@ -2181,74 +2148,7 @@ fn graph_node(
     .with_properties(properties))
 }
 
-pub(crate) fn project_node(
-    project: &goldeneye_domain::ProjectRecord,
-) -> Result<GraphNode, IndexError> {
-    let qualified_name = project.id.as_str();
-    let mut properties = GraphProperties::new();
-    properties.insert("root_path".into(), json!(project.root_path));
-    Ok(GraphNode::new(
-        project.id.clone(),
-        stable_node_id("Project", qualified_name)?,
-        NodeLabel::new("Project")?,
-        qualified_name,
-        QualifiedName::new(qualified_name)?,
-        None,
-        None,
-        Generation::new(0),
-    )?
-    .with_properties(properties))
-}
-
-pub(crate) fn branch_node(
-    project: &goldeneye_domain::ProjectRecord,
-) -> Result<GraphNode, IndexError> {
-    let qualified_name = format!("{}.__branch__.working-tree", project.id.as_str());
-    let mut properties = GraphProperties::new();
-    properties.insert("branch".into(), json!("working-tree"));
-    Ok(GraphNode::new(
-        project.id.clone(),
-        stable_node_id("Branch", &qualified_name)?,
-        NodeLabel::new("Branch")?,
-        "working-tree",
-        QualifiedName::new(qualified_name)?,
-        None,
-        None,
-        Generation::new(0),
-    )?
-    .with_properties(properties))
-}
-
-pub(crate) fn project_has_branch(
-    project: &ProjectId,
-    branch: &GraphNode,
-) -> Result<GraphEdge, IndexError> {
-    graph_edge(
-        project,
-        project_node_id(project)?,
-        branch.id.clone(),
-        "HAS_BRANCH",
-        None,
-        GraphProperties::new(),
-    )
-}
-
-pub(crate) fn project_contains_file(
-    project: &ProjectId,
-    file_node: &GraphNode,
-) -> Result<GraphEdge, IndexError> {
-    let branch_qualified_name = format!("{}.__branch__.working-tree", project.as_str());
-    graph_edge(
-        project,
-        stable_node_id("Branch", &branch_qualified_name)?,
-        file_node.id.clone(),
-        "CONTAINS_FILE",
-        None,
-        GraphProperties::new(),
-    )
-}
-
-pub(crate) fn project_node_id(project: &ProjectId) -> Result<NodeId, IndexError> {
+fn project_node_id(project: &ProjectId) -> Result<NodeId, IndexError> {
     stable_node_id("Project", project.as_str())
 }
 

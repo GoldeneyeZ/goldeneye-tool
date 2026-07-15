@@ -311,6 +311,7 @@ dependencies = [
  "goldeneye-services",
  "goldeneye-store",
  "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "serde_json",
  "tempfile",
 ]
@@ -380,6 +381,7 @@ dependencies = [
  "goldeneye-ports",
  "goldeneye-store",
  "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -453,10 +455,10 @@ dependencies = [
  "goldeneye-ports",
  "goldeneye-store",
  "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "serde_json",
  "tempfile",
  "thiserror",
- "tree-sitter",
 ]
 
 [[package]]
@@ -510,6 +512,7 @@ dependencies = [
  "goldeneye-query",
  "goldeneye-store",
  "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "serde",
  "serde_json",
  "tempfile",
@@ -547,6 +550,19 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "goldeneye-tree-sitter-index"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "goldeneye-domain",
+ "goldeneye-ports",
+ "goldeneye-syntax",
+ "serde_json",
+ "thiserror",
+ "tree-sitter",
 ]
 
 [[package]]

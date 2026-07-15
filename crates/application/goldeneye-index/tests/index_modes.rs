@@ -9,6 +9,7 @@ use goldeneye_index::{
 };
 use goldeneye_store::Store;
 use goldeneye_syntax::{CoreGrammarProvider, Grammar, GrammarProvider, SyntaxError};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
 
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +54,7 @@ fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
     };
     let mut service = IndexService::new(
         Store::open_in_memory().expect("memory store"),
-        NonCoreFixtureProvider,
+        TreeSitterIndexExtractor::new(NonCoreFixtureProvider),
         options,
         FileSystemDiscovery,
     );

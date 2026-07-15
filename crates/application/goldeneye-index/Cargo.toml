@@ -6,21 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-full-grammar-tests = ["goldeneye-syntax/full-grammar-pack"]
+full-grammar-tests = ["goldeneye-tree-sitter-index/full-grammar-tests"]
 
 [dependencies]
 blake3 = "1.8"
 goldeneye-crosslink = { path = "../goldeneye-crosslink" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 goldeneye-ports = { path = "../../ports/goldeneye-ports" }
-goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
 serde_json.workspace = true
 thiserror.workspace = true
-tree-sitter = "=0.26.11"
 
 [dev-dependencies]
 goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
+goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
+goldeneye-tree-sitter-index = { path = "../../adapters/goldeneye-tree-sitter-index" }
 tempfile.workspace = true
 
 [lints]

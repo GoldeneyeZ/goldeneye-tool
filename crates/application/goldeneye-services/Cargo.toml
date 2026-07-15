@@ -17,6 +17,7 @@ goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 goldeneye-query = { path = "../goldeneye-query" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
 goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
+goldeneye-tree-sitter-index = { path = "../../adapters/goldeneye-tree-sitter-index" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

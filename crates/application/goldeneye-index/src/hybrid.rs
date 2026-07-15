@@ -4,10 +4,13 @@ use goldeneye_domain::{
     EdgeKind, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId, NodeId, ProjectId,
     ProjectRelativePath,
 };
+use goldeneye_ports::{
+    IndexExtractedCall as ExtractedCall, IndexExtractedImport as ExtractedImport,
+    IndexExtractedRelation as ExtractedRelation,
+};
 use serde_json::{Value, json};
 
 use crate::IndexError;
-use crate::extract::{ExtractedCall, ExtractedImport, ExtractedRelation};
 
 const MAX_RESOLUTION_PASSES: usize = 3;
 const MAX_PROJECT_PENDING_FACTS: usize = 100_000;

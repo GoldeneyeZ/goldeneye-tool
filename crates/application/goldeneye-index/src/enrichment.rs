@@ -5,10 +5,12 @@ use goldeneye_domain::{
     EdgeKind, Generation, GraphEdge, GraphNode, GraphProperties, NodeId, NodeLabel, ProjectId,
     ProjectRelativePath, QualifiedName,
 };
+use goldeneye_ports::{
+    IndexExtractedCall as ExtractedCall, IndexExtractedImport as ExtractedImport,
+};
 use serde_json::{Value, json};
 
 use crate::IndexError;
-use crate::extract::{ExtractedCall, ExtractedImport};
 
 const MAX_SYNTHETIC_NODES: usize = 8_192;
 const MAX_SYNTHETIC_EDGES: usize = 32_768;

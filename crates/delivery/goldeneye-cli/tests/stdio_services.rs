@@ -13,6 +13,7 @@ use goldeneye_mcp::server::Server;
 use goldeneye_services::NodeLocator;
 use goldeneye_store::Store;
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -468,7 +469,7 @@ fn stdio_startup_recovers_interrupted_edit_before_first_response() {
     let store = Store::open(&database).expect("open edit store");
     let index = IndexService::new(
         store,
-        CoreGrammarProvider,
+        TreeSitterIndexExtractor::new(CoreGrammarProvider),
         IndexOptions::default(),
         FileSystemDiscovery,
     );
@@ -539,7 +540,7 @@ fn stdio_startup_reports_recovery_conflict_before_protocol_readiness() {
     let store = Store::open(&database).expect("open edit store");
     let index = IndexService::new(
         store,
-        CoreGrammarProvider,
+        TreeSitterIndexExtractor::new(CoreGrammarProvider),
         IndexOptions::default(),
         FileSystemDiscovery,
     );

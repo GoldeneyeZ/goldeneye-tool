@@ -6,12 +6,12 @@ resolver = "3"
 layers = ["domain", "ports", "application", "adapters", "delivery"]
 excluded = ["xtask"]
 exceptions = [
-    "goldeneye-index->goldeneye-syntax",
     "goldeneye-services->goldeneye-artifact",
     "goldeneye-services->goldeneye-discovery",
     "goldeneye-services->goldeneye-git",
     "goldeneye-services->goldeneye-store",
     "goldeneye-services->goldeneye-syntax",
+    "goldeneye-services->goldeneye-tree-sitter-index",
 ]
 
 [workspace.metadata.architecture.packages]
@@ -29,6 +29,7 @@ goldeneye-git = "adapters"
 goldeneye-grammar-pack = "adapters"
 goldeneye-store = "adapters"
 goldeneye-syntax = "adapters"
+goldeneye-tree-sitter-index = "adapters"
 goldeneye = "delivery"
 goldeneye-compat-tests = "delivery"
 goldeneye-http = "delivery"

@@ -12,13 +12,12 @@ use goldeneye_domain::{
     ContentHash, FileId, FileRecord, Generation, GraphEdge, GraphNode, ProjectId, ProjectRecord,
     ProjectRelativePath,
 };
-use goldeneye_ports::{IndexRepository, RepositoryDiscovery, RepositorySourceFile};
-use goldeneye_syntax::GrammarProvider;
-
-use crate::extract::{
-    Candidate, ExtractedFile, branch_node, extract, project_contains_file, project_has_branch,
-    project_node,
+use goldeneye_ports::{
+    IndexExtractedFile as ExtractedFile, IndexExtractionRequest as Candidate, IndexRepository,
+    IndexSyntaxExtractor, RepositoryDiscovery, RepositorySourceFile,
 };
+
+use crate::project_graph::{branch_node, project_contains_file, project_has_branch, project_node};
 use crate::{
     FileRefreshResult, FileRefreshStatus, FileSyntaxDiagnostics, IndexError, IndexOptions,
     IndexResult, IndexStatus, canonical_project,
@@ -40,28 +39,27 @@ struct ChangeSet {
 
 type ProjectGraph = (Vec<FileRecord>, Vec<GraphNode>, Vec<GraphEdge>);
 
-pub struct IndexService<P, R> {
+pub struct IndexService<R> {
     repository: R,
-    provider: P,
+    extractor: Arc<dyn IndexSyntaxExtractor>,
     options: IndexOptions,
     discovery: Box<dyn RepositoryDiscovery>,
 }
 
-impl<P, R> IndexService<P, R>
+impl<R> IndexService<R>
 where
-    P: GrammarProvider + Clone + Send + Sync,
     R: IndexRepository,
 {
     #[must_use]
     pub fn new(
         repository: R,
-        provider: P,
+        extractor: impl IndexSyntaxExtractor + 'static,
         options: IndexOptions,
         discovery: impl RepositoryDiscovery + 'static,
     ) -> Self {
         Self {
             repository,
-            provider,
+            extractor: Arc::new(extractor),
             options,
             discovery: Box::new(discovery),
         }
@@ -543,7 +541,7 @@ where
         files: &[RepositorySourceFile],
         project: &ProjectId,
     ) -> Result<Vec<Candidate>, IndexError> {
-        let supported_ids = self.provider.supported_ids();
+        let supported_ids = self.extractor.supported_ids();
         files
             .iter()
             .filter(|file| supported_ids.contains(&file.language))
@@ -612,7 +610,7 @@ where
             for _ in 0..workers {
                 let sender = sender.clone();
                 let candidates = Arc::clone(&candidates);
-                let provider = self.provider.clone();
+                let extractor = Arc::clone(&self.extractor);
                 let cancellation = self.options.cancellation.clone();
                 let next = &next;
                 handles.push(scope.spawn(move || {
@@ -624,8 +622,9 @@ where
                         let Some(candidate) = candidates.get(index).cloned() else {
                             break;
                         };
+                        let path = candidate.record.id.path.clone();
                         if sender
-                            .send((index, extract(provider.clone(), candidate, mode)))
+                            .send((index, path, extractor.extract(candidate, mode)))
                             .is_err()
                         {
                             break;
@@ -641,8 +640,11 @@ where
         })?;
         self.ensure_not_cancelled()?;
         let mut results = receiver.into_iter().collect::<Vec<_>>();
-        results.sort_by_key(|(index, _)| *index);
-        results.into_iter().map(|(_, result)| result).collect()
+        results.sort_by_key(|(index, _, _)| *index);
+        results
+            .into_iter()
+            .map(|(_, path, result)| result.map_err(|source| IndexError::Syntax { path, source }))
+            .collect()
     }
 
     fn enforce_file_limit(&self, actual: usize) -> Result<(), IndexError> {

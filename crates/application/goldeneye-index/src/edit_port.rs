@@ -2,13 +2,11 @@ use goldeneye_domain::{ProjectId, ProjectRelativePath};
 use goldeneye_ports::{
     EditIndexer, EditRefreshResult, EditRefreshStatus, IndexRepository, PortError,
 };
-use goldeneye_syntax::GrammarProvider;
 
 use crate::{FileRefreshStatus, IndexService};
 
-impl<P, R> EditIndexer for IndexService<P, R>
+impl<R> EditIndexer for IndexService<R>
 where
-    P: GrammarProvider + Clone + Send + Sync,
     R: IndexRepository,
 {
     fn refresh_file(

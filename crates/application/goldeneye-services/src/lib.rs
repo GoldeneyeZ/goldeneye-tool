@@ -20,6 +20,7 @@ use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
 use goldeneye_syntax::CoreGrammarProvider;
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -470,7 +471,12 @@ impl Services {
             .map(project_id_for_name)
             .transpose()
             .map_err(map_index_error)?;
-        let mut index = IndexService::new(store, CoreGrammarProvider, options, FileSystemDiscovery);
+        let mut index = IndexService::new(
+            store,
+            TreeSitterIndexExtractor::new(CoreGrammarProvider),
+            options,
+            FileSystemDiscovery,
+        );
         hooks.report("indexing");
         let mut result = index
             .index_repository(root.clone())

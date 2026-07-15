@@ -2,10 +2,9 @@
 
 mod edit_port;
 mod enrichment;
-mod extract;
 mod hybrid;
 mod identity;
-mod language_specs;
+mod project_graph;
 mod service;
 mod types;
 

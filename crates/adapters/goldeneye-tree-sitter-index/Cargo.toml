@@ -1,0 +1,21 @@
+[package]
+name = "goldeneye-tree-sitter-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+full-grammar-tests = ["goldeneye-syntax/full-grammar-pack"]
+
+[dependencies]
+blake3 = "1.8"
+goldeneye-domain = { path = "../../domain/goldeneye-domain" }
+goldeneye-ports = { path = "../../ports/goldeneye-ports" }
+goldeneye-syntax = { path = "../goldeneye-syntax" }
+serde_json.workspace = true
+thiserror.workspace = true
+tree-sitter = "=0.26.11"
+
+[lints]
+workspace = true

@@ -19,6 +19,7 @@ use goldeneye_syntax::{
     CoreGrammarProvider, DiagnosticKind, InspectRequest, SyntaxDiagnostic, SyntaxEngine,
     SyntaxInspection, inspect_syntax as inspect_tree,
 };
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -482,7 +483,7 @@ impl Services {
         let store = Store::open(self.config.database_path())?;
         let index = IndexService::new(
             store,
-            CoreGrammarProvider,
+            TreeSitterIndexExtractor::new(CoreGrammarProvider),
             IndexOptions::default(),
             FileSystemDiscovery,
         );

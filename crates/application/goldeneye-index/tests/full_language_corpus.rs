@@ -13,6 +13,7 @@ use goldeneye_index::{
 };
 use goldeneye_store::Store;
 use goldeneye_syntax::{FullGrammarProvider, GrammarProvider};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
 
 #[path = "support/full_language_fixtures.rs"]
@@ -187,7 +188,7 @@ fn elixir_definition_calls_use_audited_language_rules() {
     .expect("write Elixir fixture");
     let mut service = IndexService::new(
         Store::open_in_memory().expect("memory store"),
-        FullGrammarProvider,
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
         full_options(),
         FileSystemDiscovery,
     );
@@ -234,7 +235,7 @@ fn audited_hybrid_lsp_languages_resolve_cross_file_calls() {
 
         let mut service = IndexService::new(
             Store::open_in_memory().expect("memory store"),
-            FullGrammarProvider,
+            TreeSitterIndexExtractor::new(FullGrammarProvider),
             full_options(),
             FileSystemDiscovery,
         );
@@ -327,7 +328,7 @@ fn hybrid_relations_resolve_cross_file_inheritance_and_interfaces() {
 
     let mut service = IndexService::new(
         Store::open_in_memory().expect("memory store"),
-        FullGrammarProvider,
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
         full_options(),
         FileSystemDiscovery,
     );
@@ -404,7 +405,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
 
         let mut service = IndexService::new(
             Store::open_in_memory().expect("memory store"),
-            FullGrammarProvider,
+            TreeSitterIndexExtractor::new(FullGrammarProvider),
             corpus_options(fixture.language),
             FileSystemDiscovery,
         );
