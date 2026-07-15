@@ -9,6 +9,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::ProjectId;
 use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
@@ -25,9 +26,11 @@ pub const DEFAULT_PRUNE_GRACE: Duration = Duration::from_mins(10);
 pub const DEFAULT_MISSING_POLLS: u32 = 3;
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
 }
 

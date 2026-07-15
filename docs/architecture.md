@@ -54,7 +54,7 @@ violations fail `cargo xtask architecture verify`.
 
 Current debt is concentrated in:
 
-- orchestration -> discovery, SQLite store, syntax.
+- orchestration -> SQLite store, syntax, Tree-sitter extraction.
 
 ## Migration Plan
 

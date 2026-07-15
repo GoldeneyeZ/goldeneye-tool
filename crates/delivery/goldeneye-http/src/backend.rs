@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{GraphEdge, GraphNode, ProjectId};
 use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
@@ -25,9 +26,11 @@ const MAX_LOG_LINES: usize = 2_000;
 const LOG_CAPACITY: usize = 4_096;
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
 }
 

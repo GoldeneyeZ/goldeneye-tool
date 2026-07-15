@@ -12,11 +12,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_index::{
     IndexError, IndexMode, IndexOptions, IndexService, IndexStatus, project_id_for_name,
 };
-use goldeneye_ports::{ArtifactPersistence, GitPortError, GitRepository, PortError};
+use goldeneye_ports::{
+    ArtifactPersistence, GitPortError, GitRepository, LanguageClassifier, PortError,
+    SourceDiscovery,
+};
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
@@ -389,12 +391,21 @@ impl ServiceError {
 pub struct ServiceDependencies {
     artifact: Arc<dyn ArtifactPersistence>,
     git: Arc<dyn GitRepository>,
+    source: Arc<dyn SourceDiscovery>,
 }
 
 impl ServiceDependencies {
     #[must_use]
-    pub fn new(artifact: Arc<dyn ArtifactPersistence>, git: Arc<dyn GitRepository>) -> Self {
-        Self { artifact, git }
+    pub fn new(
+        artifact: Arc<dyn ArtifactPersistence>,
+        git: Arc<dyn GitRepository>,
+        source: Arc<dyn SourceDiscovery>,
+    ) -> Self {
+        Self {
+            artifact,
+            git,
+            source,
+        }
     }
 
     pub(crate) fn artifact(&self) -> &dyn ArtifactPersistence {
@@ -403,6 +414,14 @@ impl ServiceDependencies {
 
     pub(crate) fn git(&self) -> &dyn GitRepository {
         self.git.as_ref()
+    }
+
+    pub(crate) fn discovery(&self) -> Arc<dyn SourceDiscovery> {
+        Arc::clone(&self.source)
+    }
+
+    pub(crate) fn languages(&self) -> &dyn LanguageClassifier {
+        self.source.as_ref()
     }
 }
 
@@ -503,7 +522,7 @@ impl Services {
             store,
             TreeSitterIndexExtractor::new(CoreGrammarProvider),
             options,
-            FileSystemDiscovery,
+            self.dependencies.discovery(),
         );
         hooks.report("indexing");
         let mut result = index

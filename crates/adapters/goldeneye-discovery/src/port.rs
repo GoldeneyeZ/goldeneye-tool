@@ -1,13 +1,19 @@
 use goldeneye_ports::{
-    IndexMode as PortIndexMode, PortError, RepositoryDiscovery, RepositoryDiscoveryOptions,
-    RepositoryDiscoveryReport, RepositorySourceFile,
+    IndexMode as PortIndexMode, LanguageClassifier, PortError, RepositoryDiscovery,
+    RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositorySourceFile,
 };
 
-use crate::{DiscoveryOptions, IndexMode, discover};
+use crate::{DiscoveryOptions, IndexMode, LanguageId, LanguageRegistry, discover};
 
 /// Filesystem-backed repository discovery adapter.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FileSystemDiscovery;
+
+impl LanguageClassifier for FileSystemDiscovery {
+    fn classify(&self, path: &std::path::Path) -> Option<LanguageId> {
+        LanguageRegistry::upstream().classify(path).cloned()
+    }
+}
 
 impl RepositoryDiscovery for FileSystemDiscovery {
     fn discover(
@@ -39,5 +45,34 @@ impl RepositoryDiscovery for FileSystemDiscovery {
                 .collect(),
             warnings: report.warnings,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use goldeneye_domain::LanguageId;
+    use goldeneye_ports::LanguageClassifier;
+
+    use super::FileSystemDiscovery;
+
+    #[test]
+    fn classifier_preserves_upstream_path_precedence() {
+        let classifier = FileSystemDiscovery;
+
+        assert_eq!(
+            classifier.classify(Path::new("nested/Dockerfile")),
+            Some(LanguageId::new("dockerfile").expect("language id"))
+        );
+        assert_eq!(
+            classifier.classify(Path::new("views/page.blade.php")),
+            Some(LanguageId::new("blade").expect("language id"))
+        );
+        assert_eq!(
+            classifier.classify(Path::new("src/lib.rs")),
+            Some(LanguageId::new("rust").expect("language id"))
+        );
+        assert_eq!(classifier.classify(Path::new("assets/data.unknown")), None);
     }
 }

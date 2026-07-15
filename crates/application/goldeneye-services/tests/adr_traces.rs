@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::Arc;
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::ProjectRecord;
 use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
@@ -13,9 +14,11 @@ use serde_json::json;
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
 }
 

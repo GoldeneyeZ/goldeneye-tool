@@ -2,29 +2,61 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
     ArtifactPersistence, DetectChangesOptions, DetectedChanges, GitContext, GitHistory,
-    GitPortError, GitRepository, PortError,
+    GitPortError, GitRepository, LanguageClassifier, PortError, RepositoryDiscovery,
+    RepositoryDiscoveryOptions, RepositoryDiscoveryReport,
 };
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult,
-    IndexStatusRequest, InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest,
-    ProjectId, ProjectRelativePath, QueryGraphRequest, SearchCodeRequest, SearchCodeResult,
-    SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode, Services,
-    TraceDirection, TracePathRequest,
+    IndexStatusRequest, InspectSyntaxRequest, LanguageId, NodeContentRequest, OperationHooks,
+    PageRequest, ProjectId, ProjectRelativePath, QueryGraphRequest, SearchCodeRequest,
+    SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode,
+    Services, TraceDirection, TracePathRequest,
 };
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
+}
+
+#[derive(Default)]
+struct RecordingSourceDiscovery {
+    discovery_calls: AtomicUsize,
+    classified_paths: Mutex<Vec<PathBuf>>,
+}
+
+impl RepositoryDiscovery for RecordingSourceDiscovery {
+    fn discover(
+        &self,
+        root: &Path,
+        options: &RepositoryDiscoveryOptions,
+    ) -> Result<RepositoryDiscoveryReport, PortError> {
+        self.discovery_calls.fetch_add(1, Ordering::Relaxed);
+        RepositoryDiscovery::discover(&FileSystemDiscovery, root, options)
+    }
+}
+
+impl LanguageClassifier for RecordingSourceDiscovery {
+    fn classify(&self, path: &Path) -> Option<LanguageId> {
+        self.classified_paths
+            .lock()
+            .expect("classified paths")
+            .push(path.to_path_buf());
+        LanguageClassifier::classify(&FileSystemDiscovery, path)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -131,7 +163,11 @@ fn recording_dependencies(
         calls: Arc::clone(&calls),
     };
     (
-        ServiceDependencies::new(Arc::new(artifact), Arc::new(GitCommandRepository)),
+        ServiceDependencies::new(
+            Arc::new(artifact),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+        ),
         calls,
     )
 }
@@ -284,6 +320,43 @@ fn index_then_every_read_surface_paginates_and_reopens() {
             .expect("reopened status")
             .nodes,
         indexed.nodes
+    );
+}
+
+#[test]
+fn injected_source_discovery_drives_indexing_and_language_classification() {
+    let temp = TempDir::new().expect("temp directory");
+    let allowed = temp.path().join("allowed");
+    let repo = allowed.join("fixture");
+    write_fixture(&repo);
+    let source = Arc::new(RecordingSourceDiscovery::default());
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            source.clone(),
+        ),
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("index fixture");
+    assert_eq!(source.discovery_calls.load(Ordering::Relaxed), 1);
+
+    services
+        .inspect_syntax(&InspectSyntaxRequest::new(
+            ProjectId::new(indexed.project).expect("project ID"),
+            ProjectRelativePath::new("src/lib.rs").expect("relative path"),
+        ))
+        .expect("inspect source");
+    assert_eq!(
+        source
+            .classified_paths
+            .lock()
+            .expect("classified paths")
+            .as_slice(),
+        [PathBuf::from("src/lib.rs")]
     );
 }
 
@@ -491,6 +564,7 @@ fn automatic_git_history_adapter_failures_are_downgraded_to_warnings() {
             invalid_reference: false,
             cancel_history: false,
         }),
+        Arc::new(FileSystemDiscovery),
     );
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), temp.path())
@@ -529,6 +603,7 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 invalid_reference: false,
                 cancel_history: true,
             }),
+            Arc::new(FileSystemDiscovery),
         ),
     );
     let error = cancelling
@@ -546,6 +621,7 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 invalid_reference: true,
                 cancel_history: false,
             }),
+            Arc::new(FileSystemDiscovery),
         ),
     );
     let missing = ProjectId::new("missing").expect("project ID");

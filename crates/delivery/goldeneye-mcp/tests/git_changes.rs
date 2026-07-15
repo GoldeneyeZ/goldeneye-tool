@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::tools::ToolRegistry;
@@ -10,9 +11,11 @@ use goldeneye_services::{IndexRepositoryRequest, ServiceConfig, ServiceDependenc
 use serde_json::{Value, json};
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
 }
 

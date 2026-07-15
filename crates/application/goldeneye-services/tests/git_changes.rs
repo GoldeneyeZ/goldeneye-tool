@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{
     ContentHash, EdgeKind, FileId, FileRecord, Generation, GraphEdge, GraphNode, NodeId, NodeLabel,
     ProjectId, ProjectRecord, ProjectRelativePath, QualifiedName,
@@ -14,9 +15,11 @@ use goldeneye_services::{
 use goldeneye_store::Store;
 
 fn service_dependencies() -> ServiceDependencies {
+    let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
+        discovery,
     )
 }
 

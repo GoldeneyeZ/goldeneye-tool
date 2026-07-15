@@ -14,8 +14,8 @@ mod query;
 pub use artifact::ArtifactPersistence;
 pub use crosslink::CrossLinkRepository;
 pub use discovery::{
-    IndexMode, RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport,
-    RepositorySourceFile,
+    IndexMode, LanguageClassifier, RepositoryDiscovery, RepositoryDiscoveryOptions,
+    RepositoryDiscoveryReport, RepositorySourceFile, SourceDiscovery,
 };
 pub use edit::{
     EditIndexer, EditJournalRecord, EditOperationId, EditOperationKind, EditPhase,

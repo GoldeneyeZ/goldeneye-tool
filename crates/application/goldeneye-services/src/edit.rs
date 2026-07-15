@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use goldeneye_discovery::{FileSystemDiscovery, LanguageRegistry};
 use goldeneye_domain::{ContentHash, FileContext, FileId, SourceSpan};
 use goldeneye_edit::path_auth::{PathAuthorizationError, PathAuthorizer, PathIntent};
 use goldeneye_edit::{
@@ -13,7 +12,9 @@ use goldeneye_edit::{
     RecoveryReport,
 };
 use goldeneye_index::{IndexOptions, IndexService};
-use goldeneye_ports::{EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic};
+use goldeneye_ports::{
+    EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic, LanguageClassifier,
+};
 use goldeneye_store::Store;
 use goldeneye_syntax::{
     CoreGrammarProvider, DiagnosticKind, InspectRequest, SyntaxDiagnostic, SyntaxEngine,
@@ -306,7 +307,14 @@ impl Services {
         &self,
         request: &InspectSyntaxRequest,
     ) -> Result<InspectSyntaxResult, ServiceError> {
-        self.with_edit_service(|service| inspect_file(service, request, self.allowed_roots()))
+        self.with_edit_service(|service| {
+            inspect_file(
+                service,
+                request,
+                self.allowed_roots(),
+                self.dependencies.languages(),
+            )
+        })
     }
 
     /// Creates one new file without overwriting an existing destination.
@@ -319,9 +327,9 @@ impl Services {
         request: &CreateFileRequest,
     ) -> Result<EditMutationResult, ServiceError> {
         let language_id = request.language_id.clone().or_else(|| {
-            LanguageRegistry::upstream()
+            self.dependencies
+                .languages()
                 .classify(Path::new(request.path.as_str()))
-                .cloned()
         });
         let Some(language_id) = language_id else {
             return Err(ServiceError::edit(
@@ -378,6 +386,7 @@ impl Services {
         };
         let locator = request.locator.clone();
         let allowed_roots = self.allowed_roots();
+        let languages = self.dependencies.languages();
         self.with_edit_service(|service| match service.edit_node(durable) {
             Ok(result) => Ok(mutation_result(result)),
             Err(error) => Err(edit_error_with_fresh(
@@ -385,6 +394,7 @@ impl Services {
                 &locator,
                 error,
                 allowed_roots,
+                languages,
             )),
         })
     }
@@ -456,6 +466,7 @@ impl Services {
         };
         let locator = request.locator.clone();
         let allowed_roots = self.allowed_roots();
+        let languages = self.dependencies.languages();
         self.with_edit_service(|service| match service.edit_node(durable) {
             Ok(result) => Ok(mutation_result(result)),
             Err(error) => Err(edit_error_with_fresh(
@@ -463,6 +474,7 @@ impl Services {
                 &locator,
                 error,
                 allowed_roots,
+                languages,
             )),
         })
     }
@@ -489,7 +501,7 @@ impl Services {
             store,
             TreeSitterIndexExtractor::new(CoreGrammarProvider),
             IndexOptions::default(),
-            FileSystemDiscovery,
+            self.dependencies.discovery(),
         );
         let journal = Store::open(self.config.database_path())?;
         DurableEditService::open(
@@ -516,6 +528,7 @@ fn inspect_file(
     service: &mut DurableEditService,
     request: &InspectSyntaxRequest,
     allowed_roots: Vec<PathBuf>,
+    languages: &dyn LanguageClassifier,
 ) -> Result<InspectSyntaxResult, ServiceError> {
     let project = service.indexed_project(&request.project)?.ok_or_else(|| {
         ServiceError::edit(
@@ -553,9 +566,8 @@ fn inspect_file(
             actual: actual_hash,
         }));
     }
-    let language_id = LanguageRegistry::upstream()
+    let language_id = languages
         .classify(Path::new(request.path.as_str()))
-        .cloned()
         .ok_or_else(|| {
             ServiceError::edit(
                 ServiceErrorCode::InvalidInput,
@@ -629,6 +641,7 @@ fn edit_error_with_fresh(
     locator: &NodeLocator,
     error: DurableEditError,
     allowed_roots: Vec<PathBuf>,
+    languages: &dyn LanguageClassifier,
 ) -> ServiceError {
     if !matches!(
         &error,
@@ -640,7 +653,7 @@ fn edit_error_with_fresh(
         locator.scope.file.project_id.clone(),
         locator.scope.file.relative_path.clone(),
     );
-    let fresh = inspect_file(service, &request, allowed_roots)
+    let fresh = inspect_file(service, &request, allowed_roots, languages)
         .and_then(|result| {
             serde_json::to_string(&result.syntax).map_err(|serialization| {
                 ServiceError::edit(ServiceErrorCode::Storage, serialization.to_string())

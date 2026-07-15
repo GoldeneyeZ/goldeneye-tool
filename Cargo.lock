@@ -435,6 +435,7 @@ name = "goldeneye-http"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-discovery",
  "goldeneye-domain",
  "goldeneye-git",
  "goldeneye-index",
@@ -470,6 +471,7 @@ name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-discovery",
  "goldeneye-git",
  "goldeneye-services",
  "goldeneye-watcher",
@@ -577,6 +579,7 @@ name = "goldeneye-watcher"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-discovery",
  "goldeneye-domain",
  "goldeneye-git",
  "goldeneye-services",

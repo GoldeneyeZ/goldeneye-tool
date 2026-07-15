@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 goldeneye-crosslink = { path = "../goldeneye-crosslink" }
-goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 goldeneye-edit = { path = "../goldeneye-edit" }
 goldeneye-index = { path = "../goldeneye-index" }
@@ -22,6 +21,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
+goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-git = { path = "../../adapters/goldeneye-git" }
 tempfile.workspace = true
 
