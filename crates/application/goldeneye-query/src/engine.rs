@@ -91,6 +91,22 @@ struct ArchitectureSummary {
 }
 
 impl QueryCache {
+    /// Drops one project's cached graph even when its durable generation is unchanged.
+    pub fn invalidate_project(&self, project: &ProjectId) {
+        self.graphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(project);
+    }
+
+    /// Drops every cached project graph after a multi-project derived-graph write.
+    pub fn invalidate_all(&self) {
+        self.graphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+
     fn get(&self, project: &ProjectId, generation: Generation) -> Option<Arc<ProjectGraph>> {
         self.graphs
             .lock()
@@ -1391,6 +1407,38 @@ mod cache_tests {
         assert!(std::ptr::eq(first_summary, reused_summary));
         assert!(!std::ptr::eq(first_summary, replaced_summary));
         assert_eq!(loads.get(), 2);
+    }
+
+    #[test]
+    fn graph_cache_invalidation_reloads_an_unchanged_generation() {
+        let cache = QueryCache::default();
+        let first_project = ProjectId::new("first").expect("project ID");
+        let second_project = ProjectId::new("second").expect("project ID");
+        let loads = Cell::new(0_u8);
+        let mut load = || {
+            loads.set(loads.get() + 1);
+            Ok((Vec::new(), Vec::new()))
+        };
+
+        cache
+            .get_or_load(&first_project, Generation::new(1), &mut load)
+            .expect("first graph load");
+        cache.invalidate_project(&first_project);
+        cache
+            .get_or_load(&first_project, Generation::new(1), &mut load)
+            .expect("invalidated graph reload");
+        cache
+            .get_or_load(&second_project, Generation::new(1), &mut load)
+            .expect("second graph load");
+        cache.invalidate_all();
+        cache
+            .get_or_load(&first_project, Generation::new(1), &mut load)
+            .expect("all-invalidated first reload");
+        cache
+            .get_or_load(&second_project, Generation::new(1), &mut load)
+            .expect("all-invalidated second reload");
+
+        assert_eq!(loads.get(), 5);
     }
 
     #[test]

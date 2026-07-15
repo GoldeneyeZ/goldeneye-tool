@@ -14,7 +14,7 @@ use goldeneye_mcp::server::Server;
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
 };
-use goldeneye_store::{QueryStore, Store};
+use goldeneye_store::{QueryStore, SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
@@ -33,6 +33,7 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )

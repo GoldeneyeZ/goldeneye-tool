@@ -112,6 +112,7 @@ impl Services {
         self.prepare_database()?;
         let mut store = Store::open(self.config().database_path())?;
         let outcome = store.replace_git_history(project, &files, &couplings)?;
+        self.query.invalidate_project(project);
         Ok(GitHistoryResult {
             files: outcome.files,
             couplings: outcome.couplings,

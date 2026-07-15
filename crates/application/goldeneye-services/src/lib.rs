@@ -17,7 +17,7 @@ use goldeneye_index::{
 };
 use goldeneye_ports::{
     ArtifactPersistence, GitPortError, GitRepository, IndexSyntaxExtractor, LanguageClassifier,
-    PortError, ServiceSyntax, SourceDiscovery,
+    PortError, RepositoryFactory, ServiceSyntax, SourceDiscovery,
 };
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
@@ -352,6 +352,8 @@ pub enum ServiceError {
     #[error(transparent)]
     Artifact(#[from] PortError),
     #[error(transparent)]
+    Repository(PortError),
+    #[error(transparent)]
     CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
     #[error("{message}")]
     Edit {
@@ -374,7 +376,7 @@ impl ServiceError {
             Self::Cancelled
             | Self::Index(IndexError::Cancelled)
             | Self::Git(GitPortError::Cancelled) => ServiceErrorCode::Cancelled,
-            Self::Store(_) | Self::Artifact(_) => ServiceErrorCode::Storage,
+            Self::Store(_) | Self::Artifact(_) | Self::Repository(_) => ServiceErrorCode::Storage,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
             Self::Git(GitPortError::InvalidReference) => ServiceErrorCode::InvalidInput,
@@ -390,6 +392,7 @@ pub struct ServiceDependencies {
     artifact: Arc<dyn ArtifactPersistence>,
     git: Arc<dyn GitRepository>,
     source: Arc<dyn SourceDiscovery>,
+    repositories: Arc<dyn RepositoryFactory>,
     index_syntax: Arc<dyn IndexSyntaxExtractor>,
     edit_syntax: Arc<dyn ServiceSyntax>,
 }
@@ -400,6 +403,7 @@ impl ServiceDependencies {
         artifact: Arc<dyn ArtifactPersistence>,
         git: Arc<dyn GitRepository>,
         source: Arc<dyn SourceDiscovery>,
+        repositories: Arc<dyn RepositoryFactory>,
         index_syntax: Arc<dyn IndexSyntaxExtractor>,
         edit_syntax: Arc<dyn ServiceSyntax>,
     ) -> Self {
@@ -407,6 +411,7 @@ impl ServiceDependencies {
             artifact,
             git,
             source,
+            repositories,
             index_syntax,
             edit_syntax,
         }
@@ -426,6 +431,10 @@ impl ServiceDependencies {
 
     pub(crate) fn languages(&self) -> &dyn LanguageClassifier {
         self.source.as_ref()
+    }
+
+    pub(crate) fn repositories(&self) -> &dyn RepositoryFactory {
+        self.repositories.as_ref()
     }
 
     pub(crate) fn index_syntax(&self) -> Arc<dyn IndexSyntaxExtractor> {
@@ -519,7 +528,11 @@ impl Services {
         }
         hooks.report("opening_store");
         self.prepare_database()?;
-        let store = Store::open(&self.config.database_path)?;
+        let store = self
+            .dependencies
+            .repositories()
+            .open_index(&self.config.database_path)
+            .map_err(ServiceError::Repository)?;
         let mut options = IndexOptions::default();
         options.discovery.mode = request.mode.discovery();
         options.cancellation = hooks.cancellation.clone();
@@ -543,7 +556,10 @@ impl Services {
         drop(index);
         match self.refresh_git_history_at(&result.project.id, &root, hooks.cancellation()) {
             Ok(history) if history.enriched_edges > 0 => {
-                match Store::open(&self.config.database_path)
+                match self
+                    .dependencies
+                    .repositories()
+                    .open_query(&self.config.database_path)
                     .and_then(|store| store.counts(&result.project.id))
                 {
                     Ok(counts) => result.counts = counts,
@@ -623,9 +639,14 @@ impl Services {
         &self,
     ) -> Result<goldeneye_crosslink::CrossLinkOutcome, ServiceError> {
         self.prepare_database()?;
-        Ok(goldeneye_crosslink::rebuild(&mut Store::open(
-            &self.config.database_path,
-        )?)?)
+        let mut repository = self
+            .dependencies
+            .repositories()
+            .open_crosslink(&self.config.database_path)
+            .map_err(ServiceError::Repository)?;
+        let outcome = goldeneye_crosslink::rebuild(&mut repository);
+        self.query.invalidate_all();
+        Ok(outcome?)
     }
 
     /// Returns persisted index status for one project.
@@ -884,7 +905,10 @@ impl Services {
             })?;
         }
         if !self.config.database_path.exists() {
-            drop(Store::open(&self.config.database_path)?);
+            self.dependencies
+                .repositories()
+                .initialize(&self.config.database_path)
+                .map_err(ServiceError::Repository)?;
         }
         Ok(())
     }
@@ -899,7 +923,11 @@ impl Services {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if engine.is_none() {
-            let repository = Store::open_read_only(&self.config.database_path)?;
+            let repository = self
+                .dependencies
+                .repositories()
+                .open_query(&self.config.database_path)
+                .map_err(ServiceError::Repository)?;
             *engine = Some(goldeneye_query::QueryEngine::with_cache(
                 repository,
                 Arc::clone(&self.query),

@@ -62,3 +62,43 @@ pub trait IndexRepository: CrossLinkRepository + Send {
         edges: Vec<GraphEdge>,
     ) -> Result<Generation, PortError>;
 }
+
+impl<T> IndexRepository for Box<T>
+where
+    T: IndexRepository + ?Sized,
+{
+    fn get_project(&self, project: &ProjectId) -> Result<Option<ProjectRecord>, PortError> {
+        self.as_ref().get_project(project)
+    }
+
+    fn list_files(&self, project: &ProjectId) -> Result<Vec<FileRecord>, PortError> {
+        self.as_ref().list_files(project)
+    }
+
+    fn counts(&self, project: &ProjectId) -> Result<GraphCounts, PortError> {
+        self.as_ref().counts(project)
+    }
+
+    fn nodes_for_file(&self, file: &FileId) -> Result<Vec<GraphNode>, PortError> {
+        self.as_ref().nodes_for_file(file)
+    }
+
+    fn get_node(&self, project: &ProjectId, node: &NodeId) -> Result<Option<GraphNode>, PortError> {
+        self.as_ref().get_node(project, node)
+    }
+
+    fn edges_from(&self, project: &ProjectId, node: &NodeId) -> Result<Vec<GraphEdge>, PortError> {
+        self.as_ref().edges_from(project, node)
+    }
+
+    fn replace_project_graph(
+        &mut self,
+        project: &ProjectRecord,
+        files: Vec<FileRecord>,
+        nodes: Vec<GraphNode>,
+        edges: Vec<GraphEdge>,
+    ) -> Result<Generation, PortError> {
+        self.as_mut()
+            .replace_project_graph(project, files, nodes, edges)
+    }
+}

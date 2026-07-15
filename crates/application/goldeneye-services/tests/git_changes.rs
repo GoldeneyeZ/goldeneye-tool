@@ -10,9 +10,10 @@ use goldeneye_domain::{
 };
 use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
-    CancellationToken, DetectChangesRequest, ServiceConfig, ServiceDependencies, Services,
+    ArchitectureRequest, CancellationToken, DetectChangesRequest, ServiceConfig,
+    ServiceDependencies, Services,
 };
-use goldeneye_store::Store;
+use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 
@@ -22,6 +23,7 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
@@ -126,11 +128,19 @@ fn history_enrichment_and_change_blast_radius_are_end_to_end() {
 
     let services = Services::new(ServiceConfig::new(&database, &repo), service_dependencies());
     let token = CancellationToken::new();
+    let before_history = services
+        .get_architecture(&ArchitectureRequest::new(project_id.clone()))
+        .expect("architecture before history");
+    assert_eq!(before_history.total_edges, 1);
     let history = services
         .refresh_git_history(&project_id, &token)
         .expect("history");
     assert_eq!(history.couplings, 1);
     assert_eq!(history.enriched_edges, 1);
+    let after_history = services
+        .get_architecture(&ArchitectureRequest::new(project_id.clone()))
+        .expect("architecture after history");
+    assert_eq!(after_history.total_edges, 2);
     let context = services.git_context(&project_id, &token).expect("context");
     assert!(context.is_git);
     assert_eq!(context.branch, "main");

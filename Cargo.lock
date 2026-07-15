@@ -476,6 +476,7 @@ dependencies = [
  "goldeneye-discovery",
  "goldeneye-git",
  "goldeneye-services",
+ "goldeneye-store",
  "goldeneye-syntax",
  "goldeneye-tree-sitter-index",
  "goldeneye-watcher",

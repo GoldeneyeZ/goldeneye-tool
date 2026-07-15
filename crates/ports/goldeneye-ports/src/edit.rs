@@ -172,6 +172,59 @@ pub trait EditRepository: Send {
     ) -> Result<EditJournalRecord, PortError>;
 }
 
+impl<T> EditRepository for Box<T>
+where
+    T: EditRepository + ?Sized,
+{
+    fn get_project(&self, project: &ProjectId) -> Result<Option<ProjectRecord>, PortError> {
+        self.as_ref().get_project(project)
+    }
+
+    fn get_file(&self, file: &FileId) -> Result<Option<FileRecord>, PortError> {
+        self.as_ref().get_file(file)
+    }
+
+    fn nodes_for_file(&self, file: &FileId) -> Result<Vec<GraphNode>, PortError> {
+        self.as_ref().nodes_for_file(file)
+    }
+
+    fn create_edit_operation(
+        &mut self,
+        record: &NewEditJournalRecord,
+    ) -> Result<EditJournalRecord, PortError> {
+        self.as_mut().create_edit_operation(record)
+    }
+
+    fn transition_edit_operation(
+        &mut self,
+        operation_id: &EditOperationId,
+        expected: EditPhase,
+        next: EditPhase,
+    ) -> Result<EditJournalRecord, PortError> {
+        self.as_mut()
+            .transition_edit_operation(operation_id, expected, next)
+    }
+
+    fn get_edit_operation(
+        &self,
+        operation_id: &EditOperationId,
+    ) -> Result<Option<EditJournalRecord>, PortError> {
+        self.as_ref().get_edit_operation(operation_id)
+    }
+
+    fn list_incomplete_edit_operations(&self) -> Result<Vec<EditJournalRecord>, PortError> {
+        self.as_ref().list_incomplete_edit_operations()
+    }
+
+    fn set_edit_operation_error(
+        &mut self,
+        operation_id: &EditOperationId,
+        error: Option<&str>,
+    ) -> Result<EditJournalRecord, PortError> {
+        self.as_mut().set_edit_operation_error(operation_id, error)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditRefreshStatus {
     Updated,

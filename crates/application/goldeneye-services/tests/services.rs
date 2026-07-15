@@ -7,11 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_discovery::FileSystemDiscovery;
+use goldeneye_domain::{
+    EdgeKind, Generation, GraphEdge, GraphNode, NodeId, NodeLabel, ProjectRecord, QualifiedName,
+};
 use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
-    ArtifactPersistence, DetectChangesOptions, DetectedChanges, GitContext, GitHistory,
-    GitPortError, GitRepository, LanguageClassifier, PortError, RepositoryDiscovery,
-    RepositoryDiscoveryOptions, RepositoryDiscoveryReport,
+    ArtifactPersistence, CrossLinkRepository, DetectChangesOptions, DetectedChanges,
+    EditRepository, GitContext, GitHistory, GitPortError, GitRepository, IndexRepository,
+    LanguageClassifier, PortError, QueryRepository, RepositoryDiscovery,
+    RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
 };
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
@@ -21,6 +25,7 @@ use goldeneye_services::{
     SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode,
     Services, TraceDirection, TracePathRequest,
 };
+use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
@@ -31,6 +36,7 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
@@ -40,6 +46,96 @@ fn service_dependencies() -> ServiceDependencies {
 struct RecordingSourceDiscovery {
     discovery_calls: AtomicUsize,
     classified_paths: Mutex<Vec<PathBuf>>,
+}
+
+struct FailingRepositoryFactory;
+
+struct FailSecondCrosslinkFactory;
+
+struct FailSecondCrosslinkRepository {
+    store: Store,
+    replacements: usize,
+}
+
+impl RepositoryFactory for FailingRepositoryFactory {
+    fn initialize(&self, _path: &Path) -> Result<(), PortError> {
+        Err(repository_failure())
+    }
+
+    fn open_query(&self, _path: &Path) -> Result<Box<dyn QueryRepository>, PortError> {
+        Err(repository_failure())
+    }
+
+    fn open_index(&self, _path: &Path) -> Result<Box<dyn IndexRepository>, PortError> {
+        Err(repository_failure())
+    }
+
+    fn open_edit(&self, _path: &Path) -> Result<Box<dyn EditRepository>, PortError> {
+        Err(repository_failure())
+    }
+
+    fn open_crosslink(&self, _path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
+        Err(repository_failure())
+    }
+}
+
+impl RepositoryFactory for FailSecondCrosslinkFactory {
+    fn initialize(&self, path: &Path) -> Result<(), PortError> {
+        RepositoryFactory::initialize(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_query(&self, path: &Path) -> Result<Box<dyn QueryRepository>, PortError> {
+        RepositoryFactory::open_query(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_index(&self, path: &Path) -> Result<Box<dyn IndexRepository>, PortError> {
+        RepositoryFactory::open_index(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_edit(&self, path: &Path) -> Result<Box<dyn EditRepository>, PortError> {
+        RepositoryFactory::open_edit(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
+        Ok(Box::new(FailSecondCrosslinkRepository {
+            store: Store::open(path).map_err(PortError::new)?,
+            replacements: 0,
+        }))
+    }
+}
+
+impl CrossLinkRepository for FailSecondCrosslinkRepository {
+    fn list_projects(&self) -> Result<Vec<ProjectRecord>, PortError> {
+        self.store.list_projects().map_err(PortError::new)
+    }
+
+    fn list_nodes(&self, project: &ProjectId) -> Result<Vec<GraphNode>, PortError> {
+        self.store.list_nodes(project).map_err(PortError::new)
+    }
+
+    fn list_edges(&self, project: &ProjectId) -> Result<Vec<GraphEdge>, PortError> {
+        self.store.list_edges(project).map_err(PortError::new)
+    }
+
+    fn replace_cross_project_edges(
+        &mut self,
+        project: &ProjectId,
+        edges: &[GraphEdge],
+    ) -> Result<usize, PortError> {
+        self.replacements += 1;
+        if self.replacements == 2 {
+            return Err(PortError::new(std::io::Error::other(
+                "forced second crosslink replacement failure",
+            )));
+        }
+        self.store
+            .replace_cross_project_edges(project, edges)
+            .map_err(PortError::new)
+    }
+}
+
+fn repository_failure() -> PortError {
+    PortError::new(std::io::Error::other("repository factory failed"))
 }
 
 impl RepositoryDiscovery for RecordingSourceDiscovery {
@@ -171,6 +267,7 @@ fn recording_dependencies(
             Arc::new(artifact),
             Arc::new(GitCommandRepository),
             Arc::new(FileSystemDiscovery),
+            Arc::new(SqliteRepositoryFactory),
             Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
             Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
@@ -342,6 +439,7 @@ fn injected_source_discovery_drives_indexing_and_language_classification() {
             Arc::new(FileArtifactPersistence),
             Arc::new(GitCommandRepository),
             source.clone(),
+            Arc::new(SqliteRepositoryFactory),
             Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
             Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
@@ -366,6 +464,125 @@ fn injected_source_discovery_drives_indexing_and_language_classification() {
             .as_slice(),
         [PathBuf::from("src/lib.rs")]
     );
+}
+
+#[test]
+fn repository_factory_failures_keep_repository_storage_classification_and_message() {
+    let temp = TempDir::new().expect("temp directory");
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("missing/graph.db"), temp.path())
+            .with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+            Arc::new(FailingRepositoryFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+    );
+
+    let error = services
+        .list_projects()
+        .expect_err("repository initialization must fail");
+
+    assert_eq!(error.code(), ServiceErrorCode::Storage);
+    assert!(matches!(
+        &error,
+        goldeneye_services::ServiceError::Repository(_)
+    ));
+    assert_eq!(error.to_string(), "repository factory failed");
+}
+
+#[test]
+fn failed_crosslink_rebuild_invalidates_graphs_changed_before_the_failure() {
+    let temp = TempDir::new().expect("temp directory");
+    let database = temp.path().join("graph.db");
+    let first_id = ProjectId::new("first").expect("first project ID");
+    let second_id = ProjectId::new("second").expect("second project ID");
+    let first = ProjectRecord::new(
+        first_id.clone(),
+        temp.path().join("first").to_string_lossy(),
+    )
+    .expect("first project");
+    let second = ProjectRecord::new(
+        second_id.clone(),
+        temp.path().join("second").to_string_lossy(),
+    )
+    .expect("second project");
+    let pending = Generation::new(0);
+    let source = GraphNode::new(
+        first_id.clone(),
+        NodeId::new("source").expect("source node ID"),
+        NodeLabel::new("Function").expect("source label"),
+        "source",
+        QualifiedName::new("first.source").expect("source qualified name"),
+        None,
+        None,
+        pending,
+    )
+    .expect("source node");
+    let target = GraphNode::new(
+        first_id.clone(),
+        NodeId::new("target").expect("target node ID"),
+        NodeLabel::new("Function").expect("target label"),
+        "target",
+        QualifiedName::new("first.target").expect("target qualified name"),
+        None,
+        None,
+        pending,
+    )
+    .expect("target node");
+    let stale_cross_edge = GraphEdge::new(
+        first_id.clone(),
+        source.id.clone(),
+        target.id.clone(),
+        EdgeKind::new("CROSS_HTTP_CALLS").expect("cross edge kind"),
+        pending,
+    );
+    let mut store = Store::open(&database).expect("open store");
+    store
+        .replace_project_graph(
+            &first,
+            Vec::new(),
+            vec![source, target],
+            vec![stale_cross_edge],
+        )
+        .expect("seed first graph");
+    store
+        .replace_project_graph(&second, Vec::new(), Vec::new(), Vec::new())
+        .expect("seed second graph");
+    drop(store);
+
+    let services = Services::new(
+        ServiceConfig::new(&database, temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+            Arc::new(FailSecondCrosslinkFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+    );
+    let warmed = services
+        .get_architecture(&ArchitectureRequest::new(first_id.clone()))
+        .expect("warm first architecture");
+    assert_eq!(warmed.total_edges, 1);
+
+    let error = services
+        .rebuild_cross_repo_intelligence()
+        .expect_err("second replacement must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("forced second crosslink replacement failure"),
+        "{error}"
+    );
+    let reloaded = services
+        .get_architecture(&ArchitectureRequest::new(first_id))
+        .expect("reload first architecture");
+    assert_eq!(reloaded.total_edges, 0);
 }
 
 #[test]
@@ -573,6 +790,7 @@ fn automatic_git_history_adapter_failures_are_downgraded_to_warnings() {
             cancel_history: false,
         }),
         Arc::new(FileSystemDiscovery),
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     );
@@ -614,6 +832,7 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 cancel_history: true,
             }),
             Arc::new(FileSystemDiscovery),
+            Arc::new(SqliteRepositoryFactory),
             Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
             Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
@@ -634,6 +853,7 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 cancel_history: false,
             }),
             Arc::new(FileSystemDiscovery),
+            Arc::new(SqliteRepositoryFactory),
             Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
             Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),

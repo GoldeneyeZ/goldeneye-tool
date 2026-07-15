@@ -16,7 +16,6 @@ use goldeneye_ports::{
     EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic, EditSyntaxInspectRequest,
     InspectRequest, LanguageClassifier, ServiceSyntax, SyntaxInspection,
 };
-use goldeneye_store::Store;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -498,14 +497,22 @@ impl Services {
 
     fn build_edit_service(&self) -> Result<(DurableEditService, RecoveryReport), ServiceError> {
         self.prepare_database()?;
-        let store = Store::open(self.config.database_path())?;
+        let store = self
+            .dependencies
+            .repositories()
+            .open_index(self.config.database_path())
+            .map_err(ServiceError::Repository)?;
         let index = IndexService::new(
             store,
             self.dependencies.index_syntax(),
             IndexOptions::default(),
             self.dependencies.discovery(),
         );
-        let journal = Store::open(self.config.database_path())?;
+        let journal = self
+            .dependencies
+            .repositories()
+            .open_edit(self.config.database_path())
+            .map_err(ServiceError::Repository)?;
         DurableEditService::open(
             index,
             journal,

@@ -36,3 +36,28 @@ pub trait CrossLinkRepository {
         edges: &[GraphEdge],
     ) -> Result<usize, PortError>;
 }
+
+impl<T> CrossLinkRepository for Box<T>
+where
+    T: CrossLinkRepository + ?Sized,
+{
+    fn list_projects(&self) -> Result<Vec<ProjectRecord>, PortError> {
+        self.as_ref().list_projects()
+    }
+
+    fn list_nodes(&self, project: &ProjectId) -> Result<Vec<GraphNode>, PortError> {
+        self.as_ref().list_nodes(project)
+    }
+
+    fn list_edges(&self, project: &ProjectId) -> Result<Vec<GraphEdge>, PortError> {
+        self.as_ref().list_edges(project)
+    }
+
+    fn replace_cross_project_edges(
+        &mut self,
+        project: &ProjectId,
+        edges: &[GraphEdge],
+    ) -> Result<usize, PortError> {
+        self.as_mut().replace_cross_project_edges(project, edges)
+    }
+}

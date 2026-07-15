@@ -8,6 +8,7 @@ use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::tools::ToolRegistry;
 use goldeneye_services::{IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services};
+use goldeneye_store::SqliteRepositoryFactory;
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde_json::{Value, json};
@@ -18,6 +19,7 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )

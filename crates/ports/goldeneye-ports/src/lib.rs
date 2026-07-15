@@ -11,6 +11,7 @@ mod index;
 mod index_syntax;
 mod inspection;
 mod query;
+mod repository;
 
 pub use artifact::ArtifactPersistence;
 pub use crosslink::CrossLinkRepository;
@@ -48,3 +49,4 @@ pub use query::{
     ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, QueryRepository,
     STORED_VECTOR_DIM, SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,
 };
+pub use repository::RepositoryFactory;

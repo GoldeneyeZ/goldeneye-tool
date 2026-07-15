@@ -15,7 +15,7 @@ use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
 };
-use goldeneye_store::Store;
+use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use sha2::{Digest, Sha256};
@@ -33,6 +33,7 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(SqliteRepositoryFactory),
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )

@@ -205,3 +205,90 @@ pub trait QueryRepository: Send {
     /// Returns an error when graph counts cannot be read.
     fn counts(&self, project: &ProjectId) -> Result<GraphCounts, PortError>;
 }
+
+impl<T> QueryRepository for Box<T>
+where
+    T: QueryRepository + ?Sized,
+{
+    fn schema_info(&self) -> Result<SchemaInfo, PortError> {
+        self.as_ref().schema_info()
+    }
+
+    fn connection_settings(&self) -> Result<ConnectionSettings, PortError> {
+        self.as_ref().connection_settings()
+    }
+
+    fn get_project(&self, project: &ProjectId) -> Result<Option<ProjectRecord>, PortError> {
+        self.as_ref().get_project(project)
+    }
+
+    fn list_projects(&self) -> Result<Vec<ProjectRecord>, PortError> {
+        self.as_ref().list_projects()
+    }
+
+    fn list_files(&self, project: &ProjectId) -> Result<Vec<FileRecord>, PortError> {
+        self.as_ref().list_files(project)
+    }
+
+    fn get_file(&self, file: &FileId) -> Result<Option<FileRecord>, PortError> {
+        self.as_ref().get_file(file)
+    }
+
+    fn list_nodes(&self, project: &ProjectId) -> Result<Vec<GraphNode>, PortError> {
+        self.as_ref().list_nodes(project)
+    }
+
+    fn list_edges(&self, project: &ProjectId) -> Result<Vec<GraphEdge>, PortError> {
+        self.as_ref().list_edges(project)
+    }
+
+    fn nodes_for_file(&self, file: &FileId) -> Result<Vec<GraphNode>, PortError> {
+        self.as_ref().nodes_for_file(file)
+    }
+
+    fn search_nodes_page(
+        &self,
+        project: &ProjectId,
+        query: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SearchHit>, PortError> {
+        self.as_ref()
+            .search_nodes_page(project, query, limit, offset)
+    }
+
+    fn count_search_nodes(&self, project: &ProjectId, query: &str) -> Result<u64, PortError> {
+        self.as_ref().count_search_nodes(project, query)
+    }
+
+    fn list_node_vectors(&self, project: &ProjectId) -> Result<Vec<NodeVectorRecord>, PortError> {
+        self.as_ref().list_node_vectors(project)
+    }
+
+    fn get_token_vector(
+        &self,
+        project: &ProjectId,
+        token: &str,
+    ) -> Result<Option<TokenVectorRecord>, PortError> {
+        self.as_ref().get_token_vector(project, token)
+    }
+
+    fn list_node_signatures(
+        &self,
+        project: &ProjectId,
+    ) -> Result<Vec<NodeSignatureRecord>, PortError> {
+        self.as_ref().list_node_signatures(project)
+    }
+
+    fn get_node_signature(
+        &self,
+        project: &ProjectId,
+        node: &NodeId,
+    ) -> Result<Option<NodeSignatureRecord>, PortError> {
+        self.as_ref().get_node_signature(project, node)
+    }
+
+    fn counts(&self, project: &ProjectId) -> Result<GraphCounts, PortError> {
+        self.as_ref().counts(project)
+    }
+}

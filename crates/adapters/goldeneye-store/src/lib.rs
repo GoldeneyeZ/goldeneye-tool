@@ -5,6 +5,7 @@ mod crosslink_port;
 mod edit_port;
 mod index_port;
 mod query_port;
+mod repository_factory;
 mod schema;
 
 use std::{
@@ -33,6 +34,7 @@ pub use goldeneye_ports::{
     ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, STORED_VECTOR_DIM,
     SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,
 };
+pub use repository_factory::SqliteRepositoryFactory;
 pub use schema::CURRENT_SCHEMA_VERSION;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
