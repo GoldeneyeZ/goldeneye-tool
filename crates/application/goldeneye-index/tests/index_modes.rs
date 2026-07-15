@@ -64,12 +64,12 @@ fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
         ProjectRelativePath::new("Fixture.java").expect("fixture path"),
     );
     let nodes = service
-        .store()
+        .repository()
         .nodes_for_file(&file)
         .expect("fixture nodes");
     let has_calls = nodes.iter().any(|node| {
         service
-            .store()
+            .repository()
             .edges_from(&result.project.id, &node.id)
             .expect("fixture edges")
             .iter()

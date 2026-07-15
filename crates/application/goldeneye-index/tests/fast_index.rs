@@ -25,7 +25,7 @@ fn remove(root: &Path, path: &str) {
     fs::remove_file(root.join(path)).expect("remove fixture");
 }
 
-fn service(options: IndexOptions) -> IndexService<CoreGrammarProvider> {
+fn service(options: IndexOptions) -> IndexService<CoreGrammarProvider, Store> {
     IndexService::new(
         Store::open_in_memory().expect("memory store"),
         CoreGrammarProvider,
@@ -35,7 +35,7 @@ fn service(options: IndexOptions) -> IndexService<CoreGrammarProvider> {
 }
 
 fn nodes_for(
-    service: &IndexService<CoreGrammarProvider>,
+    service: &IndexService<CoreGrammarProvider, Store>,
     project: &goldeneye_domain::ProjectId,
     path: &str,
 ) -> Vec<goldeneye_domain::GraphNode> {
@@ -44,21 +44,25 @@ fn nodes_for(
         ProjectRelativePath::new(path).expect("relative path"),
     );
     service
-        .store()
+        .repository()
         .nodes_for_file(&file)
         .expect("nodes for fixture")
 }
 
 fn graph_snapshot(
-    service: &IndexService<CoreGrammarProvider>,
+    service: &IndexService<CoreGrammarProvider, Store>,
     project: &goldeneye_domain::ProjectId,
 ) -> (NodeSnapshot, EdgeSnapshot) {
     let mut nodes = Vec::new();
     let mut edges = BTreeSet::new();
-    for file in service.store().list_files(project).expect("files") {
-        for node in service.store().nodes_for_file(&file.id).expect("nodes") {
+    for file in service.repository().list_files(project).expect("files") {
+        for node in service
+            .repository()
+            .nodes_for_file(&file.id)
+            .expect("nodes")
+        {
             for edge in service
-                .store()
+                .repository()
                 .edges_from(project, &node.id)
                 .expect("edges")
             {
@@ -139,7 +143,7 @@ fn unsupported_discovered_languages_do_not_abort_core_indexing() {
     assert_eq!(result.new_files, 1);
     assert_eq!(
         index
-            .store()
+            .repository()
             .list_files(&result.project.id)
             .expect("stored files")
             .len(),
@@ -250,7 +254,7 @@ fn incremental_index_reconciles_changed_new_and_deleted_files() {
     );
     assert_eq!(
         index
-            .store()
+            .repository()
             .get_file(&goldeneye_domain::FileId::new(
                 first.project.id.clone(),
                 ProjectRelativePath::new("pkg/delete.py").expect("path"),
@@ -315,11 +319,11 @@ fn malformed_incremental_change_rejects_commit_and_preserves_generation() {
     let path = ProjectRelativePath::new("src/lib.rs").expect("path");
     let file_id = goldeneye_domain::FileId::new(first.project.id.clone(), path);
     let original_file = index
-        .store()
+        .repository()
         .get_file(&file_id)
         .expect("file lookup")
         .expect("file");
-    let original_nodes = index.store().nodes_for_file(&file_id).expect("nodes");
+    let original_nodes = index.repository().nodes_for_file(&file_id).expect("nodes");
 
     write(temp.path(), "src/lib.rs", "fn broken(\n");
     let rejected = index
@@ -331,11 +335,11 @@ fn malformed_incremental_change_rejects_commit_and_preserves_generation() {
     assert_eq!(rejected.changed_files, 1);
     assert!(!rejected.diagnostics.is_empty());
     assert_eq!(
-        index.store().get_file(&file_id).expect("file"),
+        index.repository().get_file(&file_id).expect("file"),
         Some(original_file)
     );
     assert_eq!(
-        index.store().nodes_for_file(&file_id).expect("nodes"),
+        index.repository().nodes_for_file(&file_id).expect("nodes"),
         original_nodes
     );
 }
@@ -354,7 +358,7 @@ fn duplicate_short_names_never_create_false_cross_file_calls() {
         .iter()
         .flat_map(|node| {
             index
-                .store()
+                .repository()
                 .edges_from(&result.project.id, &node.id)
                 .expect("edges")
         })
@@ -383,7 +387,7 @@ fn duplicate_short_names_never_create_false_cross_file_calls() {
         .iter()
         .flat_map(|node| {
             index
-                .store()
+                .repository()
                 .edges_from(&result.project.id, &node.id)
                 .expect("edges")
         })
@@ -414,7 +418,7 @@ fn unimported_builtins_do_not_link_to_project_lookalikes() {
         .into_iter()
         .flat_map(|node| {
             index
-                .store()
+                .repository()
                 .edges_from(&result.project.id, &node.id)
                 .expect("caller edges")
         })
@@ -439,12 +443,12 @@ fn targeted_refresh_recomputes_cross_file_calls() {
     let result = index.index_repository(temp.path()).expect("index");
     let target_path = ProjectRelativePath::new("target.py").expect("target path");
 
-    let call_count = |index: &IndexService<CoreGrammarProvider>| {
+    let call_count = |index: &IndexService<CoreGrammarProvider, Store>| {
         nodes_for(index, &result.project.id, "caller.py")
             .into_iter()
             .flat_map(|node| {
                 index
-                    .store()
+                    .repository()
                     .edges_from(&result.project.id, &node.id)
                     .expect("caller edges")
             })
@@ -487,7 +491,7 @@ fn bounds_and_cancellation_abort_before_registration() {
     ));
     assert!(
         bounded
-            .store()
+            .repository()
             .list_projects()
             .expect("projects")
             .is_empty()
@@ -506,7 +510,7 @@ fn bounds_and_cancellation_abort_before_registration() {
     ));
     assert!(
         cancelled
-            .store()
+            .repository()
             .list_projects()
             .expect("projects")
             .is_empty()
@@ -554,7 +558,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         }
     );
     let branch = index
-        .store()
+        .repository()
         .node_by_qualified_name(
             &result.project.id,
             &goldeneye_domain::QualifiedName::new(format!("{prefix}.__branch__.working-tree"))
@@ -573,7 +577,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
     ] {
         assert!(
             index
-                .store()
+                .repository()
                 .node_by_qualified_name(
                     &result.project.id,
                     &goldeneye_domain::QualifiedName::new(qualified_name.clone())
@@ -592,7 +596,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         format!("{prefix}.goCaller"),
     ] {
         let caller = index
-            .store()
+            .repository()
             .node_by_qualified_name(
                 &result.project.id,
                 &goldeneye_domain::QualifiedName::new(caller).expect("caller QN"),
@@ -600,7 +604,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
             .expect("caller lookup")
             .expect("caller");
         let calls = index
-            .store()
+            .repository()
             .edges_from(&result.project.id, &caller.id)
             .expect("caller edges")
             .into_iter()
@@ -627,7 +631,7 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
         .expect("index Go package");
     let prefix = result.project.id.as_str();
     let mut modules = index
-        .store()
+        .repository()
         .list_nodes(&result.project.id)
         .expect("project nodes")
         .into_iter()
@@ -643,7 +647,7 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
     ] {
         assert!(
             index
-                .store()
+                .repository()
                 .node_by_qualified_name(
                     &result.project.id,
                     &goldeneye_domain::QualifiedName::new(qualified_name.clone())
@@ -660,7 +664,7 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
         .index_repository(temp.path())
         .expect("reindex remaining Go package file");
     let module = index
-        .store()
+        .repository()
         .node_by_qualified_name(
             &refreshed.project.id,
             &goldeneye_domain::QualifiedName::new(format!("{prefix}.cmd")).expect("module QN"),
@@ -668,7 +672,7 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
         .expect("module lookup")
         .expect("remaining module");
     let test_main = index
-        .store()
+        .repository()
         .node_by_qualified_name(
             &refreshed.project.id,
             &goldeneye_domain::QualifiedName::new(format!("{prefix}.cmd.TestMain"))
@@ -678,7 +682,7 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
         .expect("remaining function");
     assert!(
         index
-            .store()
+            .repository()
             .edges_from(&refreshed.project.id, &module.id)
             .expect("module edges")
             .iter()

@@ -12,8 +12,7 @@ use goldeneye_domain::{
     ContentHash, FileId, FileRecord, Generation, GraphEdge, GraphNode, ProjectId, ProjectRecord,
     ProjectRelativePath,
 };
-use goldeneye_ports::{RepositoryDiscovery, RepositorySourceFile};
-use goldeneye_store::Store;
+use goldeneye_ports::{IndexRepository, RepositoryDiscovery, RepositorySourceFile};
 use goldeneye_syntax::GrammarProvider;
 
 use crate::extract::{
@@ -41,26 +40,27 @@ struct ChangeSet {
 
 type ProjectGraph = (Vec<FileRecord>, Vec<GraphNode>, Vec<GraphEdge>);
 
-pub struct IndexService<P> {
-    store: Store,
+pub struct IndexService<P, R> {
+    repository: R,
     provider: P,
     options: IndexOptions,
     discovery: Box<dyn RepositoryDiscovery>,
 }
 
-impl<P> IndexService<P>
+impl<P, R> IndexService<P, R>
 where
     P: GrammarProvider + Clone + Send + Sync,
+    R: IndexRepository,
 {
     #[must_use]
     pub fn new(
-        store: Store,
+        repository: R,
         provider: P,
         options: IndexOptions,
         discovery: impl RepositoryDiscovery + 'static,
     ) -> Self {
         Self {
-            store,
+            repository,
             provider,
             options,
             discovery: Box::new(discovery),
@@ -68,18 +68,18 @@ where
     }
 
     #[must_use]
-    pub const fn store(&self) -> &Store {
-        &self.store
+    pub const fn repository(&self) -> &R {
+        &self.repository
     }
 
     #[must_use]
-    pub const fn store_mut(&mut self) -> &mut Store {
-        &mut self.store
+    pub const fn repository_mut(&mut self) -> &mut R {
+        &mut self.repository
     }
 
     #[must_use]
-    pub fn into_store(self) -> Store {
-        self.store
+    pub fn into_repository(self) -> R {
+        self.repository
     }
 
     /// Discovers and indexes a repository, reusing unchanged persisted file graphs.
@@ -101,13 +101,18 @@ where
         if let Some(project_id) = &self.options.project_id_override {
             project = ProjectRecord::new(project_id.clone(), project.root_path.clone())?;
         }
-        let stored_project = self.store.get_project(&project.id)?;
+        let stored_project = self
+            .repository
+            .get_project(&project.id)
+            .map_err(IndexError::Repository)?;
         if let Some(stored) = &stored_project {
             project.generation = stored.generation;
         }
         let candidates = self.read_candidates(&report.files, &project.id)?;
         let existing_files = if stored_project.is_some() {
-            self.store.list_files(&project.id)?
+            self.repository
+                .list_files(&project.id)
+                .map_err(IndexError::Repository)?
         } else {
             Vec::new()
         };
@@ -129,7 +134,10 @@ where
         if stored_project.is_some() && new_files == 0 && changed_files == 0 && deleted_files == 0 {
             return Ok(IndexResult {
                 status: IndexStatus::Unchanged,
-                counts: self.store.counts(&project.id)?,
+                counts: self
+                    .repository
+                    .counts(&project.id)
+                    .map_err(IndexError::Repository)?,
                 project,
                 discovered_files: candidates.len(),
                 new_files,
@@ -163,7 +171,10 @@ where
         if rejects_existing_graph {
             return Ok(IndexResult {
                 status: IndexStatus::RejectedSyntax,
-                counts: self.store.counts(&project.id)?,
+                counts: self
+                    .repository
+                    .counts(&project.id)
+                    .map_err(IndexError::Repository)?,
                 project,
                 discovered_files: discovered_paths.len(),
                 new_files,
@@ -183,12 +194,15 @@ where
         let (files, nodes, edges) =
             self.assemble_project_graph(&project, records, &mut parsed_by_path)?;
         self.ensure_not_cancelled()?;
-        let outcome = self
-            .store
-            .replace_project_graph(&project, files, nodes, edges)?;
-        project.generation = outcome.generation;
-        goldeneye_crosslink::rebuild(&mut self.store)?;
-        let counts = self.store.counts(&project.id)?;
+        project.generation = self
+            .repository
+            .replace_project_graph(&project, files, nodes, edges)
+            .map_err(IndexError::Repository)?;
+        goldeneye_crosslink::rebuild(&mut self.repository)?;
+        let counts = self
+            .repository
+            .counts(&project.id)
+            .map_err(IndexError::Repository)?;
         Ok(IndexResult {
             status: IndexStatus::Indexed,
             project,
@@ -213,6 +227,7 @@ where
     ///
     /// Returns a typed error for unknown projects, discovery/I/O failures, invalid graph facts,
     /// cancellation, or atomic persistence failure.
+    #[allow(clippy::too_many_lines)]
     pub fn refresh_file(
         &mut self,
         project_id: &ProjectId,
@@ -220,9 +235,10 @@ where
     ) -> Result<FileRefreshResult, IndexError> {
         self.ensure_not_cancelled()?;
         let mut project = self
-            .store
-            .get_project(project_id)?
-            .ok_or_else(|| goldeneye_store::StoreError::ProjectNotFound(project_id.clone()))?;
+            .repository
+            .get_project(project_id)
+            .map_err(IndexError::Repository)?
+            .ok_or_else(|| IndexError::ProjectNotFound(project_id.clone()))?;
         let report = self
             .discovery
             .discover(Path::new(&project.root_path), &self.options.discovery)?;
@@ -231,7 +247,10 @@ where
             .files
             .iter()
             .find(|file| relative_path(&file.relative_path).is_ok_and(|value| value == *path));
-        let existing_files = self.store.list_files(project_id)?;
+        let existing_files = self
+            .repository
+            .list_files(project_id)
+            .map_err(IndexError::Repository)?;
         let existing_target = existing_files
             .iter()
             .find(|file| file.id.path == *path)
@@ -256,11 +275,11 @@ where
             let (files, nodes, edges) =
                 self.assemble_project_graph(&project, records, &mut parsed)?;
             self.ensure_not_cancelled()?;
-            let outcome = self
-                .store
-                .replace_project_graph(&project, files, nodes, edges)?;
-            project.generation = outcome.generation;
-            goldeneye_crosslink::rebuild(&mut self.store)?;
+            project.generation = self
+                .repository
+                .replace_project_graph(&project, files, nodes, edges)
+                .map_err(IndexError::Repository)?;
+            goldeneye_crosslink::rebuild(&mut self.repository)?;
             return self.refresh_result(
                 project_id,
                 path,
@@ -308,11 +327,11 @@ where
         parsed.insert(path.clone(), extracted);
         let (files, nodes, edges) = self.assemble_project_graph(&project, records, &mut parsed)?;
         self.ensure_not_cancelled()?;
-        let outcome = self
-            .store
-            .replace_project_graph(&project, files, nodes, edges)?;
-        project.generation = outcome.generation;
-        goldeneye_crosslink::rebuild(&mut self.store)?;
+        project.generation = self
+            .repository
+            .replace_project_graph(&project, files, nodes, edges)
+            .map_err(IndexError::Repository)?;
+        goldeneye_crosslink::rebuild(&mut self.repository)?;
         self.refresh_result(
             project_id,
             path,
@@ -335,7 +354,10 @@ where
             path: path.clone(),
             status,
             generation,
-            counts: self.store.counts(project)?,
+            counts: self
+                .repository
+                .counts(project)
+                .map_err(IndexError::Repository)?,
             diagnostics,
         })
     }
@@ -406,7 +428,10 @@ where
     }
 
     fn reuse_file_graph(&self, file: &FileId) -> Result<FileGraph, IndexError> {
-        let mut nodes = self.store.nodes_for_file(file)?;
+        let mut nodes = self
+            .repository
+            .nodes_for_file(file)
+            .map_err(IndexError::Repository)?;
         let mut node_ids = nodes
             .iter()
             .map(|node| node.id.clone())
@@ -414,7 +439,11 @@ where
         let mut identities = BTreeSet::new();
         let mut edges = Vec::new();
         for node in &nodes {
-            for edge in self.store.edges_from(&file.project, &node.id)? {
+            for edge in self
+                .repository
+                .edges_from(&file.project, &node.id)
+                .map_err(IndexError::Repository)?
+            {
                 if !node_ids.contains(&edge.source) {
                     continue;
                 }
@@ -435,14 +464,22 @@ where
             .map(|edge| edge.target.clone())
             .collect::<BTreeSet<_>>();
         for module_id in referenced_modules {
-            let Some(module) = self.store.get_node(&file.project, &module_id)? else {
+            let Some(module) = self
+                .repository
+                .get_node(&file.project, &module_id)
+                .map_err(IndexError::Repository)?
+            else {
                 continue;
             };
             if module.label.as_str() != "Module" || !node_ids.insert(module.id.clone()) {
                 continue;
             }
             nodes.push(module);
-            for edge in self.store.edges_from(&file.project, &module_id)? {
+            for edge in self
+                .repository
+                .edges_from(&file.project, &module_id)
+                .map_err(IndexError::Repository)?
+            {
                 if !node_ids.contains(&edge.target) {
                     continue;
                 }

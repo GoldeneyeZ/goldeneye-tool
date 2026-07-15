@@ -198,7 +198,10 @@ fn elixir_definition_calls_use_audited_language_rules() {
         result.project.id.clone(),
         ProjectRelativePath::new("demo.ex").expect("fixture path"),
     );
-    let nodes = service.store().nodes_for_file(&file).expect("Elixir nodes");
+    let nodes = service
+        .repository()
+        .nodes_for_file(&file)
+        .expect("Elixir nodes");
     let definitions = nodes
         .iter()
         .map(|node| (node.label.as_str(), node.name.as_str()))
@@ -208,7 +211,7 @@ fn elixir_definition_calls_use_audited_language_rules() {
 
     let has_call = nodes.iter().any(|node| {
         service
-            .store()
+            .repository()
             .edges_from(&result.project.id, &node.id)
             .expect("Elixir edges")
             .iter()
@@ -252,7 +255,7 @@ fn audited_hybrid_lsp_languages_resolve_cross_file_calls() {
             ProjectRelativePath::new(fixture.caller_path).expect("caller path"),
         );
         let target_ids = service
-            .store()
+            .repository()
             .nodes_for_file(&target_file)
             .expect("target nodes")
             .into_iter()
@@ -266,13 +269,13 @@ fn audited_hybrid_lsp_languages_resolve_cross_file_calls() {
             fixture.target_name
         );
         let calls = service
-            .store()
+            .repository()
             .nodes_for_file(&caller_file)
             .expect("caller nodes")
             .into_iter()
             .flat_map(|node| {
                 service
-                    .store()
+                    .repository()
                     .edges_from(&result.project.id, &node.id)
                     .expect("caller edges")
             })
@@ -333,18 +336,18 @@ fn hybrid_relations_resolve_cross_file_inheritance_and_interfaces() {
         .expect("index relation fixtures");
     let mut resolved = BTreeSet::new();
     for node in service
-        .store()
+        .repository()
         .list_nodes(&result.project.id)
         .expect("project nodes")
     {
         for edge in service
-            .store()
+            .repository()
             .edges_from(&result.project.id, &node.id)
             .expect("relation edges")
         {
             if matches!(edge.kind.as_str(), "INHERITS" | "IMPLEMENTS") {
                 let target = service
-                    .store()
+                    .repository()
                     .get_node(&result.project.id, &edge.target)
                     .expect("target lookup")
                     .expect("relation target");
@@ -420,7 +423,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
             ProjectRelativePath::new(&relative_path).expect("fixture path"),
         );
         let nodes = service
-            .store()
+            .repository()
             .nodes_for_file(&file)
             .unwrap_or_else(|error| panic!("{} corpus nodes failed: {error}", fixture.language));
         if !nodes.iter().any(|node| node.label.as_str() == "File") {
@@ -443,7 +446,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
                 .entry(node.label.as_str().to_owned())
                 .or_default() += 1;
             for edge in service
-                .store()
+                .repository()
                 .edges_from(&result.project.id, &node.id)
                 .unwrap_or_else(|error| panic!("{} corpus edges failed: {error}", fixture.language))
             {

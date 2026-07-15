@@ -5,6 +5,7 @@ mod discovery;
 mod edit;
 mod edit_syntax;
 mod error;
+mod index;
 mod query;
 
 pub use crosslink::CrossLinkRepository;
@@ -22,6 +23,7 @@ pub use edit_syntax::{
     EditSyntaxNodeView, EditSyntaxPlan, EditSyntaxPlanRequest,
 };
 pub use error::PortError;
+pub use index::IndexRepository;
 pub use query::{
     ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, QueryRepository,
     STORED_VECTOR_DIM, SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,

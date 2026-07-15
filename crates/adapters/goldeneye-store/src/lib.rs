@@ -3,6 +3,7 @@
 mod adr;
 mod crosslink_port;
 mod edit_port;
+mod index_port;
 mod query_port;
 mod schema;
 

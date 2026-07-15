@@ -10,8 +10,7 @@ use goldeneye_domain::{
     DomainError, Generation, GraphIdentityError, ProjectId, ProjectRecord, ProjectRelativePath,
     SyntaxIdentityError,
 };
-use goldeneye_ports::{IndexMode, PortError, RepositoryDiscoveryOptions};
-use goldeneye_store::{GraphCounts, StoreError};
+use goldeneye_ports::{GraphCounts, IndexMode, PortError, RepositoryDiscoveryOptions};
 use goldeneye_syntax::{SyntaxDiagnostic, SyntaxError};
 use thiserror::Error;
 
@@ -119,8 +118,10 @@ pub enum IndexError {
     CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
     #[error(transparent)]
     Discovery(#[from] PortError),
-    #[error(transparent)]
-    Store(#[from] StoreError),
+    #[error("index repository error: {0}")]
+    Repository(PortError),
+    #[error("project not found: {0:?}")]
+    ProjectNotFound(ProjectId),
     #[error("I/O error for {path}: {source}")]
     Io {
         path: PathBuf,
