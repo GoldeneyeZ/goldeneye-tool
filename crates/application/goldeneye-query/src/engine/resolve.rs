@@ -11,20 +11,20 @@ pub(crate) enum ResolveMode {
     Callable,
 }
 
-pub(super) fn resolve_symbol_in_graph(
+pub(super) fn resolve_symbol_in_graph<'graph>(
     query: &str,
-    graph: &ProjectGraph,
+    graph: &'graph ProjectGraph,
     mode: ResolveMode,
-) -> Result<GraphNode, QueryError> {
+) -> Result<&'graph GraphNode, QueryError> {
     if let Some(node) = graph
         .nodes_by_qualified_name
         .get(query)
         .and_then(|index| graph.nodes.get(*index))
         .filter(|node| resolve_eligible(node, mode))
     {
-        return Ok(node.clone());
+        return Ok(node);
     }
-    resolve_symbol(query, &graph.nodes, &graph.degrees, mode)
+    resolve_symbol_ref(query, &graph.nodes, &graph.degrees, mode)
 }
 
 pub(crate) fn resolve_symbol(
@@ -33,13 +33,22 @@ pub(crate) fn resolve_symbol(
     degrees: &BTreeMap<NodeId, (usize, usize)>,
     mode: ResolveMode,
 ) -> Result<GraphNode, QueryError> {
+    resolve_symbol_ref(query, nodes, degrees, mode).cloned()
+}
+
+fn resolve_symbol_ref<'nodes>(
+    query: &str,
+    nodes: &'nodes [GraphNode],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    mode: ResolveMode,
+) -> Result<&'nodes GraphNode, QueryError> {
     let eligible = |node: &&GraphNode| resolve_eligible(node, mode);
     if let Some(node) = nodes
         .iter()
         .filter(eligible)
         .find(|node| node.qualified_name.as_str() == query)
     {
-        return Ok(node.clone());
+        return Ok(node);
     }
 
     let mut candidates: Vec<&GraphNode> = if is_qualified_fragment(query) {
@@ -61,7 +70,7 @@ pub(crate) fn resolve_symbol(
             .then_with(|| left.id.cmp(&right.id))
     });
     match candidates.as_slice() {
-        [node] => Ok((*node).clone()),
+        [node] => Ok(*node),
         [] => Err(QueryError::SymbolNotFound {
             query: query.to_owned(),
             suggestions: symbol_suggestions(query, nodes, degrees, mode),

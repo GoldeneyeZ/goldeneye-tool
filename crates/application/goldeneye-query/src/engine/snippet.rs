@@ -21,14 +21,14 @@ pub(super) fn execute(
     validate_limit("max_bytes", request.max_bytes, MAX_SNIPPET_BYTES)?;
     validate_limit("max_lines", request.max_lines, MAX_SNIPPET_LINES)?;
     let (symbol, file_path, span) = resolve_source_location(request, graph)?;
-    let file = indexed_file(repository, request, graph, &file_path)?;
-    let bytes = fresh_source(project, &file_path, &file)?;
-    let (source, start, end, line_count) = decode_snippet(&bytes, &symbol, span, request)?;
+    let file = indexed_file(repository, request, graph, file_path)?;
+    let bytes = fresh_source(project, file_path, &file)?;
+    let (source, start, end, line_count) = decode_snippet(&bytes, symbol, span, request)?;
     let start_line = span.start.row + 1;
     let end_line = start_line + u64::try_from(line_count.saturating_sub(1)).unwrap_or(u64::MAX);
     Ok(CodeSnippetResult {
         project: request.project.as_str().to_owned(),
-        symbol: node_summary(&symbol, None, &graph.degrees, Vec::new()),
+        symbol: node_summary(symbol, None, &graph.degrees, Vec::new()),
         source,
         file_path: file_path.as_str().to_owned(),
         start_byte: start,
@@ -39,14 +39,14 @@ pub(super) fn execute(
     })
 }
 
-fn resolve_source_location(
+fn resolve_source_location<'graph>(
     request: &CodeSnippetRequest,
-    graph: &ProjectGraph,
-) -> Result<(GraphNode, ProjectRelativePath, SourceSpan), QueryError> {
+    graph: &'graph ProjectGraph,
+) -> Result<(&'graph GraphNode, &'graph ProjectRelativePath, SourceSpan), QueryError> {
     let symbol = resolve_symbol_in_graph(&request.qualified_name, graph, ResolveMode::Any)?;
     let file_path = symbol
         .file_path
-        .clone()
+        .as_ref()
         .ok_or_else(|| QueryError::SourceFileUnavailable {
             qualified_name: symbol.qualified_name.as_str().to_owned(),
         })?;

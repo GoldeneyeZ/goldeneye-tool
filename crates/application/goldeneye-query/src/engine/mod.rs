@@ -159,10 +159,10 @@ impl QueryEngine {
         }
         let origin =
             resolve_symbol_in_graph(&request.function_name, &graph, ResolveMode::Callable)?;
-        let (paths, truncated) = trace_breadth_first(&origin, &graph, request);
+        let (paths, truncated) = trace_breadth_first(origin, &graph, request);
         let result = TracePathResult {
             project: request.project.as_str().to_owned(),
-            origin: node_summary(&origin, None, &graph.degrees, Vec::new()),
+            origin: node_summary(origin, None, &graph.degrees, Vec::new()),
             direction: request.direction,
             paths,
             truncated,
