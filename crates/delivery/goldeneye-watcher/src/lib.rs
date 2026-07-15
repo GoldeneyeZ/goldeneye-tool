@@ -8,16 +8,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use goldeneye_artifact::FileArtifactPersistence;
-use goldeneye_discovery::FileSystemDiscovery;
-use goldeneye_domain::ProjectId;
-use goldeneye_git::GitCommandRepository;
-use goldeneye_services::{
-    IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
-};
-use goldeneye_store::{SqliteRepositoryFactory, Store};
-use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
-use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -26,18 +16,6 @@ pub const DEFAULT_POLL_MAX: Duration = Duration::from_mins(1);
 pub const DEFAULT_FILE_STEP: usize = 500;
 pub const DEFAULT_PRUNE_GRACE: Duration = Duration::from_mins(10);
 pub const DEFAULT_MISSING_POLLS: u32 = 3;
-
-fn service_dependencies() -> ServiceDependencies {
-    let discovery = Arc::new(FileSystemDiscovery);
-    ServiceDependencies::new(
-        Arc::new(FileArtifactPersistence),
-        Arc::new(GitCommandRepository),
-        discovery,
-        Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
-    )
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatcherConfig {
@@ -90,57 +68,6 @@ pub trait Indexer: Send + Sync + 'static {
 pub enum IndexDisposition {
     Indexed,
     Busy,
-}
-
-pub struct ServiceIndexer {
-    config: ServiceConfig,
-    busy: AtomicBool,
-}
-
-impl ServiceIndexer {
-    #[must_use]
-    pub const fn new(config: ServiceConfig) -> Self {
-        Self {
-            config,
-            busy: AtomicBool::new(false),
-        }
-    }
-}
-
-impl Indexer for ServiceIndexer {
-    fn index(&self, project: &str, root: &Path) -> Result<IndexDisposition, String> {
-        if self
-            .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Ok(IndexDisposition::Busy);
-        }
-        let result = Services::new(self.config.clone(), service_dependencies()).index_repository(
-            &IndexRepositoryRequest {
-                repo_path: root.to_owned(),
-                name: Some(project.to_owned()),
-                mode: IndexRepositoryMode::Fast,
-                persistence: false,
-            },
-        );
-        self.busy.store(false, Ordering::Release);
-        result.map_err(|error| error.to_string())?;
-        Ok(IndexDisposition::Indexed)
-    }
-
-    fn prune(&self, project: &str, _root: &Path) -> Result<(), String> {
-        if !self.config.database_path().is_file() {
-            return Ok(());
-        }
-        let project = ProjectId::new(project).map_err(|error| error.to_string())?;
-        let mut store =
-            Store::open(self.config.database_path()).map_err(|error| error.to_string())?;
-        store
-            .delete_project(&project)
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

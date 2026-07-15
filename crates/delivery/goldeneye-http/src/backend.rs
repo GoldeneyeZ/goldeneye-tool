@@ -6,18 +6,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use goldeneye_artifact::FileArtifactPersistence;
-use goldeneye_discovery::FileSystemDiscovery;
+use goldeneye_bootstrap::{ServiceIndexer, service_dependencies};
 use goldeneye_domain::{GraphEdge, GraphNode, ProjectId};
-use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
-use goldeneye_services::{
-    IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
-};
-use goldeneye_store::{QueryStore, SqliteRepositoryFactory, Store};
-use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
-use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
-use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
+use goldeneye_services::{IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, Services};
+use goldeneye_store::{QueryStore, Store};
+use goldeneye_watcher::{WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
@@ -26,18 +20,6 @@ const MAX_LAYOUT_NODES: usize = 250_000;
 const DEFAULT_LAYOUT_NODES: usize = 5_000;
 const MAX_LOG_LINES: usize = 2_000;
 const LOG_CAPACITY: usize = 4_096;
-
-fn service_dependencies() -> ServiceDependencies {
-    let discovery = Arc::new(FileSystemDiscovery);
-    ServiceDependencies::new(
-        Arc::new(FileArtifactPersistence),
-        Arc::new(GitCommandRepository),
-        discovery,
-        Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
-    )
-}
 
 pub trait ApiBackend: Send + Sync + 'static {
     /// # Errors
@@ -115,6 +97,7 @@ impl ApiError {
 
 pub struct GoldeneyeBackend {
     config: ServiceConfig,
+    services: Services,
     rpc: Server,
     jobs: Arc<Mutex<Vec<IndexJob>>>,
     logs: Arc<Mutex<VecDeque<String>>>,
@@ -126,9 +109,10 @@ pub struct GoldeneyeBackend {
 impl GoldeneyeBackend {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
+        let services = Services::new(config.clone(), service_dependencies());
         let watcher = Arc::new(Watcher::new(
             WatcherConfig::default(),
-            ServiceIndexer::new(config.clone()),
+            ServiceIndexer::new(services.clone()),
         ));
         if config.database_path().is_file()
             && let Ok(store) = Store::open_read_only(config.database_path())
@@ -140,8 +124,9 @@ impl GoldeneyeBackend {
         }
         let watcher_runtime = watcher.spawn().ok();
         Self {
-            rpc: Server::new(Services::new(config.clone(), service_dependencies())),
+            rpc: Server::new(services.clone()),
             config,
+            services,
             jobs: Arc::new(Mutex::new(Vec::new())),
             logs: Arc::new(Mutex::new(VecDeque::new())),
             watcher,
@@ -298,18 +283,17 @@ impl GoldeneyeBackend {
         let jobs = Arc::clone(&self.jobs);
         let logs = Arc::clone(&self.logs);
         let watcher = Arc::clone(&self.watcher);
-        let config = self.config.clone();
+        let services = self.services.clone();
         let thread_root = root.clone();
         thread::Builder::new()
             .name(format!("goldeneye-index-{slot}"))
             .spawn(move || {
-                let result = Services::new(config.clone(), service_dependencies())
-                    .index_repository(&IndexRepositoryRequest {
-                        repo_path: thread_root.clone(),
-                        name: name_override,
-                        mode: body.mode,
-                        persistence: body.persistence || persistence_enabled(),
-                    });
+                let result = services.index_repository(&IndexRepositoryRequest {
+                    repo_path: thread_root.clone(),
+                    name: name_override,
+                    mode: body.mode,
+                    persistence: body.persistence || persistence_enabled(),
+                });
                 let (status, error) = match &result {
                     Ok(indexed) => {
                         let _ = watcher.watch(&indexed.project, &thread_root);

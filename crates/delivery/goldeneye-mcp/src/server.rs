@@ -1,22 +1,17 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
-use goldeneye_artifact::FileArtifactPersistence;
-use goldeneye_discovery::FileSystemDiscovery;
-use goldeneye_git::GitCommandRepository;
+use goldeneye_bootstrap::{ServiceIndexer, service_dependencies};
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
     IndexRepositoryRequest, IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest,
     ManageAdrRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
     QueryGraphRequest, QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest,
-    SemanticSearchRequest, ServiceConfig, ServiceDependencies, ServiceError, ServiceErrorCode,
-    Services, TraceDirection, TracePathRequest,
+    SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
+    TracePathRequest,
 };
-use goldeneye_store::SqliteRepositoryFactory;
-use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
-use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
-use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
+use goldeneye_watcher::{WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -27,18 +22,6 @@ use crate::tools::{ToolCallResult, ToolRegistry};
 pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
     ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 pub const LATEST_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
-
-fn service_dependencies() -> ServiceDependencies {
-    let discovery = Arc::new(FileSystemDiscovery);
-    ServiceDependencies::new(
-        Arc::new(FileArtifactPersistence),
-        Arc::new(GitCommandRepository),
-        discovery,
-        Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
-    )
-}
 
 fn negotiated_protocol_version(params: &Value) -> &'static str {
     params
@@ -66,7 +49,7 @@ impl Server {
     pub fn new(services: Services) -> Self {
         let watcher = Arc::new(Watcher::new(
             WatcherConfig::default(),
-            ServiceIndexer::new(services.config().clone()),
+            ServiceIndexer::new(services.clone()),
         ));
         if let Ok(projects) = services.list_projects() {
             for project in projects {

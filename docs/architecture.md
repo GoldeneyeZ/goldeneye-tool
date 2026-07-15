@@ -26,7 +26,8 @@ domain <- ports <- application <- delivery
 - **Adapters** implement ports for SQLite, source discovery, syntax grammars,
   Git, artifacts, and other external mechanisms.
 - **Delivery** translates CLI, MCP, HTTP, and watcher events into application
-  requests and composes concrete adapters.
+  requests. `goldeneye-bootstrap` owns concrete adapter composition, while
+  `goldeneye-watcher` remains generic over its indexing boundary.
 
 Delivery may depend on every inner layer. Adapters and application are sibling
 branches joined through ports; neither may depend on the other.

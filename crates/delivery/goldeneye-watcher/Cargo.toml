@@ -6,14 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
-goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
-goldeneye-domain = { path = "../../domain/goldeneye-domain" }
-goldeneye-git = { path = "../../adapters/goldeneye-git" }
-goldeneye-services = { path = "../../application/goldeneye-services" }
-goldeneye-store = { path = "../../adapters/goldeneye-store" }
-goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
-goldeneye-tree-sitter-index = { path = "../../adapters/goldeneye-tree-sitter-index" }
 sha2.workspace = true
 thiserror.workspace = true
 
