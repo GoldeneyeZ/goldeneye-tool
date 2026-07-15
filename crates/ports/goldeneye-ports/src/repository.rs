@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    CrossLinkRepository, EditRepository, IndexRepository, PortError,
+    AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository, PortError,
     ProjectAdministrationRepository, QueryRepository,
 };
 
@@ -51,4 +51,11 @@ pub trait RepositoryFactory: Send + Sync {
         &self,
         path: &Path,
     ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError>;
+
+    /// Opens a writable repository for ADR and runtime-trace persistence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an adapter error when the repository cannot be opened or migrated.
+    fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError>;
 }

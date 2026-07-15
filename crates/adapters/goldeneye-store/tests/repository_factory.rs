@@ -1,7 +1,7 @@
 use goldeneye_domain::{Generation, ProjectId, ProjectRecord};
 use goldeneye_ports::{
-    CrossLinkRepository, EditRepository, IndexRepository, ProjectAdministrationRepository,
-    QueryRepository, RepositoryFactory,
+    AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository,
+    ProjectAdministrationRepository, QueryRepository, RepositoryFactory, RuntimeTraceObservation,
 };
 use goldeneye_store::SqliteRepositoryFactory;
 
@@ -37,6 +37,40 @@ fn delete_project(
     project: &ProjectId,
 ) -> bool {
     repository.delete_project(project).expect("delete project")
+}
+
+fn roundtrip_adr(repository: &mut impl AdrTraceRepository, project: &ProjectId) {
+    repository
+        .store_adr(project, "## PURPOSE\nFactory port")
+        .expect("store ADR");
+    assert_eq!(
+        repository
+            .get_adr(project)
+            .expect("read ADR")
+            .expect("ADR")
+            .content,
+        "## PURPOSE\nFactory port"
+    );
+    assert_eq!(
+        repository
+            .ingest_runtime_traces(
+                project,
+                &[
+                    RuntimeTraceObservation {
+                        caller: "caller".to_owned(),
+                        callee: "callee".to_owned(),
+                        count: 2,
+                    },
+                    RuntimeTraceObservation {
+                        caller: "caller".to_owned(),
+                        callee: "callee".to_owned(),
+                        count: 3,
+                    },
+                ],
+            )
+            .expect("ingest runtime traces"),
+        2
+    );
 }
 
 #[test]
@@ -98,10 +132,25 @@ fn factory_boxes_forward_repository_ports_and_edit_opens_are_independent() {
         .open_query(&database)
         .expect("open query repository");
     assert_eq!(query_project_count(&query), 1);
+    let mut adr_traces = factory
+        .open_adr_traces(&database)
+        .expect("open ADR/runtime repository");
+    roundtrip_adr(&mut adr_traces, &project_id);
     let mut administration = factory
         .open_project_administration(&database)
         .expect("open project administration repository");
     assert!(delete_project(&mut administration, &project_id));
     assert!(!delete_project(&mut administration, &project_id));
     assert_eq!(query_project_count(&query), 0);
+    let error = adr_traces
+        .ingest_runtime_traces(
+            &project_id,
+            &[RuntimeTraceObservation {
+                caller: String::new(),
+                callee: String::new(),
+                count: 0,
+            }],
+        )
+        .expect_err("missing project must precede trace validation");
+    assert!(error.to_string().contains("project not found"), "{error}");
 }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
+use goldeneye_ports::RuntimeTraceObservation;
 use goldeneye_query::QueryError;
-use goldeneye_store::{RuntimeTrace, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -76,16 +76,26 @@ impl Services {
     /// Returns a typed project, path-policy, or storage error.
     pub fn manage_adr(&self, request: &ManageAdrRequest) -> Result<ManageAdrResult, ServiceError> {
         let (project, root) = self.project_and_root_for_reference(&request.project)?;
-        let mut store = Store::open(self.config().database_path())?;
-        let mut adr = store.get_adr(&project)?;
+        let mut repository = self
+            .dependencies
+            .repositories()
+            .open_adr_traces(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
+        let mut adr = repository
+            .get_adr(&project)
+            .map_err(ServiceError::Repository)?;
         if adr.is_none() {
             let legacy_path = root.join(".codebase-memory").join("adr.md");
             if let Ok(bytes) = std::fs::read(legacy_path)
                 && !bytes.is_empty()
             {
                 let legacy = String::from_utf8_lossy(&bytes).into_owned();
-                store.store_adr(&project, &legacy)?;
-                adr = store.get_adr(&project)?;
+                repository
+                    .store_adr(&project, &legacy)
+                    .map_err(ServiceError::Repository)?;
+                adr = repository
+                    .get_adr(&project)
+                    .map_err(ServiceError::Repository)?;
             }
         }
 
@@ -93,7 +103,9 @@ impl Services {
         if matches!(mode, "update" | "store")
             && let Some(content) = request.content.as_deref()
         {
-            store.store_adr(&project, content)?;
+            repository
+                .store_adr(&project, content)
+                .map_err(ServiceError::Repository)?;
             return Ok(ManageAdrResult {
                 status: Some("updated".to_owned()),
                 ..ManageAdrResult::default()
@@ -134,9 +146,15 @@ impl Services {
         request: &IngestTracesRequest,
     ) -> Result<IngestTracesResult, ServiceError> {
         self.adr_project_root(&request.project)?;
-        let mut store = Store::open(self.config().database_path())?;
+        let mut repository = self
+            .dependencies
+            .repositories()
+            .open_adr_traces(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
         let traces = parse_runtime_traces(&request.traces);
-        store.ingest_runtime_traces(&request.project, &traces)?;
+        repository
+            .ingest_runtime_traces(&request.project, &traces)
+            .map_err(ServiceError::Repository)?;
         Ok(IngestTracesResult {
             status: "accepted",
             traces_received: request.traces.len(),
@@ -201,7 +219,7 @@ impl Services {
 }
 
 #[must_use]
-pub fn parse_runtime_traces(values: &[Value]) -> Vec<RuntimeTrace> {
+pub fn parse_runtime_traces(values: &[Value]) -> Vec<RuntimeTraceObservation> {
     values
         .iter()
         .take(MAX_PERSISTED_TRACE_BATCH)
@@ -209,12 +227,14 @@ pub fn parse_runtime_traces(values: &[Value]) -> Vec<RuntimeTrace> {
         .collect()
 }
 
-fn parse_runtime_trace(value: &Value) -> Option<RuntimeTrace> {
+fn parse_runtime_trace(value: &Value) -> Option<RuntimeTraceObservation> {
     let object = value.as_object()?;
     let source = object.get("caller")?.as_str()?;
     let target = object.get("callee")?.as_str()?;
     if source.is_empty()
         || target.is_empty()
+        || source.contains('\0')
+        || target.contains('\0')
         || source.len() > MAX_TRACE_ENDPOINT_BYTES
         || target.len() > MAX_TRACE_ENDPOINT_BYTES
     {
@@ -224,7 +244,11 @@ fn parse_runtime_trace(value: &Value) -> Option<RuntimeTrace> {
     if count == 0 || count > i64::MAX.cast_unsigned() {
         return None;
     }
-    RuntimeTrace::new(source, target, count).ok()
+    Some(RuntimeTraceObservation {
+        caller: source.to_owned(),
+        callee: target.to_owned(),
+        count,
+    })
 }
 
 fn adr_headers(content: Option<&str>) -> Vec<String> {

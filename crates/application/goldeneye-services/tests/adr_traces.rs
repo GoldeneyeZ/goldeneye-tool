@@ -188,10 +188,11 @@ fn trace_ingestion_is_bounded_skips_partial_items_and_persists_valid_edges() {
                 json!({"caller": "valid", "callee": "edge"}),
                 json!({"caller": "valid", "callee": "edge", "count": 4}),
                 json!({"caller": "", "callee": "ignored"}),
+                json!({"caller": "contains\0nul", "callee": "ignored"}),
             ],
         })
         .expect("partial traces remain accepted");
-    assert_eq!(partial.traces_received, 5);
+    assert_eq!(partial.traces_received, 6);
 
     let persisted = Store::open_read_only(&database)
         .expect("store")

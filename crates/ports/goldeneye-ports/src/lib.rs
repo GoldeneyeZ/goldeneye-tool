@@ -1,5 +1,6 @@
 //! Application-owned interfaces for external mechanisms.
 
+mod adr_traces;
 mod artifact;
 mod crosslink;
 mod discovery;
@@ -14,6 +15,7 @@ mod project_administration;
 mod query;
 mod repository;
 
+pub use adr_traces::{AdrDocument, AdrTraceRepository, RuntimeTraceObservation};
 pub use artifact::ArtifactPersistence;
 pub use crosslink::CrossLinkRepository;
 pub use discovery::{

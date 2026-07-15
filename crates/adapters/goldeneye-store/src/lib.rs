@@ -1,6 +1,7 @@
 //! `SQLite` persistence for Goldeneye's tool-neutral code graph.
 
 mod adr;
+mod adr_traces_port;
 mod crosslink_port;
 mod edit_port;
 mod index_port;

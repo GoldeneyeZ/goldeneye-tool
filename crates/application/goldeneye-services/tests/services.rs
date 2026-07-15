@@ -12,18 +12,19 @@ use goldeneye_domain::{
 };
 use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
-    ArtifactPersistence, CrossLinkRepository, DetectChangesOptions, DetectedChanges,
-    EditRepository, GitContext, GitHistory, GitPortError, GitRepository, IndexRepository,
-    LanguageClassifier, PortError, ProjectAdministrationRepository, QueryRepository,
-    RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
+    AdrTraceRepository, ArtifactPersistence, CrossLinkRepository, DetectChangesOptions,
+    DetectedChanges, EditRepository, GitContext, GitHistory, GitPortError, GitRepository,
+    IndexRepository, LanguageClassifier, PortError, ProjectAdministrationRepository,
+    QueryRepository, RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport,
+    RepositoryFactory,
 };
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult,
-    IndexStatusRequest, InspectSyntaxRequest, LanguageId, NodeContentRequest, OperationHooks,
-    PageRequest, ProjectId, ProjectRelativePath, QueryGraphRequest, SearchCodeRequest,
-    SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode,
-    Services, TraceDirection, TracePathRequest,
+    IndexStatusRequest, InspectSyntaxRequest, LanguageId, ManageAdrRequest, NodeContentRequest,
+    OperationHooks, PageRequest, ProjectId, ProjectRelativePath, QueryGraphRequest,
+    SearchCodeRequest, SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies,
+    ServiceErrorCode, Services, TraceDirection, TracePathRequest,
 };
 use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
@@ -49,6 +50,8 @@ struct RecordingSourceDiscovery {
 }
 
 struct FailingRepositoryFactory;
+
+struct FailingAdrTraceFactory;
 
 struct FailSecondCrosslinkFactory;
 
@@ -84,6 +87,43 @@ impl RepositoryFactory for FailingRepositoryFactory {
     ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
         Err(repository_failure())
     }
+
+    fn open_adr_traces(&self, _path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        Err(repository_failure())
+    }
+}
+
+impl RepositoryFactory for FailingAdrTraceFactory {
+    fn initialize(&self, path: &Path) -> Result<(), PortError> {
+        RepositoryFactory::initialize(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_query(&self, path: &Path) -> Result<Box<dyn QueryRepository>, PortError> {
+        RepositoryFactory::open_query(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_index(&self, path: &Path) -> Result<Box<dyn IndexRepository>, PortError> {
+        RepositoryFactory::open_index(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_edit(&self, path: &Path) -> Result<Box<dyn EditRepository>, PortError> {
+        RepositoryFactory::open_edit(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
+        RepositoryFactory::open_crosslink(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        RepositoryFactory::open_project_administration(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_adr_traces(&self, _path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        Err(repository_failure())
+    }
 }
 
 impl RepositoryFactory for FailSecondCrosslinkFactory {
@@ -115,6 +155,10 @@ impl RepositoryFactory for FailSecondCrosslinkFactory {
         path: &Path,
     ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
         RepositoryFactory::open_project_administration(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
     }
 }
 
@@ -561,6 +605,44 @@ fn repository_factory_failures_keep_repository_storage_classification_and_messag
         goldeneye_services::ServiceError::Repository(_)
     ));
     assert_eq!(delete_error.to_string(), "repository factory failed");
+}
+
+#[test]
+fn adr_repository_failures_keep_repository_storage_classification_and_message() {
+    let temp = TempDir::new().expect("temp directory");
+    let database = temp.path().join("graph.db");
+    let root = temp.path().join("project");
+    fs::create_dir(&root).expect("project root");
+    let project = ProjectId::new("adr-failure").expect("project ID");
+    let mut store = Store::open(&database).expect("store");
+    store
+        .register_project(
+            &ProjectRecord::new(project.clone(), root.to_string_lossy()).expect("project"),
+        )
+        .expect("register project");
+    drop(store);
+    let services = Services::new(
+        ServiceConfig::new(&database, temp.path()).with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+            Arc::new(FailingAdrTraceFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+    );
+
+    let error = services
+        .manage_adr(&ManageAdrRequest::new(&project))
+        .expect_err("ADR repository open must fail");
+
+    assert_eq!(error.code(), ServiceErrorCode::Storage);
+    assert!(matches!(
+        &error,
+        goldeneye_services::ServiceError::Repository(_)
+    ));
+    assert_eq!(error.to_string(), "repository factory failed");
 }
 
 #[test]

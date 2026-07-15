@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use goldeneye_ports::{
-    CrossLinkRepository, EditRepository, IndexRepository, PortError,
+    AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository, PortError,
     ProjectAdministrationRepository, QueryRepository, RepositoryFactory,
 };
 
@@ -47,6 +47,12 @@ impl RepositoryFactory for SqliteRepositoryFactory {
     ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
         Store::open(path)
             .map(|repository| Box::new(repository) as Box<dyn ProjectAdministrationRepository>)
+            .map_err(PortError::new)
+    }
+
+    fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        Store::open(path)
+            .map(|repository| Box::new(repository) as Box<dyn AdrTraceRepository>)
             .map_err(PortError::new)
     }
 }
