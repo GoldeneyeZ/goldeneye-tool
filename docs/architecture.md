@@ -46,17 +46,13 @@ Crates remain feature-focused inside a layer. Five layers do not imply five
 monolithic crates. Merge a crate only when its separate lifecycle or public
 boundary has no demonstrated value.
 
-## Current Migration Debt
+## Migration Status
 
-`Cargo.toml` records temporary application-to-adapter exceptions. Each entry
-must correspond to a real forbidden dependency; stale or newly introduced
-violations fail `cargo xtask architecture verify`.
-
-Current debt is concentrated in:
-
-- orchestration -> SQLite store for remaining Git-history/impact paths. Project administration,
-  ADR/runtime, semantic-index, index, query, edit, and cross-link repository construction now enters
-  through the application-owned `RepositoryFactory` port.
+The workspace currently requires no application-to-adapter migration exceptions.
+Project administration, ADR/runtime, semantic-index, Git-history/impact, index,
+query, edit, and cross-link repository construction enters through the
+application-owned `RepositoryFactory` port. Any newly introduced forbidden
+dependency fails `cargo xtask architecture verify`.
 
 ## Migration Plan
 

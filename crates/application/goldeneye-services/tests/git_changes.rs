@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -9,24 +10,83 @@ use goldeneye_domain::{
     ProjectId, ProjectRecord, ProjectRelativePath, QualifiedName,
 };
 use goldeneye_git::GitCommandRepository;
+use goldeneye_ports::{
+    AdrTraceRepository, CrossLinkRepository, EditRepository, GitHistoryRepository, IndexRepository,
+    PortError, ProjectAdministrationRepository, QueryRepository, RepositoryFactory,
+    SemanticIndexRepository,
+};
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, DetectChangesRequest, ServiceConfig,
-    ServiceDependencies, Services,
+    ServiceDependencies, ServiceErrorCode, Services,
 };
 use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 
 fn service_dependencies() -> ServiceDependencies {
+    service_dependencies_with_repositories(Arc::new(SqliteRepositoryFactory))
+}
+
+fn service_dependencies_with_repositories(
+    repositories: Arc<dyn RepositoryFactory>,
+) -> ServiceDependencies {
     let discovery = Arc::new(FileSystemDiscovery);
     ServiceDependencies::new(
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
-        Arc::new(SqliteRepositoryFactory),
+        repositories,
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
+}
+
+struct FailingGitHistoryFactory;
+
+impl RepositoryFactory for FailingGitHistoryFactory {
+    fn initialize(&self, path: &Path) -> Result<(), PortError> {
+        RepositoryFactory::initialize(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_query(&self, path: &Path) -> Result<Box<dyn QueryRepository>, PortError> {
+        RepositoryFactory::open_query(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_index(&self, path: &Path) -> Result<Box<dyn IndexRepository>, PortError> {
+        RepositoryFactory::open_index(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_edit(&self, path: &Path) -> Result<Box<dyn EditRepository>, PortError> {
+        RepositoryFactory::open_edit(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
+        RepositoryFactory::open_crosslink(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        RepositoryFactory::open_project_administration(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_git_history(&self, _path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        Err(PortError::new(std::io::Error::other(
+            "Git-history repository unavailable",
+        )))
+    }
+
+    fn open_semantic_index(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        RepositoryFactory::open_semantic_index(&SqliteRepositoryFactory, path)
+    }
 }
 
 fn git(root: &std::path::Path, args: &[&str]) {
@@ -159,7 +219,7 @@ fn history_enrichment_and_change_blast_radius_are_end_to_end() {
     assert!(names.contains(&"a"));
     assert!(names.contains(&"b"));
 
-    let mut files_only = DetectChangesRequest::new(project_id);
+    let mut files_only = DetectChangesRequest::new(project_id.clone());
     files_only.scope = Some("files".to_owned());
     assert!(
         services
@@ -167,5 +227,47 @@ fn history_enrichment_and_change_blast_radius_are_end_to_end() {
             .expect("files only")
             .impacted_symbols
             .is_empty()
+    );
+
+    assert_failed_refresh_preserves_cache(&repo, &database, &project_id, &token);
+}
+
+fn assert_failed_refresh_preserves_cache(
+    repo: &Path,
+    database: &Path,
+    project_id: &ProjectId,
+    token: &CancellationToken,
+) {
+    let failing_services = Services::new(
+        ServiceConfig::new(database, repo),
+        service_dependencies_with_repositories(Arc::new(FailingGitHistoryFactory)),
+    );
+    assert_eq!(
+        failing_services
+            .get_architecture(&ArchitectureRequest::new(project_id.clone()))
+            .expect("warm architecture before failed refresh")
+            .total_edges,
+        2
+    );
+    let error = failing_services
+        .refresh_git_history(project_id, token)
+        .expect_err("Git-history repository failure");
+    assert_eq!(error.code(), ServiceErrorCode::Storage);
+    assert!(
+        error
+            .to_string()
+            .contains("Git-history repository unavailable"),
+        "{error}"
+    );
+    Store::open(database)
+        .expect("store after failed refresh")
+        .replace_git_history(project_id, &[], &[])
+        .expect("remove Git enrichment outside services");
+    assert_eq!(
+        failing_services
+            .get_architecture(&ArchitectureRequest::new(project_id.clone()))
+            .expect("failed refresh preserves warm architecture cache")
+            .total_edges,
+        2
     );
 }

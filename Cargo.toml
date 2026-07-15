@@ -5,9 +5,7 @@ resolver = "3"
 [workspace.metadata.architecture]
 layers = ["domain", "ports", "application", "adapters", "delivery"]
 excluded = ["xtask"]
-exceptions = [
-    "goldeneye-services->goldeneye-store",
-]
+exceptions = []
 
 [workspace.metadata.architecture.packages]
 goldeneye-domain = "domain"

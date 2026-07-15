@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use goldeneye_ports::{
-    AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository, PortError,
-    ProjectAdministrationRepository, QueryRepository, RepositoryFactory, SemanticIndexRepository,
+    AdrTraceRepository, CrossLinkRepository, EditRepository, GitHistoryRepository, IndexRepository,
+    PortError, ProjectAdministrationRepository, QueryRepository, RepositoryFactory,
+    SemanticIndexRepository,
 };
 
 use crate::Store;
@@ -53,6 +54,12 @@ impl RepositoryFactory for SqliteRepositoryFactory {
     fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         Store::open(path)
             .map(|repository| Box::new(repository) as Box<dyn AdrTraceRepository>)
+            .map_err(PortError::new)
+    }
+
+    fn open_git_history(&self, path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        Store::open(path)
+            .map(|repository| Box::new(repository) as Box<dyn GitHistoryRepository>)
             .map_err(PortError::new)
     }
 

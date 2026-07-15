@@ -13,9 +13,9 @@ use goldeneye_domain::{
 use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
     AdrTraceRepository, ArtifactPersistence, CrossLinkRepository, DetectChangesOptions,
-    DetectedChanges, EditRepository, GitContext, GitHistory, GitPortError, GitRepository,
-    IndexRepository, LanguageClassifier, NodeSignatureRecord, NodeVectorRecord, PortError,
-    ProjectAdministrationRepository, QueryRepository, RepositoryDiscovery,
+    DetectedChanges, EditRepository, GitContext, GitHistory, GitHistoryRepository, GitPortError,
+    GitRepository, IndexRepository, LanguageClassifier, NodeSignatureRecord, NodeVectorRecord,
+    PortError, ProjectAdministrationRepository, QueryRepository, RepositoryDiscovery,
     RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
     SemanticIndexRepository, TokenVectorRecord,
 };
@@ -107,6 +107,10 @@ impl RepositoryFactory for FailingRepositoryFactory {
         Err(repository_failure())
     }
 
+    fn open_git_history(&self, _path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        Err(repository_failure())
+    }
+
     fn open_semantic_index(
         &self,
         _path: &Path,
@@ -145,6 +149,10 @@ impl RepositoryFactory for FailingAdrTraceFactory {
 
     fn open_adr_traces(&self, _path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         Err(repository_failure())
+    }
+
+    fn open_git_history(&self, path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        RepositoryFactory::open_git_history(&SqliteRepositoryFactory, path)
     }
 
     fn open_semantic_index(
@@ -190,6 +198,10 @@ impl RepositoryFactory for FailSecondCrosslinkFactory {
         RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
     }
 
+    fn open_git_history(&self, path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        RepositoryFactory::open_git_history(&SqliteRepositoryFactory, path)
+    }
+
     fn open_semantic_index(
         &self,
         path: &Path,
@@ -229,6 +241,10 @@ impl RepositoryFactory for RecordingSemanticFactory {
 
     fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_git_history(&self, path: &Path) -> Result<Box<dyn GitHistoryRepository>, PortError> {
+        RepositoryFactory::open_git_history(&SqliteRepositoryFactory, path)
     }
 
     fn open_semantic_index(

@@ -4,6 +4,7 @@ mod adr;
 mod adr_traces_port;
 mod crosslink_port;
 mod edit_port;
+mod git_history_port;
 mod index_port;
 mod project_administration_port;
 mod query_port;
@@ -34,8 +35,9 @@ pub use adr::{
     ADR_MAX_LENGTH, ADR_MAX_SECTIONS, AdrSection, parse_adr_sections, render_adr_sections,
 };
 pub use goldeneye_ports::{
-    ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, STORED_VECTOR_DIM,
-    SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,
+    ConnectionSettings, GitCoChangeRecord, GitFileHistoryRecord, GitHistoryOutcome, GraphCounts,
+    NodeSignatureRecord, NodeVectorRecord, STORED_VECTOR_DIM, SchemaInfo, SearchHit, StoredVector,
+    TokenVectorRecord,
 };
 pub use repository_factory::SqliteRepositoryFactory;
 pub use schema::CURRENT_SCHEMA_VERSION;
@@ -207,30 +209,6 @@ pub struct RuntimeTraceRecord {
     pub count: u64,
     pub created_at: String,
     pub updated_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitFileHistoryRecord {
-    pub path: ProjectRelativePath,
-    pub change_count: u64,
-    pub last_modified: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct GitCoChangeRecord {
-    pub file_a: ProjectRelativePath,
-    pub file_b: ProjectRelativePath,
-    pub co_changes: u64,
-    pub coupling_score: f64,
-    pub last_co_change: i64,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GitHistoryOutcome {
-    pub files: usize,
-    pub couplings: usize,
-    pub enriched_files: usize,
-    pub enriched_edges: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

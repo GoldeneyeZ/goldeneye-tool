@@ -8,6 +8,7 @@ mod edit;
 mod edit_syntax;
 mod error;
 mod git;
+mod git_history;
 mod index;
 mod index_syntax;
 mod inspection;
@@ -37,6 +38,9 @@ pub use error::PortError;
 pub use git::{
     DetectChangesOptions, DetectedChanges, GitCoChange, GitContext, GitFailure, GitFileHistory,
     GitHistory, GitPortError, GitRepository,
+};
+pub use git_history::{
+    GitCoChangeRecord, GitFileHistoryRecord, GitHistoryOutcome, GitHistoryRepository,
 };
 pub use index::IndexRepository;
 pub use index_syntax::{

@@ -1,8 +1,9 @@
-use goldeneye_domain::{Generation, ProjectId, ProjectRecord};
+use goldeneye_domain::{FileId, Generation, NodeId, ProjectId, ProjectRecord, ProjectRelativePath};
 use goldeneye_ports::{
-    AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository,
-    ProjectAdministrationRepository, QueryRepository, RepositoryFactory, RuntimeTraceObservation,
-    SemanticIndexRepository, StoredVector, TokenVectorRecord,
+    AdrTraceRepository, CrossLinkRepository, EditRepository, GitHistoryOutcome,
+    GitHistoryRepository, IndexRepository, ProjectAdministrationRepository, QueryRepository,
+    RepositoryFactory, RuntimeTraceObservation, SemanticIndexRepository, StoredVector,
+    TokenVectorRecord,
 };
 use goldeneye_store::SqliteRepositoryFactory;
 
@@ -83,6 +84,42 @@ fn replace_semantic_tokens(
     repository
         .replace_semantic_index(project, generation, &[], token_vectors, &[])
         .expect("replace semantic index");
+}
+
+fn exercise_git_history_box(
+    repository: &mut impl GitHistoryRepository,
+    project: &ProjectId,
+) -> GitHistoryOutcome {
+    let path = ProjectRelativePath::new("src/lib.rs").expect("project-relative path");
+    let node = NodeId::new("missing").expect("node ID");
+    let outcome = repository
+        .replace_git_history(project, &[], &[])
+        .expect("replace Git history");
+    assert!(
+        repository
+            .coupled_files(project, &path)
+            .expect("query couplings")
+            .is_empty()
+    );
+    assert!(
+        repository
+            .nodes_for_file(&FileId::new(project.clone(), path))
+            .expect("query file nodes")
+            .is_empty()
+    );
+    assert!(
+        repository
+            .edges_to(project, &node)
+            .expect("query inbound edges")
+            .is_empty()
+    );
+    assert!(
+        repository
+            .get_node(project, &node)
+            .expect("query node")
+            .is_none()
+    );
+    outcome
 }
 
 #[test]
@@ -175,6 +212,13 @@ fn factory_boxes_forward_repository_ports_and_edit_opens_are_independent() {
         .open_adr_traces(&database)
         .expect("open ADR/runtime repository");
     roundtrip_adr(&mut adr_traces, &project_id);
+    let mut git_history = factory
+        .open_git_history(&database)
+        .expect("open Git-history repository");
+    assert_eq!(
+        exercise_git_history_box(&mut git_history, &project_id),
+        GitHistoryOutcome::default()
+    );
     let mut administration = factory
         .open_project_administration(&database)
         .expect("open project administration repository");

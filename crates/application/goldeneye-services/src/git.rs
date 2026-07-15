@@ -2,8 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use goldeneye_domain::{FileId, NodeId, ProjectId, ProjectRelativePath};
-use goldeneye_ports::{DetectChangesOptions, GitCoChange, GitContext, GitFileHistory};
-use goldeneye_store::{GitCoChangeRecord, GitFileHistoryRecord, Store};
+use goldeneye_ports::{
+    DetectChangesOptions, GitCoChange, GitCoChangeRecord, GitContext, GitFileHistory,
+    GitFileHistoryRecord, GitHistoryRepository,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{CancellationToken, QueryError, ServiceError, Services};
@@ -110,8 +112,14 @@ impl Services {
             .filter_map(convert_cochange)
             .collect::<Vec<_>>();
         self.prepare_database()?;
-        let mut store = Store::open(self.config().database_path())?;
-        let outcome = store.replace_git_history(project, &files, &couplings)?;
+        let mut repository = self
+            .dependencies
+            .repositories()
+            .open_git_history(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
+        let outcome = repository
+            .replace_git_history(project, &files, &couplings)
+            .map_err(ServiceError::Repository)?;
         self.query.invalidate_project(project);
         Ok(GitHistoryResult {
             files: outcome.files,
@@ -153,8 +161,12 @@ impl Services {
             .as_deref()
             .is_none_or(|scope| matches!(scope, "symbols" | "impact"));
         let impacted_symbols = if wants_symbols {
-            let store = Store::open(self.config().database_path())?;
-            impacted_symbols(&store, &request.project, &changes.files, depth)?
+            let repository = self
+                .dependencies
+                .repositories()
+                .open_git_history(self.config().database_path())
+                .map_err(ServiceError::Repository)?;
+            impacted_symbols(repository.as_ref(), &request.project, &changes.files, depth)?
         } else {
             Vec::new()
         };
@@ -213,7 +225,7 @@ fn convert_cochange(coupling: &GitCoChange) -> Option<GitCoChangeRecord> {
 }
 
 fn impacted_symbols(
-    store: &Store,
+    repository: &dyn GitHistoryRepository,
     project: &ProjectId,
     changed_files: &[String],
     depth: usize,
@@ -227,7 +239,7 @@ fn impacted_symbols(
             continue;
         };
         add_file_symbols(
-            store,
+            repository,
             project,
             &path,
             0,
@@ -236,14 +248,17 @@ fn impacted_symbols(
             &mut queue,
         )?;
         if depth > 0 {
-            for coupling in store.coupled_files(project, &path)? {
+            for coupling in repository
+                .coupled_files(project, &path)
+                .map_err(ServiceError::Repository)?
+            {
                 let coupled = if coupling.file_a == path {
                     coupling.file_b
                 } else {
                     coupling.file_a
                 };
                 add_file_symbols(
-                    store,
+                    repository,
                     project,
                     &coupled,
                     1,
@@ -259,11 +274,17 @@ fn impacted_symbols(
         if level >= depth || symbols.len() >= MAX_IMPACTED_SYMBOLS {
             continue;
         }
-        for edge in store.edges_to(project, &node_id)? {
+        for edge in repository
+            .edges_to(project, &node_id)
+            .map_err(ServiceError::Repository)?
+        {
             if !is_impact_edge(edge.kind.as_str()) || !visited.insert(edge.source.clone()) {
                 continue;
             }
-            let Some(node) = store.get_node(project, &edge.source)? else {
+            let Some(node) = repository
+                .get_node(project, &edge.source)
+                .map_err(ServiceError::Repository)?
+            else {
                 continue;
             };
             if is_symbol_label(node.label.as_str()) {
@@ -280,7 +301,7 @@ fn impacted_symbols(
 
 #[allow(clippy::too_many_arguments)]
 fn add_file_symbols(
-    store: &Store,
+    repository: &dyn GitHistoryRepository,
     project: &ProjectId,
     path: &ProjectRelativePath,
     level: usize,
@@ -288,7 +309,10 @@ fn add_file_symbols(
     visited: &mut BTreeSet<NodeId>,
     queue: &mut VecDeque<(NodeId, usize)>,
 ) -> Result<(), ServiceError> {
-    for node in store.nodes_for_file(&FileId::new(project.clone(), path.clone()))? {
+    for node in repository
+        .nodes_for_file(&FileId::new(project.clone(), path.clone()))
+        .map_err(ServiceError::Repository)?
+    {
         if !is_symbol_label(node.label.as_str()) || !visited.insert(node.id.clone()) {
             continue;
         }

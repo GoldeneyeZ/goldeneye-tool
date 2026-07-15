@@ -20,7 +20,6 @@ use goldeneye_ports::{
     NodeSignatureRecord, NodeVectorRecord, PortError, RepositoryFactory, ServiceSyntax,
     SourceDiscovery, StoredVector, TokenVectorRecord,
 };
-use goldeneye_store::StoreError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -341,8 +340,6 @@ pub enum ServiceError {
     #[error("index operation was cancelled")]
     Cancelled,
     #[error(transparent)]
-    Store(#[from] StoreError),
-    #[error(transparent)]
     Index(IndexError),
     #[error(transparent)]
     Query(#[from] QueryError),
@@ -375,7 +372,7 @@ impl ServiceError {
             Self::Cancelled
             | Self::Index(IndexError::Cancelled)
             | Self::Git(GitPortError::Cancelled) => ServiceErrorCode::Cancelled,
-            Self::Store(_) | Self::Artifact(_) | Self::Repository(_) => ServiceErrorCode::Storage,
+            Self::Artifact(_) | Self::Repository(_) => ServiceErrorCode::Storage,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
             Self::Git(GitPortError::InvalidReference) => ServiceErrorCode::InvalidInput,
