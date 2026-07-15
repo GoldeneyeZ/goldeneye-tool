@@ -13,6 +13,7 @@ use goldeneye_edit::{
     RecoveryReport,
 };
 use goldeneye_index::{IndexOptions, IndexService};
+use goldeneye_ports::{EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic};
 use goldeneye_store::Store;
 use goldeneye_syntax::{
     CoreGrammarProvider, DiagnosticKind, InspectRequest, SyntaxDiagnostic, SyntaxEngine,
@@ -463,7 +464,7 @@ impl Services {
 
     fn with_edit_service<T>(
         &self,
-        action: impl FnOnce(&mut DurableEditService<CoreGrammarProvider>) -> Result<T, ServiceError>,
+        action: impl FnOnce(&mut DurableEditService) -> Result<T, ServiceError>,
     ) -> Result<T, ServiceError> {
         let mut guard = self.edit.lock().map_err(|_| {
             ServiceError::edit(ServiceErrorCode::Storage, "edit service lock poisoned")
@@ -476,15 +477,18 @@ impl Services {
         action(guard.as_mut().expect("edit service initialized"))
     }
 
-    fn build_edit_service(
-        &self,
-    ) -> Result<(DurableEditService<CoreGrammarProvider>, RecoveryReport), ServiceError> {
+    fn build_edit_service(&self) -> Result<(DurableEditService, RecoveryReport), ServiceError> {
         self.prepare_database()?;
         let store = Store::open(self.config.database_path())?;
         let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
         let journal = Store::open(self.config.database_path())?;
-        DurableEditService::open(index, journal, CoreGrammarProvider, self.allowed_roots())
-            .map_err(ServiceError::from)
+        DurableEditService::open(
+            index,
+            journal,
+            SyntaxEngine::new(CoreGrammarProvider),
+            self.allowed_roots(),
+        )
+        .map_err(ServiceError::from)
     }
 
     fn allowed_roots(&self) -> Vec<PathBuf> {
@@ -499,22 +503,18 @@ impl Services {
 
 #[allow(clippy::too_many_lines)]
 fn inspect_file(
-    service: &mut DurableEditService<CoreGrammarProvider>,
+    service: &mut DurableEditService,
     request: &InspectSyntaxRequest,
     allowed_roots: Vec<PathBuf>,
 ) -> Result<InspectSyntaxResult, ServiceError> {
-    let project = service
-        .index()
-        .store()
-        .get_project(&request.project)?
-        .ok_or_else(|| {
-            ServiceError::edit(
-                ServiceErrorCode::NotFound,
-                format!("project is not indexed: {}", request.project.as_str()),
-            )
-        })?;
+    let project = service.indexed_project(&request.project)?.ok_or_else(|| {
+        ServiceError::edit(
+            ServiceErrorCode::NotFound,
+            format!("project is not indexed: {}", request.project.as_str()),
+        )
+    })?;
     let file_id = FileId::new(request.project.clone(), request.path.clone());
-    let indexed = service.index().store().get_file(&file_id)?.ok_or_else(|| {
+    let indexed = service.indexed_file(&file_id)?.ok_or_else(|| {
         ServiceError::edit(
             ServiceErrorCode::NotFound,
             format!("file is not indexed: {}", request.path.as_str()),
@@ -562,18 +562,16 @@ fn inspect_file(
             Arc::<[u8]>::from(source),
             project.generation,
         )
-        .map_err(DurableEditError::from)?;
+        .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
     let context = FileContext::new(request.project.clone(), request.path.clone());
     let syntax = inspect_tree(&snapshot, &context, &request.inspect)
-        .map_err(EditError::from)
-        .map_err(DurableEditError::from)?;
+        .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
     let locators = syntax
         .nodes
         .iter()
         .map(|node| syntax.locator(node.ordinal))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(EditError::from)
-        .map_err(DurableEditError::from)?;
+        .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
     let compact_syntax_bytes = serde_json::to_vec(&syntax)
         .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?
         .len();
@@ -612,12 +610,12 @@ fn inspect_file(
 fn edit_options(parse_policy: EditParsePolicy) -> EditOptions {
     EditOptions {
         parse_policy: parse_policy.into(),
-        refresh_request: InspectRequest::default(),
+        refresh_request: EditInspectRequest::default(),
     }
 }
 
 fn edit_error_with_fresh(
-    service: &mut DurableEditService<CoreGrammarProvider>,
+    service: &mut DurableEditService,
     locator: &NodeLocator,
     error: DurableEditError,
     allowed_roots: Vec<PathBuf>,
@@ -676,7 +674,7 @@ fn mutation_result(result: DurableMutationResult) -> EditMutationResult {
                 .diagnostics
                 .after
                 .iter()
-                .map(diagnostic_result)
+                .map(edit_diagnostic_result)
                 .collect(),
         },
         size: MutationSize {
@@ -694,6 +692,18 @@ fn diagnostic_result(diagnostic: &SyntaxDiagnostic) -> SyntaxDiagnosticResult {
         kind: match diagnostic.kind {
             DiagnosticKind::Error => "error",
             DiagnosticKind::Missing => "missing",
+        }
+        .to_owned(),
+        node_kind: diagnostic.node_kind.clone(),
+        span: diagnostic.span,
+    }
+}
+
+fn edit_diagnostic_result(diagnostic: &EditSyntaxDiagnostic) -> SyntaxDiagnosticResult {
+    SyntaxDiagnosticResult {
+        kind: match diagnostic.kind {
+            EditDiagnosticKind::Error => "error",
+            EditDiagnosticKind::Missing => "missing",
         }
         .to_owned(),
         node_kind: diagnostic.node_kind.clone(),
@@ -743,16 +753,12 @@ impl From<DurableEditError> for ServiceError {
             DurableEditError::Repository(_) | DurableEditError::Io { .. } => {
                 ServiceErrorCode::Storage
             }
-            DurableEditError::Index(_) | DurableEditError::RefreshRejected { .. } => {
-                ServiceErrorCode::Index
-            }
+            DurableEditError::RefreshRejected { .. } => ServiceErrorCode::Index,
             DurableEditError::InjectedFault { .. }
             | DurableEditError::JournalPathMismatch(_)
             | DurableEditError::Path(_)
             | DurableEditError::Edit(_)
-            | DurableEditError::Locator(_)
             | DurableEditError::Identity(_)
-            | DurableEditError::Syntax(_)
             | DurableEditError::GenerationOverflow(_) => ServiceErrorCode::InvalidInput,
         };
         Self::edit(code, error.to_string())

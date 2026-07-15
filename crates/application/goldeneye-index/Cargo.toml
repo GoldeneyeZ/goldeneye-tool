@@ -13,6 +13,7 @@ blake3 = "1.8"
 goldeneye-crosslink = { path = "../goldeneye-crosslink" }
 goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
+goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
 goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }
 serde_json.workspace = true

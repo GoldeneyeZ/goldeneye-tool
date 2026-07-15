@@ -2,13 +2,19 @@
 
 mod crosslink;
 mod edit;
+mod edit_syntax;
 mod error;
 mod query;
 
 pub use crosslink::CrossLinkRepository;
 pub use edit::{
-    EditJournalRecord, EditOperationId, EditOperationKind, EditPhase, EditRepository,
-    NewEditJournalRecord,
+    EditIndexer, EditJournalRecord, EditOperationId, EditOperationKind, EditPhase,
+    EditRefreshResult, EditRefreshStatus, EditRepository, NewEditJournalRecord,
+};
+pub use edit_syntax::{
+    EditDiagnosticKind, EditInspectRequest, EditSyntax, EditSyntaxCreate, EditSyntaxCreateRequest,
+    EditSyntaxDiagnostic, EditSyntaxError, EditSyntaxInspection, EditSyntaxMutation,
+    EditSyntaxNodeView, EditSyntaxPlan, EditSyntaxPlanRequest,
 };
 pub use error::PortError;
 pub use query::{

@@ -447,6 +447,7 @@ dependencies = [
  "goldeneye-crosslink",
  "goldeneye-discovery",
  "goldeneye-domain",
+ "goldeneye-ports",
  "goldeneye-store",
  "goldeneye-syntax",
  "serde_json",
@@ -472,6 +473,7 @@ name = "goldeneye-ports"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "serde",
 ]
 
 [[package]]
@@ -501,6 +503,7 @@ dependencies = [
  "goldeneye-edit",
  "goldeneye-git",
  "goldeneye-index",
+ "goldeneye-ports",
  "goldeneye-query",
  "goldeneye-store",
  "goldeneye-syntax",
@@ -529,6 +532,7 @@ dependencies = [
  "goldeneye-domain",
  "goldeneye-full-grammars",
  "goldeneye-grammar-pack",
+ "goldeneye-ports",
  "serde",
  "serde_json",
  "tempfile",

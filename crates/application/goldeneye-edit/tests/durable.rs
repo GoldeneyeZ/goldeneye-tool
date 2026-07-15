@@ -43,19 +43,14 @@ impl Fixture {
         }
     }
 
-    fn open(
-        &self,
-    ) -> (
-        DurableEditService<CoreGrammarProvider>,
-        goldeneye_edit::RecoveryReport,
-    ) {
+    fn open(&self) -> (DurableEditService, goldeneye_edit::RecoveryReport) {
         let store = Store::open(&self.database).expect("reopen store");
         let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
         let journal = Store::open(&self.database).expect("open edit journal");
         DurableEditService::open(
             index,
             journal,
-            CoreGrammarProvider,
+            SyntaxEngine::new(CoreGrammarProvider),
             vec![self.allowed_root.clone()],
         )
         .expect("open durable edit service")
@@ -66,29 +61,22 @@ impl Fixture {
     }
 }
 
-fn generation(
-    service: &DurableEditService<CoreGrammarProvider>,
-    project: &ProjectId,
-) -> Generation {
-    service
-        .index()
-        .store()
+fn generation(database: &Path, project: &ProjectId) -> Generation {
+    Store::open_read_only(database)
+        .expect("open query store")
         .get_project(project)
         .expect("read project")
         .expect("indexed project")
         .generation
 }
 
-fn function_locator(
-    service: &DurableEditService<CoreGrammarProvider>,
-    fixture: &Fixture,
-) -> NodeLocator {
+fn function_locator(_service: &DurableEditService, fixture: &Fixture) -> NodeLocator {
     let source = fs::read(fixture.source_path()).expect("read fixture source");
     let snapshot = SyntaxEngine::new(CoreGrammarProvider)
         .parse(
             LanguageId::new("rust").expect("language"),
             Arc::<[u8]>::from(source),
-            generation(service, &fixture.project),
+            generation(&fixture.database, &fixture.project),
         )
         .expect("parse fixture");
     let context = FileContext::new(
@@ -140,7 +128,7 @@ fn durable_replace_returns_compact_source_syntax_graph_and_generation_metadata()
     let fixture = Fixture::new("fn before() {}\n");
     let (mut service, startup) = fixture.open();
     assert!(startup.entries.is_empty());
-    let before_generation = generation(&service, &fixture.project);
+    let before_generation = generation(&fixture.database, &fixture.project);
     let locator = function_locator(&service, &fixture);
 
     let result = service
@@ -191,9 +179,8 @@ fn delete_and_adjacent_insertions_use_the_same_durable_journal_pipeline() {
         service.edit_node(request).expect("durable operation");
         assert_eq!(fs::read_to_string(fixture.source_path()).unwrap(), expected);
         assert!(
-            service
-                .index()
-                .store()
+            Store::open_read_only(&fixture.database)
+                .expect("open query store")
                 .list_incomplete_edit_operations()
                 .expect("journal")
                 .is_empty()
@@ -227,7 +214,7 @@ fn restart_recovery_reconciles_every_incomplete_filesystem_phase() {
         );
         drop(service);
 
-        let (service, recovery) = fixture.open();
+        let (_service, recovery) = fixture.open();
         assert_eq!(recovery.entries.len(), 1, "recovery report for {point:?}");
         assert!(recovery.entries[0].resolved, "unresolved {point:?}");
         let source = fs::read_to_string(fixture.source_path()).expect("recovered source");
@@ -242,9 +229,8 @@ fn restart_recovery_reconciles_every_incomplete_filesystem_phase() {
             fixture.project.clone(),
             ProjectRelativePath::new("src/lib.rs").unwrap(),
         );
-        let nodes = service
-            .index()
-            .store()
+        let nodes = Store::open_read_only(&fixture.database)
+            .expect("open query store")
             .nodes_for_file(&file)
             .expect("recovered graph");
         assert!(nodes.iter().any(|node| node.name == expected_name));
@@ -286,7 +272,7 @@ fn stale_source_and_generation_are_rejected_without_writing() {
 fn unicode_create_is_no_overwrite_and_indexes_in_one_generation() {
     let fixture = Fixture::new("fn before() {}\n");
     let (mut service, _) = fixture.open();
-    let before_generation = generation(&service, &fixture.project);
+    let before_generation = generation(&fixture.database, &fixture.project);
     let path = ProjectRelativePath::new("nested/深/naïve.rs").expect("Unicode path");
     let request = DurableCreateRequest {
         operation_id: "unicode-create".to_owned(),
@@ -332,7 +318,7 @@ fn create_parent_directories_are_removed_after_pre_rename_recovery() {
         relative_path: ProjectRelativePath::new("new/only/file.rs").unwrap(),
         language_id: LanguageId::new("rust").unwrap(),
         source: Arc::<[u8]>::from("fn created() {}\n".as_bytes()),
-        expected_generation: generation(&service, &fixture.project),
+        expected_generation: generation(&fixture.database, &fixture.project),
         parse_policy: ParsePolicy::RequireClean,
         create_parents: true,
     };

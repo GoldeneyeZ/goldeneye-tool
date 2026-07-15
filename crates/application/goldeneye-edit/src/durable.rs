@@ -10,18 +10,17 @@ use goldeneye_domain::{
     ByteSpan, ContentHash, FileContext, FileId, Generation, LanguageId, NodeLocator, ProjectId,
     ProjectRelativePath, SyntaxIdentityError,
 };
-use goldeneye_index::{FileRefreshResult, FileRefreshStatus, IndexError, IndexService};
 use goldeneye_ports::{
-    EditJournalRecord, EditOperationId, EditOperationKind, EditPhase, EditRepository,
-    NewEditJournalRecord, PortError,
+    EditIndexer, EditJournalRecord, EditOperationId, EditOperationKind, EditPhase,
+    EditRefreshResult, EditRefreshStatus, EditRepository, EditSyntax, NewEditJournalRecord,
+    PortError,
 };
-use goldeneye_syntax::{GrammarProvider, LocatorError, SyntaxEngine, all_named_locators};
 use thiserror::Error;
 
 use crate::path_auth::{AuthorizedPath, PathAuthorizationError, PathAuthorizer, PathIntent};
 use crate::{
-    EditDiagnostics, EditError, EditOperation, EditOptions, ParsePolicy, SourceDiff,
-    TokenSizeMetadata, plan_edit, validate_create_content,
+    EditDiagnostics, EditError, EditOperation, EditOptions, EditPlanRequest, ParsePolicy,
+    SourceDiff, TokenSizeMetadata, plan_edit, validate_create_content,
 };
 
 static ACTIVE_TARGETS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
@@ -140,13 +139,7 @@ pub enum DurableEditError {
     #[error(transparent)]
     Edit(#[from] EditError),
     #[error(transparent)]
-    Index(#[from] IndexError),
-    #[error(transparent)]
-    Locator(#[from] LocatorError),
-    #[error(transparent)]
     Identity(#[from] SyntaxIdentityError),
-    #[error(transparent)]
-    Syntax(#[from] goldeneye_syntax::SyntaxError),
     #[error("project is not indexed: {0:?}")]
     ProjectNotFound(ProjectId),
     #[error("stale project generation: expected {expected:?}, actual {actual:?}")]
@@ -190,18 +183,15 @@ pub enum DurableEditError {
 }
 
 /// Owns syntax planning, authorized filesystem mutation, journal recovery, and targeted indexing.
-pub struct DurableEditService<P> {
-    index: IndexService<P>,
+pub struct DurableEditService {
+    index: Box<dyn EditIndexer>,
     journal: Box<dyn EditRepository>,
-    engine: SyntaxEngine<P>,
+    syntax: Box<dyn EditSyntax>,
     authorizer: PathAuthorizer,
     fault_injector: Arc<dyn FaultInjector>,
 }
 
-impl<P> DurableEditService<P>
-where
-    P: GrammarProvider + Clone + Send + Sync,
-{
+impl DurableEditService {
     /// Opens the service and reconciles every incomplete journal row before returning.
     ///
     /// # Errors
@@ -209,16 +199,16 @@ where
     /// Returns a configuration/store error when roots cannot be authorized or the journal cannot
     /// be listed. Individual recovery conflicts are reported without preventing startup.
     pub fn open(
-        index: IndexService<P>,
+        index: impl EditIndexer + 'static,
         journal: impl EditRepository + 'static,
-        provider: P,
+        syntax: impl EditSyntax + 'static,
         allowed_roots: Vec<PathBuf>,
     ) -> Result<(Self, RecoveryReport), DurableEditError> {
         let authorizer = PathAuthorizer::new(allowed_roots)?;
         let mut service = Self {
-            index,
+            index: Box::new(index),
             journal: Box::new(journal),
-            engine: SyntaxEngine::new(provider),
+            syntax: Box::new(syntax),
             authorizer,
             fault_injector: Arc::new(NoFault),
         };
@@ -226,19 +216,28 @@ where
         Ok((service, recovery))
     }
 
-    #[must_use]
-    pub const fn index(&self) -> &IndexService<P> {
-        &self.index
+    /// Finds one project required by edit inspection workflows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the project registry cannot be read.
+    pub fn indexed_project(
+        &self,
+        project: &ProjectId,
+    ) -> Result<Option<goldeneye_domain::ProjectRecord>, DurableEditError> {
+        Ok(self.journal.get_project(project)?)
     }
 
-    #[must_use]
-    pub const fn index_mut(&mut self) -> &mut IndexService<P> {
-        &mut self.index
-    }
-
-    #[must_use]
-    pub fn into_index(self) -> IndexService<P> {
-        self.index
+    /// Finds one file required by edit inspection workflows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file registry cannot be read.
+    pub fn indexed_file(
+        &self,
+        file: &FileId,
+    ) -> Result<Option<goldeneye_domain::FileRecord>, DurableEditError> {
+        Ok(self.journal.get_file(file)?)
     }
 
     pub fn set_fault_injector(&mut self, injector: Arc<dyn FaultInjector>) {
@@ -264,7 +263,7 @@ where
             PathIntent::Update,
         )?;
         let _lease = TargetLease::acquire(authorized.destination())?;
-        let source = read_file(authorized.revalidate()?.as_path())?;
+        let source = Arc::<[u8]>::from(read_file(authorized.revalidate()?.as_path())?);
         let actual_hash = ContentHash::of(&source);
         if actual_hash != request.locator.scope.file_hash {
             return Err(DurableEditError::StaleSource {
@@ -273,22 +272,19 @@ where
             });
         }
         self.ensure_indexed_hash(&project_id, &relative_path, actual_hash)?;
-        let snapshot = self.engine.parse(
-            request.locator.scope.language_id.clone(),
-            Arc::<[u8]>::from(source),
-            project.generation,
-        )?;
         let next_generation = next_generation(&project_id, project.generation)?;
         let file_context = FileContext::new(project_id.clone(), relative_path.clone());
-        let plan = plan_edit(
-            &self.engine,
-            &snapshot,
-            &file_context,
-            &request.locator,
-            &request.operation,
+        let edit_plan_request = EditPlanRequest {
+            language_id: request.locator.scope.language_id.clone(),
+            source,
+            current_generation: project.generation,
+            file_context,
+            locator: request.locator.clone(),
+            operation: request.operation.clone(),
             next_generation,
-            &request.options,
-        )?;
+            options: request.options.clone(),
+        };
+        let plan = plan_edit(self.syntax.as_ref(), &edit_plan_request)?;
         if plan.old_file_hash == plan.new_file_hash {
             return Err(DurableEditError::NoContentChange);
         }
@@ -349,11 +345,14 @@ where
         )?;
         let _lease = TargetLease::acquire(authorized.destination())?;
         let next_generation = next_generation(&request.project_id, project.generation)?;
+        let file_context =
+            FileContext::new(request.project_id.clone(), request.relative_path.clone());
         let validated = validate_create_content(
-            &self.engine,
+            self.syntax.as_ref(),
             request.language_id,
             Arc::clone(&request.source),
             next_generation,
+            &file_context,
             request.parse_policy,
         )?;
         let created_parent_paths = if request.create_parents {
@@ -390,9 +389,7 @@ where
         let refresh = outcome?;
         let after_nodes = self.node_ids(&request.project_id, &request.relative_path)?;
         let changed_graph_identities = changed_graph_identities(&BTreeSet::new(), &after_nodes);
-        let file_context =
-            FileContext::new(request.project_id.clone(), request.relative_path.clone());
-        let mut syntax_identities = all_named_locators(&validated.snapshot, &file_context)?;
+        let mut syntax_identities = validated.locators;
         syntax_identities.truncate(64);
         let source_len = u64::try_from(validated.source.len())
             .map_err(|_| DurableEditError::GenerationOverflow(request.project_id.clone()))?;
@@ -841,10 +838,7 @@ fn remove_empty_confined_directory(
     })
 }
 
-impl<P> DurableEditService<P>
-where
-    P: GrammarProvider + Clone + Send + Sync,
-{
+impl DurableEditService {
     fn project(
         &self,
         project_id: &ProjectId,
@@ -894,7 +888,7 @@ where
         authorized: &AuthorizedPath,
         artifacts: &ArtifactPaths,
         source: &[u8],
-    ) -> Result<FileRefreshResult, DurableEditError> {
+    ) -> Result<EditRefreshResult, DurableEditError> {
         self.check_fault(operation_id, FaultPoint::AfterJournal)?;
         self.check_fault(operation_id, FaultPoint::BeforeWrite)?;
         let permissions = metadata(authorized.destination())?.permissions();
@@ -965,7 +959,7 @@ where
         artifacts: &ArtifactPaths,
         source: &[u8],
         create_parents: bool,
-    ) -> Result<FileRefreshResult, DurableEditError> {
+    ) -> Result<EditRefreshResult, DurableEditError> {
         self.check_fault(operation_id, FaultPoint::AfterJournal)?;
         self.check_fault(operation_id, FaultPoint::BeforeWrite)?;
         let created = create_parents
@@ -1032,19 +1026,16 @@ where
         &mut self,
         project_id: &ProjectId,
         path: &ProjectRelativePath,
-    ) -> Result<FileRefreshResult, DurableEditError> {
+    ) -> Result<EditRefreshResult, DurableEditError> {
         let refresh = self.index.refresh_file(project_id, path)?;
-        if refresh.status == FileRefreshStatus::RejectedSyntax {
+        if refresh.status == EditRefreshStatus::RejectedSyntax {
             return Err(DurableEditError::RefreshRejected {
-                reason: format!(
-                    "parser returned {} diagnostic groups",
-                    refresh.diagnostics.len()
-                ),
+                reason: format!("parser returned {} diagnostic groups", refresh.diagnostics),
             });
         }
         if !matches!(
             refresh.status,
-            FileRefreshStatus::Updated | FileRefreshStatus::Unchanged
+            EditRefreshStatus::Updated | EditRefreshStatus::Unchanged
         ) {
             return Err(DurableEditError::RefreshRejected {
                 reason: format!("unexpected refresh status {:?}", refresh.status),
@@ -1057,11 +1048,11 @@ where
         &mut self,
         project_id: &ProjectId,
         path: &ProjectRelativePath,
-    ) -> Result<FileRefreshResult, DurableEditError> {
+    ) -> Result<EditRefreshResult, DurableEditError> {
         let refresh = self.index.refresh_file(project_id, path)?;
         if !matches!(
             refresh.status,
-            FileRefreshStatus::Deleted | FileRefreshStatus::Unchanged
+            EditRefreshStatus::Deleted | EditRefreshStatus::Unchanged
         ) {
             return Err(DurableEditError::RefreshRejected {
                 reason: format!("unexpected absent-file refresh status {:?}", refresh.status),
@@ -1152,10 +1143,7 @@ where
     }
 }
 
-impl<P> DurableEditService<P>
-where
-    P: GrammarProvider + Clone + Send + Sync,
-{
+impl DurableEditService {
     /// Reconciles every nonterminal journal row against authoritative on-disk hashes.
     ///
     /// # Errors

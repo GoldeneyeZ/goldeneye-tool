@@ -383,7 +383,7 @@ impl ServiceError {
 #[derive(Clone)]
 pub struct Services {
     config: ServiceConfig,
-    edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService<CoreGrammarProvider>>>>,
+    edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService>>>,
     query: Arc<goldeneye_query::QueryCache>,
     query_engine: Arc<Mutex<Option<goldeneye_query::QueryEngine>>>,
 }

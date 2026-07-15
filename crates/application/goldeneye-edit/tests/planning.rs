@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use goldeneye_domain::{FileContext, Generation, LanguageId, ProjectId, ProjectRelativePath};
-use goldeneye_edit::{
-    EditError, EditOperation, EditOptions, ParsePolicy, plan_edit, validate_create_content,
+use goldeneye_domain::{
+    ContentHash, FileContext, Generation, LanguageId, ProjectId, ProjectRelativePath,
 };
-use goldeneye_syntax::{CoreGrammarProvider, LocatorError, SyntaxEngine, all_named_locators};
+use goldeneye_edit::{
+    EditError, EditOperation, EditOptions, EditPlanRequest, ParsePolicy, plan_edit,
+    validate_create_content,
+};
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine, all_named_locators};
 
 fn context() -> FileContext {
     FileContext::new(
@@ -39,21 +42,23 @@ fn replace_plans_one_named_node_and_reports_refresh_metadata() {
 
     let plan = plan_edit(
         &engine,
-        &snapshot,
-        &context(),
-        &locator,
-        &EditOperation::Replace("fn changed() {}".to_owned()),
-        Generation::new(8),
-        &EditOptions::default(),
+        &EditPlanRequest {
+            language_id: LanguageId::new("rust").unwrap(),
+            source: Arc::from(snapshot.source()),
+            current_generation: snapshot.generation(),
+            file_context: context(),
+            locator,
+            operation: EditOperation::Replace("fn changed() {}".to_owned()),
+            next_generation: Generation::new(8),
+            options: EditOptions::default(),
+        },
     )
     .unwrap();
 
     assert_eq!(plan.source.as_ref(), b"fn changed() {}\nfn keep() {}");
     assert_eq!(plan.old_file_hash, snapshot.file_hash());
-    assert_eq!(plan.new_file_hash, plan.snapshot.file_hash());
+    assert_eq!(plan.new_file_hash, ContentHash::of(&plan.source));
     assert_ne!(plan.old_file_hash, plan.new_file_hash);
-    assert_eq!(plan.snapshot.generation(), Generation::new(8));
-    assert!(!plan.snapshot.has_errors());
     assert_eq!(plan.diagnostics.after_total, 0);
     assert!(!plan.refreshed_locators.is_empty());
     assert!(plan.token_size.compact_syntax_bytes > 0);
@@ -80,19 +85,26 @@ fn stale_locator_returns_typed_cause_and_fresh_compact_view() {
 
     let Err(error) = plan_edit(
         &engine,
-        &snapshot,
-        &context(),
-        &locator,
-        &EditOperation::Delete,
-        Generation::new(8),
-        &EditOptions::default(),
+        &EditPlanRequest {
+            language_id: LanguageId::new("rust").unwrap(),
+            source: Arc::from(snapshot.source()),
+            current_generation: snapshot.generation(),
+            file_context: context(),
+            locator,
+            operation: EditOperation::Delete,
+            next_generation: Generation::new(8),
+            options: EditOptions::default(),
+        },
     ) else {
         panic!("stale locator unexpectedly planned an edit");
     };
 
     match error {
         EditError::StaleLocator { cause, fresh } => {
-            assert_eq!(cause, LocatorError::GenerationMismatch);
+            assert_eq!(
+                cause,
+                "locator generation does not match the syntax snapshot"
+            );
             assert_eq!(fresh.scope.file_hash, snapshot.file_hash());
             assert_eq!(fresh.scope.generation, snapshot.generation());
             assert!(!fresh.nodes.is_empty());
@@ -110,12 +122,13 @@ fn create_content_validation_reports_size_and_rejects_parse_errors() {
         LanguageId::new("rust").unwrap(),
         Arc::clone(&source),
         Generation::new(1),
+        &context(),
         ParsePolicy::RequireClean,
     )
     .unwrap();
 
     assert_eq!(valid.source, source);
-    assert_eq!(valid.content_hash, valid.snapshot.file_hash());
+    assert_eq!(valid.content_hash, ContentHash::of(&source));
     assert_eq!(valid.token_size.source_bytes, source.len());
     assert_eq!(valid.token_size.changed_bytes, source.len());
     assert!(valid.token_size.approximate_context_tokens > 0);
@@ -125,6 +138,7 @@ fn create_content_validation_reports_size_and_rejects_parse_errors() {
         LanguageId::new("rust").unwrap(),
         Arc::<[u8]>::from(b"fn broken(".as_slice()),
         Generation::new(1),
+        &context(),
         ParsePolicy::RequireClean,
     );
     assert!(matches!(

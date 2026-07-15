@@ -11,16 +11,14 @@ pub use durable::{
 use std::sync::Arc;
 
 use goldeneye_domain::{
-    ByteSpan, ContentHash, FileContext, Generation, LanguageId, NodeLocator, SourcePoint,
-    SyntaxIdentityError,
+    ByteSpan, ContentHash, FileContext, Generation, LanguageId, NodeLocator, SyntaxIdentityError,
 };
-use goldeneye_syntax::{
-    GrammarProvider, InspectError, InspectRequest, LocatorError, SyntaxDiagnostic, SyntaxEdit,
-    SyntaxEngine, SyntaxError, SyntaxInspection, SyntaxSnapshot, inspect_syntax, resolve_locator,
+use goldeneye_ports::{
+    EditInspectRequest, EditSyntax, EditSyntaxCreateRequest, EditSyntaxDiagnostic, EditSyntaxError,
+    EditSyntaxInspection, EditSyntaxMutation, EditSyntaxPlanRequest, PortError,
 };
 use thiserror::Error;
 
-const DEFAULT_REFRESH_NODES: usize = 64;
 const BYTES_PER_APPROXIMATE_TOKEN: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,19 +39,28 @@ pub enum ParsePolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditOptions {
     pub parse_policy: ParsePolicy,
-    pub refresh_request: InspectRequest,
+    pub refresh_request: EditInspectRequest,
 }
 
 impl Default for EditOptions {
     fn default() -> Self {
         Self {
             parse_policy: ParsePolicy::RequireClean,
-            refresh_request: InspectRequest {
-                max_nodes: DEFAULT_REFRESH_NODES,
-                ..InspectRequest::default()
-            },
+            refresh_request: EditInspectRequest::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditPlanRequest {
+    pub language_id: LanguageId,
+    pub source: Arc<[u8]>,
+    pub current_generation: Generation,
+    pub file_context: FileContext,
+    pub locator: NodeLocator,
+    pub operation: EditOperation,
+    pub next_generation: Generation,
+    pub options: EditOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +69,7 @@ pub struct EditDiagnostics {
     pub after_total: usize,
     pub before_truncated: bool,
     pub after_truncated: bool,
-    pub after: Vec<SyntaxDiagnostic>,
+    pub after: Vec<EditSyntaxDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,22 +92,21 @@ pub struct TokenSizeMetadata {
 
 pub struct EditPlan {
     pub source: Arc<[u8]>,
-    pub snapshot: SyntaxSnapshot,
     pub diff: SourceDiff,
     pub changed_ranges: Vec<goldeneye_domain::SourceSpan>,
     pub old_file_hash: ContentHash,
     pub new_file_hash: ContentHash,
     pub diagnostics: EditDiagnostics,
-    pub refreshed_syntax: SyntaxInspection,
+    pub refreshed_syntax: EditSyntaxInspection,
     pub refreshed_locators: Vec<NodeLocator>,
     pub token_size: TokenSizeMetadata,
 }
 
 pub struct ValidatedCreate {
     pub source: Arc<[u8]>,
-    pub snapshot: SyntaxSnapshot,
     pub content_hash: ContentHash,
     pub diagnostics: EditDiagnostics,
+    pub locators: Vec<NodeLocator>,
     pub token_size: TokenSizeMetadata,
 }
 
@@ -108,8 +114,8 @@ pub struct ValidatedCreate {
 pub enum EditError {
     #[error("node locator is stale: {cause}")]
     StaleLocator {
-        cause: LocatorError,
-        fresh: Box<SyntaxInspection>,
+        cause: String,
+        fresh: Box<EditSyntaxInspection>,
     },
     #[error(
         "proposed source rejected by {policy:?}: {after_total} diagnostics after {before_total}"
@@ -119,7 +125,7 @@ pub enum EditError {
         before_total: usize,
         after_total: usize,
         proposed_file_hash: ContentHash,
-        diagnostics: Vec<SyntaxDiagnostic>,
+        diagnostics: Vec<EditSyntaxDiagnostic>,
     },
     #[error("source size arithmetic overflowed")]
     SourceSizeOverflow,
@@ -136,9 +142,7 @@ pub enum EditError {
         source: serde_json::Error,
     },
     #[error(transparent)]
-    Inspect(#[from] InspectError),
-    #[error(transparent)]
-    Syntax(#[from] SyntaxError),
+    Syntax(#[from] PortError),
 }
 
 /// Plans one exact named-node mutation without writing to the filesystem.
@@ -147,91 +151,53 @@ pub enum EditError {
 ///
 /// Returns a typed stale-locator error with fresh syntax context when any
 /// identity guard fails. Syntax, inspection, parse-policy, size, identity, and
-/// metadata failures are returned without mutating `snapshot`.
-pub fn plan_edit<P>(
-    engine: &SyntaxEngine<P>,
-    snapshot: &SyntaxSnapshot,
-    file_context: &FileContext,
-    locator: &NodeLocator,
-    operation: &EditOperation,
-    next_generation: Generation,
-    options: &EditOptions,
-) -> Result<EditPlan, EditError>
-where
-    P: GrammarProvider,
-{
-    let node = match resolve_locator(snapshot, file_context, locator) {
-        Ok(node) => node,
-        Err(cause) => {
-            let fresh = inspect_syntax(
-                snapshot,
-                file_context,
-                &stale_view_request(snapshot, locator),
-            )?;
-            return Err(EditError::StaleLocator {
-                cause,
-                fresh: Box::new(fresh),
-            });
-        }
+/// metadata failures are returned without mutating source.
+pub fn plan_edit(
+    syntax: &dyn EditSyntax,
+    request: &EditPlanRequest,
+) -> Result<EditPlan, EditError> {
+    let planned = syntax
+        .plan_edit(EditSyntaxPlanRequest {
+            language_id: request.language_id.clone(),
+            source: Arc::clone(&request.source),
+            current_generation: request.current_generation,
+            file_context: request.file_context.clone(),
+            locator: request.locator.clone(),
+            operation: (&request.operation).into(),
+            next_generation: request.next_generation,
+            inspection: request.options.refresh_request.clone(),
+        })
+        .map_err(EditError::from)?;
+    let diagnostics = EditDiagnostics {
+        before_total: planned.before_diagnostic_total,
+        after_total: planned.after_diagnostic_total,
+        before_truncated: planned.before_diagnostics_truncated,
+        after_truncated: planned.after_diagnostics_truncated,
+        after: planned.diagnostics,
     };
-    let node_start = node.start_byte();
-    let node_end = node.end_byte();
-    let (start, old_end, replacement) = operation_geometry(operation, node_start, node_end);
-    let proposed = splice(snapshot.source(), start, old_end, replacement)?;
-    let new_end = start
-        .checked_add(replacement.len())
-        .ok_or(EditError::SourceSizeOverflow)?;
-    let syntax_edit = SyntaxEdit::new(
-        portable_offset(start)?,
-        portable_offset(old_end)?,
-        portable_offset(new_end)?,
-        point_at(snapshot.source(), start),
-        point_at(snapshot.source(), old_end),
-        point_at(&proposed, new_end),
-    );
-    let source = Arc::<[u8]>::from(proposed);
-    let reparsed = engine.reparse(
-        snapshot,
-        snapshot.language_id().clone(),
-        Arc::clone(&source),
-        next_generation,
-        syntax_edit,
-    )?;
-    let diagnostics = diagnostics(snapshot, &reparsed.snapshot);
     enforce_parse_policy(
-        options.parse_policy,
+        request.options.parse_policy,
         &diagnostics,
-        reparsed.snapshot.file_hash(),
+        planned.new_file_hash,
     )?;
 
-    let diff = minimal_diff(snapshot.source(), &source)?;
-    let mut refresh_request = options.refresh_request.clone();
-    refresh_request.byte_range = Some(diff.new_span);
-    let refreshed_syntax = inspect_syntax(&reparsed.snapshot, file_context, &refresh_request)?;
-    let refreshed_locators = refreshed_syntax
-        .nodes
-        .iter()
-        .map(|node| refreshed_syntax.locator(node.ordinal))
-        .collect::<Result<Vec<_>, _>>()?;
+    let diff = minimal_diff(&request.source, &planned.source)?;
     let token_size = token_size(
-        source.len(),
+        planned.source.len(),
         diff.inserted.len(),
-        &refreshed_syntax,
-        &refreshed_locators,
+        &planned.inspection,
+        &planned.locators,
     )?;
-    let old_file_hash = snapshot.file_hash();
-    let new_file_hash = reparsed.snapshot.file_hash();
 
     Ok(EditPlan {
-        source,
-        snapshot: reparsed.snapshot,
+        source: planned.source,
         diff,
-        changed_ranges: reparsed.changed_ranges,
-        old_file_hash,
-        new_file_hash,
+        changed_ranges: planned.changed_ranges,
+        old_file_hash: planned.old_file_hash,
+        new_file_hash: planned.new_file_hash,
         diagnostics,
-        refreshed_syntax,
-        refreshed_locators,
+        refreshed_syntax: planned.inspection,
+        refreshed_locators: planned.locators,
         token_size,
     })
 }
@@ -242,32 +208,34 @@ where
 ///
 /// Returns syntax/provider failures or [`EditError::ParseRejected`] when the
 /// parsed content violates `policy`.
-pub fn validate_create_content<P>(
-    engine: &SyntaxEngine<P>,
+pub fn validate_create_content(
+    syntax: &dyn EditSyntax,
     language_id: LanguageId,
     source: Arc<[u8]>,
     generation: Generation,
+    file_context: &FileContext,
     policy: ParsePolicy,
-) -> Result<ValidatedCreate, EditError>
-where
-    P: GrammarProvider,
-{
-    let snapshot = engine.parse(language_id, Arc::clone(&source), generation)?;
+) -> Result<ValidatedCreate, EditError> {
+    let parsed = syntax.parse_create(EditSyntaxCreateRequest {
+        language_id,
+        source,
+        generation,
+        file_context: file_context.clone(),
+    })?;
     let diagnostics = EditDiagnostics {
         before_total: 0,
-        after_total: snapshot.diagnostic_total(),
+        after_total: parsed.diagnostic_total,
         before_truncated: false,
-        after_truncated: snapshot.diagnostics_truncated(),
-        after: snapshot.diagnostics().to_vec(),
+        after_truncated: parsed.diagnostics_truncated,
+        after: parsed.diagnostics,
     };
-    enforce_parse_policy(policy, &diagnostics, snapshot.file_hash())?;
-    let content_hash = snapshot.file_hash();
-    let source_bytes = source.len();
+    enforce_parse_policy(policy, &diagnostics, parsed.content_hash)?;
+    let source_bytes = parsed.source.len();
     Ok(ValidatedCreate {
-        source,
-        snapshot,
-        content_hash,
+        source: parsed.source,
+        content_hash: parsed.content_hash,
         diagnostics,
+        locators: parsed.locators,
         token_size: TokenSizeMetadata {
             source_bytes,
             changed_bytes: source_bytes,
@@ -278,66 +246,27 @@ where
     })
 }
 
-fn operation_geometry(
-    operation: &EditOperation,
-    node_start: usize,
-    node_end: usize,
-) -> (usize, usize, &[u8]) {
-    match operation {
-        EditOperation::Replace(content) => (node_start, node_end, content.as_bytes()),
-        EditOperation::Delete => (node_start, node_end, &[]),
-        EditOperation::InsertBefore(content) => (node_start, node_start, content.as_bytes()),
-        EditOperation::InsertAfter(content) => (node_end, node_end, content.as_bytes()),
-    }
-}
-
-fn splice(
-    source: &[u8],
-    start: usize,
-    old_end: usize,
-    replacement: &[u8],
-) -> Result<Vec<u8>, EditError> {
-    let retained = source
-        .len()
-        .checked_sub(
-            old_end
-                .checked_sub(start)
-                .ok_or(EditError::SourceSizeOverflow)?,
-        )
-        .ok_or(EditError::SourceSizeOverflow)?;
-    let new_len = retained
-        .checked_add(replacement.len())
-        .ok_or(EditError::SourceSizeOverflow)?;
-    let mut proposed = Vec::with_capacity(new_len);
-    proposed.extend_from_slice(&source[..start]);
-    proposed.extend_from_slice(replacement);
-    proposed.extend_from_slice(&source[old_end..]);
-    Ok(proposed)
-}
-
-fn point_at(source: &[u8], offset: usize) -> SourcePoint {
-    let prefix = &source[..offset];
-    let (row, column) = prefix.iter().fold((0_u64, 0_u64), |(row, column), byte| {
-        if *byte == b'\n' {
-            (row + 1, 0)
-        } else {
-            (row, column + 1)
-        }
-    });
-    SourcePoint::new(row, column)
-}
-
 fn portable_offset(value: usize) -> Result<u64, EditError> {
     u64::try_from(value).map_err(|_| EditError::SourceOffsetOverflow)
 }
 
-fn diagnostics(before: &SyntaxSnapshot, after: &SyntaxSnapshot) -> EditDiagnostics {
-    EditDiagnostics {
-        before_total: before.diagnostic_total(),
-        after_total: after.diagnostic_total(),
-        before_truncated: before.diagnostics_truncated(),
-        after_truncated: after.diagnostics_truncated(),
-        after: after.diagnostics().to_vec(),
+impl From<&EditOperation> for EditSyntaxMutation {
+    fn from(operation: &EditOperation) -> Self {
+        match operation {
+            EditOperation::Replace(content) => Self::Replace(content.clone()),
+            EditOperation::Delete => Self::Delete,
+            EditOperation::InsertBefore(content) => Self::InsertBefore(content.clone()),
+            EditOperation::InsertAfter(content) => Self::InsertAfter(content.clone()),
+        }
+    }
+}
+
+impl From<EditSyntaxError> for EditError {
+    fn from(error: EditSyntaxError) -> Self {
+        match error {
+            EditSyntaxError::StaleLocator { cause, fresh } => Self::StaleLocator { cause, fresh },
+            EditSyntaxError::Adapter(error) => Self::Syntax(error),
+        }
     }
 }
 
@@ -417,20 +346,10 @@ fn minimal_diff(before: &[u8], after: &[u8]) -> Result<SourceDiff, EditError> {
     })
 }
 
-fn stale_view_request(snapshot: &SyntaxSnapshot, locator: &NodeLocator) -> InspectRequest {
-    let source_len = u64::try_from(snapshot.source().len()).unwrap_or(u64::MAX);
-    let range = locator.anchor.source_span.bytes;
-    InspectRequest {
-        max_nodes: DEFAULT_REFRESH_NODES,
-        byte_range: (range.end <= source_len).then_some(range),
-        ..InspectRequest::default()
-    }
-}
-
 fn token_size(
     source_bytes: usize,
     changed_bytes: usize,
-    inspection: &SyntaxInspection,
+    inspection: &EditSyntaxInspection,
     locators: &[NodeLocator],
 ) -> Result<TokenSizeMetadata, EditError> {
     let compact_syntax_bytes = serde_json::to_vec(inspection)

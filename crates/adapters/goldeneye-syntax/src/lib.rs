@@ -1,5 +1,6 @@
 //! Tree-sitter syntax services for Goldeneye.
 
+mod edit_port;
 mod engine;
 #[cfg(feature = "full-grammar-pack")]
 mod full_grammar;

@@ -2,7 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 use goldeneye_domain::{
-    ContentHash, FileId, FileRecord, GraphNode, ProjectId, ProjectRecord, ProjectRelativePath,
+    ContentHash, FileId, FileRecord, Generation, GraphNode, ProjectId, ProjectRecord,
+    ProjectRelativePath,
 };
 
 use crate::PortError;
@@ -169,4 +170,33 @@ pub trait EditRepository: Send {
         operation_id: &EditOperationId,
         error: Option<&str>,
     ) -> Result<EditJournalRecord, PortError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRefreshStatus {
+    Updated,
+    Deleted,
+    Unchanged,
+    RejectedSyntax,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditRefreshResult {
+    pub status: EditRefreshStatus,
+    pub generation: Generation,
+    pub diagnostics: usize,
+}
+
+/// Targeted indexing required after durable source edits.
+pub trait EditIndexer: Send {
+    /// Refreshes one project-relative file in the durable graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when discovery, parsing, graph assembly, or persistence fails.
+    fn refresh_file(
+        &mut self,
+        project: &ProjectId,
+        path: &ProjectRelativePath,
+    ) -> Result<EditRefreshResult, PortError>;
 }

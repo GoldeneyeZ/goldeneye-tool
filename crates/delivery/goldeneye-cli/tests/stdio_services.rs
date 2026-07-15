@@ -11,7 +11,7 @@ use goldeneye_index::{IndexOptions, IndexService};
 use goldeneye_mcp::server::Server;
 use goldeneye_services::NodeLocator;
 use goldeneye_store::Store;
-use goldeneye_syntax::CoreGrammarProvider;
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -470,7 +470,7 @@ fn stdio_startup_recovers_interrupted_edit_before_first_response() {
     let (mut edit, startup) = DurableEditService::open(
         index,
         journal,
-        CoreGrammarProvider,
+        SyntaxEngine::new(CoreGrammarProvider),
         vec![temp.path().to_path_buf()],
     )
     .expect("open durable edit service");
@@ -536,7 +536,7 @@ fn stdio_startup_reports_recovery_conflict_before_protocol_readiness() {
     let (mut edit, _) = DurableEditService::open(
         index,
         journal,
-        CoreGrammarProvider,
+        SyntaxEngine::new(CoreGrammarProvider),
         vec![temp.path().to_path_buf()],
     )
     .expect("open durable edit service");

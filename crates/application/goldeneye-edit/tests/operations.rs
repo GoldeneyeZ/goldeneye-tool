@@ -3,7 +3,7 @@ use std::sync::Arc;
 use goldeneye_domain::{
     ContentHash, FileContext, Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath,
 };
-use goldeneye_edit::{EditOperation, EditOptions, plan_edit};
+use goldeneye_edit::{EditOperation, EditOptions, EditPlanRequest, plan_edit};
 use goldeneye_syntax::{
     CoreGrammarProvider, SyntaxEngine, SyntaxSnapshot, all_named_locators, resolve_locator,
 };
@@ -39,6 +39,25 @@ fn nth_locator(
         .filter(|locator| locator.anchor.node_kind == kind)
         .nth(index)
         .unwrap_or_else(|| panic!("fixture has no {kind} at index {index}"))
+}
+
+fn request(
+    snapshot: &SyntaxSnapshot,
+    file: &FileContext,
+    locator: NodeLocator,
+    operation: EditOperation,
+    next_generation: Generation,
+) -> EditPlanRequest {
+    EditPlanRequest {
+        language_id: snapshot.language_id().clone(),
+        source: Arc::from(snapshot.source()),
+        current_generation: snapshot.generation(),
+        file_context: file.clone(),
+        locator,
+        operation,
+        next_generation,
+        options: EditOptions::default(),
+    }
 }
 
 #[test]
@@ -92,21 +111,28 @@ fn replacement_parses_cleanly_across_core_agent_languages() {
         let locator = nth_locator(&snapshot, &file, kind, 0);
         let plan = plan_edit(
             &engine,
-            &snapshot,
-            &file,
-            &locator,
-            &EditOperation::Replace(replacement.to_owned()),
-            Generation::new(2),
-            &EditOptions::default(),
+            &request(
+                &snapshot,
+                &file,
+                locator,
+                EditOperation::Replace(replacement.to_owned()),
+                Generation::new(2),
+            ),
         )
         .unwrap_or_else(|error| panic!("{language}: {error}"));
 
         assert_eq!(plan.source.as_ref(), expected.as_bytes(), "{language}");
-        assert!(!plan.snapshot.has_errors(), "{language}");
         assert_eq!(plan.diagnostics.after_total, 0, "{language}");
         assert_eq!(plan.new_file_hash, ContentHash::of(expected.as_bytes()));
+        let reparsed = engine
+            .parse(
+                LanguageId::new(language).unwrap(),
+                Arc::clone(&plan.source),
+                Generation::new(2),
+            )
+            .unwrap();
         for refreshed in &plan.refreshed_locators {
-            resolve_locator(&plan.snapshot, &file, refreshed).unwrap();
+            resolve_locator(&reparsed, &file, refreshed).unwrap();
         }
     }
 }
@@ -132,16 +158,11 @@ fn delete_and_adjacent_insertions_change_only_one_named_node_boundary() {
         let locator = nth_locator(&snapshot, &file, "function_item", 0);
         let plan = plan_edit(
             &engine,
-            &snapshot,
-            &file,
-            &locator,
-            &operation,
-            Generation::new(2),
-            &EditOptions::default(),
+            &request(&snapshot, &file, locator, operation, Generation::new(2)),
         )
         .unwrap();
         assert_eq!(plan.source.as_ref(), expected.as_bytes());
-        assert!(!plan.snapshot.has_errors());
+        assert_eq!(plan.diagnostics.after_total, 0);
     }
 }
 
@@ -165,16 +186,11 @@ fn root_insertions_preserve_original_bytes_on_each_side() {
         let root = nth_locator(&snapshot, &file, "source_file", 0);
         let plan = plan_edit(
             &engine,
-            &snapshot,
-            &file,
-            &root,
-            &operation,
-            Generation::new(2),
-            &EditOptions::default(),
+            &request(&snapshot, &file, root, operation, Generation::new(2)),
         )
         .unwrap();
         assert_eq!(plan.source.as_ref(), expected.as_bytes());
-        assert!(!plan.snapshot.has_errors());
+        assert_eq!(plan.diagnostics.after_total, 0);
     }
 }
 
@@ -187,12 +203,13 @@ fn duplicate_identical_nodes_use_path_identity_not_text_search() {
 
     let plan = plan_edit(
         &engine,
-        &snapshot,
-        &file,
-        &second,
-        &EditOperation::Replace("fn changed() {}".to_owned()),
-        Generation::new(2),
-        &EditOptions::default(),
+        &request(
+            &snapshot,
+            &file,
+            second,
+            EditOperation::Replace("fn changed() {}".to_owned()),
+            Generation::new(2),
+        ),
     )
     .unwrap();
 
@@ -209,12 +226,13 @@ fn unicode_offsets_and_minimal_diff_stay_on_utf8_boundaries() {
 
     let plan = plan_edit(
         &engine,
-        &snapshot,
-        &file,
-        &string,
-        &EditOperation::Replace("\"ê\"".to_owned()),
-        Generation::new(2),
-        &EditOptions::default(),
+        &request(
+            &snapshot,
+            &file,
+            string,
+            EditOperation::Replace("\"ê\"".to_owned()),
+            Generation::new(2),
+        ),
     )
     .unwrap();
 

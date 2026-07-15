@@ -20,6 +20,7 @@ full-grammar-pack = ["dep:goldeneye-full-grammars"]
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 goldeneye-full-grammars = { path = "../goldeneye-full-grammars", features = ["compiled"], optional = true }
 goldeneye-grammar-pack = { path = "../goldeneye-grammar-pack" }
+goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 serde.workspace = true
 thiserror.workspace = true
 tree-sitter = "=0.26.11"

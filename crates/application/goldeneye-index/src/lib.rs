@@ -1,5 +1,6 @@
 //! Fast, deterministic repository indexing for Goldeneye.
 
+mod edit_port;
 mod enrichment;
 mod extract;
 mod hybrid;

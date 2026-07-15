@@ -4,7 +4,7 @@ use goldeneye_domain::{
     ContentHash, FileContext, Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath,
     SourcePoint,
 };
-use goldeneye_edit::{EditError, EditOperation, EditOptions, plan_edit};
+use goldeneye_edit::{EditError, EditOperation, EditOptions, EditPlanRequest, plan_edit};
 use goldeneye_syntax::{
     CoreGrammarProvider, LocatorError, SyntaxEngine, SyntaxSnapshot, all_named_locators,
 };
@@ -35,15 +35,19 @@ fn locator(snapshot: &SyntaxSnapshot, index: usize) -> NodeLocator {
         .unwrap()
 }
 
-fn stale_cause(snapshot: &SyntaxSnapshot, locator: &NodeLocator) -> LocatorError {
+fn stale_cause(snapshot: &SyntaxSnapshot, locator: &NodeLocator) -> String {
     let result = plan_edit(
         &SyntaxEngine::new(CoreGrammarProvider),
-        snapshot,
-        &context(),
-        locator,
-        &EditOperation::Delete,
-        Generation::new(snapshot.generation().value() + 1),
-        &EditOptions::default(),
+        &EditPlanRequest {
+            language_id: LanguageId::new("rust").unwrap(),
+            source: Arc::from(snapshot.source()),
+            current_generation: snapshot.generation(),
+            file_context: context(),
+            locator: locator.clone(),
+            operation: EditOperation::Delete,
+            next_generation: Generation::new(snapshot.generation().value() + 1),
+            options: EditOptions::default(),
+        },
     );
     match result {
         Err(EditError::StaleLocator { cause, fresh }) => {
@@ -66,60 +70,63 @@ fn every_scope_guard_returns_its_typed_stale_cause() {
     changed.scope.file.project_id = ProjectId::new("other").unwrap();
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::ProjectMismatch
+        LocatorError::ProjectMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.file.relative_path = ProjectRelativePath::new("src/other.rs").unwrap();
-    assert_eq!(stale_cause(&snapshot, &changed), LocatorError::PathMismatch);
+    assert_eq!(
+        stale_cause(&snapshot, &changed),
+        LocatorError::PathMismatch.to_string()
+    );
 
     let mut changed = original.clone();
     changed.scope.language_id = LanguageId::new("python").unwrap();
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::LanguageMismatch
+        LocatorError::LanguageMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.grammar.provider.push_str("-other");
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::GrammarProviderMismatch
+        LocatorError::GrammarProviderMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.grammar.grammar.push_str("-other");
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::GrammarNameMismatch
+        LocatorError::GrammarNameMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.grammar.revision.push_str("-other");
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::GrammarRevisionMismatch
+        LocatorError::GrammarRevisionMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.grammar.abi += 1;
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::GrammarAbiMismatch
+        LocatorError::GrammarAbiMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.scope.file_hash = ContentHash::of(b"different");
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::FileHashMismatch
+        LocatorError::FileHashMismatch.to_string()
     );
 
     let mut changed = original;
     changed.scope.generation = Generation::new(6);
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::GenerationMismatch
+        LocatorError::GenerationMismatch.to_string()
     );
 }
 
@@ -133,49 +140,49 @@ fn every_anchor_guard_is_required_even_for_identical_node_text() {
     changed.anchor.ancestor_path[0].named_child_index = 99;
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::AncestorIndexOutOfBounds { depth: 0 }
+        LocatorError::AncestorIndexOutOfBounds { depth: 0 }.to_string()
     );
 
     let mut changed = original.clone();
     changed.anchor.ancestor_path[0].node_kind = "struct_item".to_owned();
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::AncestorKindMismatch { depth: 0 }
+        LocatorError::AncestorKindMismatch { depth: 0 }.to_string()
     );
 
     let mut changed = original.clone();
     changed.anchor.ancestor_path[0].field_name = Some("fake".to_owned());
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::AncestorFieldMismatch { depth: 0 }
+        LocatorError::AncestorFieldMismatch { depth: 0 }.to_string()
     );
 
     let mut changed = original.clone();
     changed.anchor.node_kind = "struct_item".to_owned();
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::TerminalKindMismatch
+        LocatorError::TerminalKindMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.anchor.source_span.bytes = second.anchor.source_span.bytes;
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::TerminalByteRangeMismatch
+        LocatorError::TerminalByteRangeMismatch.to_string()
     );
 
     let mut changed = original.clone();
     changed.anchor.source_span.start = SourcePoint::new(99, 0);
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::TerminalPointSpanMismatch
+        LocatorError::TerminalPointSpanMismatch.to_string()
     );
 
     let mut changed = original;
     changed.anchor.content_hash = ContentHash::of(b"different");
     assert_eq!(
         stale_cause(&snapshot, &changed),
-        LocatorError::TerminalContentHashMismatch
+        LocatorError::TerminalContentHashMismatch.to_string()
     );
 }
 
@@ -189,6 +196,6 @@ fn shifted_range_is_only_a_hint_and_never_fuzzy_relocates() {
 
     assert_eq!(
         stale_cause(&shifted, &old_locator),
-        LocatorError::TerminalByteRangeMismatch
+        LocatorError::TerminalByteRangeMismatch.to_string()
     );
 }
