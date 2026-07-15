@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
-use goldeneye_bootstrap::{ServiceIndexer, service_dependencies};
+use goldeneye_bootstrap::{BootstrapRuntime, service_dependencies};
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
@@ -11,7 +11,7 @@ use goldeneye_services::{
     SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
     TracePathRequest,
 };
-use goldeneye_watcher::{WatchRuntime, Watcher, WatcherConfig};
+use goldeneye_watcher::Watcher;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -38,32 +38,33 @@ fn negotiated_protocol_version(params: &Value) -> &'static str {
 
 pub struct Server {
     tools: ToolRegistry,
-    services: Services,
+    runtime: BootstrapRuntime,
     active_index: Mutex<Option<(RequestId, CancellationToken)>>,
-    watcher: Arc<Watcher<ServiceIndexer>>,
-    watcher_runtime: Mutex<Option<WatchRuntime>>,
 }
 
 impl Server {
     #[must_use]
     pub fn new(services: Services) -> Self {
-        let watcher = Arc::new(Watcher::new(
-            WatcherConfig::default(),
-            ServiceIndexer::new(services.clone()),
-        ));
-        if let Ok(projects) = services.list_projects() {
-            for project in projects {
-                let _ = watcher.watch(project.project, project.root_path);
-            }
-        }
-        let watcher_runtime = watcher.spawn().ok();
+        Self::with_runtime(BootstrapRuntime::new(services))
+    }
+
+    #[must_use]
+    pub fn with_runtime(runtime: BootstrapRuntime) -> Self {
         Self {
             tools: ToolRegistry::implemented(),
-            services,
+            runtime,
             active_index: Mutex::new(None),
-            watcher,
-            watcher_runtime: Mutex::new(watcher_runtime),
         }
+    }
+
+    #[must_use]
+    pub const fn services(&self) -> &Services {
+        self.runtime.services()
+    }
+
+    #[must_use]
+    pub const fn watcher(&self) -> &Arc<Watcher<goldeneye_bootstrap::ServiceIndexer>> {
+        self.runtime.watcher()
     }
 
     /// Builds a server using process environment configuration.
@@ -72,7 +73,7 @@ impl Server {
     ///
     /// Returns a typed configuration error when service configuration cannot be resolved.
     pub fn from_env() -> Result<Self, ServiceError> {
-        Ok(Self::new(Services::from_env(service_dependencies())?))
+        BootstrapRuntime::from_env().map(Self::with_runtime)
     }
 
     #[must_use]
@@ -178,7 +179,7 @@ impl Server {
                 let args: IndexArguments = parse_arguments(name, arguments)?;
                 if args.mode.as_deref() == Some("cross-repo-intelligence") {
                     let outcome = self
-                        .services
+                        .services()
                         .rebuild_cross_repo_intelligence()
                         .map_err(service_error_message)?;
                     return Ok(json!({
@@ -214,11 +215,11 @@ impl Server {
                 let args: ProjectArguments = parse_arguments(name, arguments)?;
                 let project = project_id(name, args.project)?;
                 let deleted = self
-                    .services
+                    .services()
                     .delete_project(&project)
                     .map_err(service_error_message)?;
                 if deleted {
-                    let _ = self.watcher.unwatch(project.as_str());
+                    let _ = self.watcher().unwatch(project.as_str());
                     Ok(json!({ "project": project.as_str(), "status": "deleted" }))
                 } else {
                     Err(json!({ "project": project.as_str(), "status": "not_found" }).to_string())
@@ -228,7 +229,7 @@ impl Server {
                 let args: ProjectArguments = parse_arguments(name, arguments)?;
                 let project = project_id(name, args.project)?;
                 let status = self
-                    .services
+                    .services()
                     .index_status(&IndexStatusRequest::new(project))
                     .map_err(service_error_message)?;
                 to_value(json!({
@@ -246,7 +247,7 @@ impl Server {
                 let args: ProjectArguments = parse_arguments(name, arguments)?;
                 let project = project_id(name, args.project)?;
                 let schema = self
-                    .services
+                    .services()
                     .get_graph_schema(&GraphSchemaRequest::new(project))
                     .map_err(service_error_message)?;
                 let labels = schema
@@ -279,7 +280,7 @@ impl Server {
                     return Err("pattern is required".to_owned());
                 }
                 if arguments.get("project").is_none() {
-                    return Err(project_list_error(&self.services, "project is required"));
+                    return Err(project_list_error(self.services(), "project is required"));
                 }
                 let args: SearchCodeArguments = parse_arguments(name, arguments)?;
                 self.search_code(args)
@@ -303,7 +304,7 @@ impl Server {
             "inspect_syntax" => {
                 let request: InspectSyntaxRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .inspect_syntax(&request)
                         .map_err(service_error_message)?,
                 )
@@ -311,7 +312,7 @@ impl Server {
             "create_file" => {
                 let request: CreateFileRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .create_file(&request)
                         .map_err(service_error_message)?,
                 )
@@ -319,7 +320,7 @@ impl Server {
             "replace_node" => {
                 let request: NodeContentRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .replace_node(&request)
                         .map_err(service_error_message)?,
                 )
@@ -327,7 +328,7 @@ impl Server {
             "delete_node" => {
                 let request: DeleteNodeRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .delete_node(&request)
                         .map_err(service_error_message)?,
                 )
@@ -335,7 +336,7 @@ impl Server {
             "insert_before_node" => {
                 let request: NodeContentRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .insert_before_node(&request)
                         .map_err(service_error_message)?,
                 )
@@ -343,7 +344,7 @@ impl Server {
             "insert_after_node" => {
                 let request: NodeContentRequest = parse_arguments(name, arguments)?;
                 to_value(
-                    self.services
+                    self.services()
                         .insert_after_node(&request)
                         .map_err(service_error_message)?,
                 )
@@ -366,9 +367,9 @@ impl Server {
             sections: args.sections,
         };
         let result = self
-            .services
+            .services()
             .manage_adr(&request)
-            .map_err(|error| compatibility_error(&self.services, error))?;
+            .map_err(|error| compatibility_error(self.services(), error))?;
         to_value(result)
     }
 
@@ -387,9 +388,9 @@ impl Server {
             traces: args.traces,
         };
         let result = self
-            .services
+            .services()
             .ingest_traces(&request)
-            .map_err(|error| compatibility_error(&self.services, error))?;
+            .map_err(|error| compatibility_error(self.services(), error))?;
         to_value(result)
     }
 
@@ -414,7 +415,7 @@ impl Server {
                 .map_err(|_| "change cancellation state is unavailable".to_owned())?;
             *active = Some((id.clone(), cancellation.clone()));
         }
-        let result = self.services.detect_changes(&request, &cancellation);
+        let result = self.services().detect_changes(&request, &cancellation);
         if let Ok(mut active) = self.active_index.lock()
             && active
                 .as_ref()
@@ -422,7 +423,7 @@ impl Server {
         {
             *active = None;
         }
-        let result = result.map_err(|error| compatibility_error(&self.services, error))?;
+        let result = result.map_err(|error| compatibility_error(self.services(), error))?;
         let is_error = result.is_error;
         Ok((to_value(result)?, is_error))
     }
@@ -441,7 +442,7 @@ impl Server {
             *active = Some((id.clone(), cancellation.clone()));
         }
         let result = self
-            .services
+            .services()
             .index_repository_with_hooks(request, &OperationHooks::new(cancellation));
         if let Ok(mut active) = self.active_index.lock()
             && active
@@ -451,23 +452,23 @@ impl Server {
             *active = None;
         }
         let result = result.map_err(service_error_message)?;
-        let _ = self.watcher.watch(&result.project, &result.root_path);
+        let _ = self.watcher().watch(&result.project, &result.root_path);
         to_value(result)
     }
 
     fn list_projects(&self) -> Result<Value, String> {
         let projects = self
-            .services
+            .services()
             .list_projects()
             .map_err(service_error_message)?;
-        let database_bytes = fs::metadata(self.services.config().database_path())
+        let database_bytes = fs::metadata(self.services().config().database_path())
             .map_or(0, |metadata| metadata.len());
         let mut rows = Vec::with_capacity(projects.len());
         for project in projects {
             let id = ProjectId::new(project.project.clone())
                 .map_err(|error| format!("stored project name is invalid: {error}"))?;
             let status = self
-                .services
+                .services()
                 .index_status(&IndexStatusRequest::new(id))
                 .map_err(service_error_message)?;
             rows.push(json!({
@@ -507,7 +508,7 @@ impl Server {
             cursor: args.cursor,
         };
         let page = self
-            .services
+            .services()
             .search_graph(&request)
             .map_err(service_error_message)?;
         let mut value = to_value(page)?;
@@ -522,7 +523,7 @@ impl Server {
             let mut semantic_request = SemanticSearchRequest::new(project, keywords);
             semantic_request.limit = args.limit;
             let semantic = self
-                .services
+                .services()
                 .semantic_search(&semantic_request)
                 .map_err(service_error_message)?;
             let semantic_results = semantic
@@ -554,7 +555,7 @@ impl Server {
         let mut request = QueryGraphRequest::new(project, args.query);
         request.max_rows = args.max_rows;
         let result = self
-            .services
+            .services()
             .query_graph(&request)
             .map_err(service_error_message)?;
         let rows = result
@@ -585,14 +586,14 @@ impl Server {
         request.context = args.context;
         request.regex = regex;
         request.limit = args.limit;
-        match self.services.search_code(&request) {
+        match self.services().search_code(&request) {
             Ok(result) => to_value(result),
             Err(ServiceError::Query(QueryError::InvalidPattern {
                 field: "pattern", ..
             })) if regex => Err(
                 "invalid regex pattern (regex=true): check for unbalanced (), [], or {}".to_owned(),
             ),
-            Err(error) => Err(compatibility_error(&self.services, error)),
+            Err(error) => Err(compatibility_error(self.services(), error)),
         }
     }
 
@@ -607,7 +608,7 @@ impl Server {
         request.depth = args.depth;
         request.edge_types = args.edge_types;
         let result = self
-            .services
+            .services()
             .trace_path(&request)
             .map_err(service_error_message)?;
         let mut value = to_value(&result)?;
@@ -636,7 +637,7 @@ impl Server {
     fn get_code_snippet(&self, args: SnippetArguments) -> Result<Value, String> {
         let project = project_id("get_code_snippet", args.project)?;
         let result = self
-            .services
+            .services()
             .get_code_snippet(&CodeSnippetRequest::new(project, args.qualified_name))
             .map_err(service_error_message)?;
         let Value::Object(mut object) = to_value(&result.symbol)? else {
@@ -660,7 +661,7 @@ impl Server {
     fn get_architecture(&self, args: ArchitectureArguments) -> Result<Value, String> {
         let project = project_id("get_architecture", args.project)?;
         let result = self
-            .services
+            .services()
             .get_architecture(&ArchitectureRequest::new(project))
             .map_err(service_error_message)?;
         Ok(json!({
@@ -688,16 +689,6 @@ impl Default for Server {
             ServiceConfig::default(),
             service_dependencies(),
         ))
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        if let Ok(runtime) = self.watcher_runtime.get_mut()
-            && let Some(runtime) = runtime.take()
-        {
-            runtime.stop();
-        }
     }
 }
 
@@ -986,9 +977,11 @@ struct ArchitectureArguments {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Arc;
 
     use super::{LATEST_PROTOCOL_VERSION, Server};
     use crate::protocol::RequestId;
+    use goldeneye_bootstrap::BootstrapRuntime;
     use goldeneye_services::{ServiceConfig, Services};
     use serde_json::json;
     use tempfile::TempDir;
@@ -1106,6 +1099,24 @@ mod tests {
     }
 
     #[test]
+    fn with_runtime_preserves_the_exact_shared_watcher_registry() {
+        let temp = TempDir::new().expect("temp directory");
+        let runtime = BootstrapRuntime::from_config(ServiceConfig::new(
+            temp.path().join("graph.db"),
+            temp.path(),
+        ));
+        let watcher = Arc::clone(runtime.watcher());
+        watcher
+            .watch("shared", temp.path())
+            .expect("seed shared registry");
+
+        let server = Server::with_runtime(runtime);
+
+        assert!(Arc::ptr_eq(&watcher, server.watcher()));
+        assert_eq!(server.watcher().projects().expect("projects").len(), 1);
+    }
+
+    #[test]
     fn index_repository_applies_project_name_override() {
         let temp = TempDir::new().expect("temp directory");
         let allowed = temp.path().join("allowed");
@@ -1136,6 +1147,25 @@ mod tests {
 
         assert_eq!(value["result"]["structuredContent"]["project"], "Team-API");
         assert_eq!(value["result"]["isError"], false);
+        assert_eq!(
+            server.watcher().projects().expect("indexed projects").len(),
+            1
+        );
+
+        let delete = server
+            .handle_line(
+                r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_project","arguments":{"project":"Team-API"}}}"#,
+            )
+            .expect("delete response");
+        let delete = serde_json::to_value(delete).expect("serialize delete response");
+        assert_eq!(delete["result"]["structuredContent"]["status"], "deleted");
+        assert!(
+            server
+                .watcher()
+                .projects()
+                .expect("deleted projects")
+                .is_empty()
+        );
     }
 
     #[test]

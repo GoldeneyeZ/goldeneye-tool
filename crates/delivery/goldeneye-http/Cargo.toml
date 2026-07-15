@@ -13,7 +13,6 @@ goldeneye-index = { path = "../../application/goldeneye-index" }
 goldeneye-mcp = { path = "../goldeneye-mcp" }
 goldeneye-services = { path = "../../application/goldeneye-services" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
-goldeneye-watcher = { path = "../goldeneye-watcher" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

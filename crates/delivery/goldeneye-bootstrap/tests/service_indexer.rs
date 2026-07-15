@@ -1,6 +1,7 @@
 use std::fs;
+use std::sync::Arc;
 
-use goldeneye_bootstrap::{ServiceIndexer, service_dependencies};
+use goldeneye_bootstrap::{BootstrapRuntime, ServiceIndexer, service_dependencies};
 use goldeneye_services::{
     ArchitectureRequest, IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceConfig,
     ServiceErrorCode, Services,
@@ -22,6 +23,21 @@ fn prune_is_a_no_op_before_project_validation_when_database_is_missing() {
 }
 
 #[test]
+fn dropping_runtime_stops_its_watcher() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let runtime = BootstrapRuntime::from_config(ServiceConfig::new(
+        temp.path().join("missing.db"),
+        temp.path(),
+    ));
+    let watcher = Arc::clone(runtime.watcher());
+    assert!(!watcher.is_stopped());
+
+    drop(runtime);
+
+    assert!(watcher.is_stopped());
+}
+
+#[test]
 fn reindex_and_prune_are_visible_through_the_original_services_cache() {
     let temp = tempfile::tempdir().expect("temporary directory");
     let root = temp.path().join("repo");
@@ -40,7 +56,11 @@ fn reindex_and_prune_are_visible_through_the_original_services_cache() {
     let before = services
         .get_architecture(&ArchitectureRequest::new(project.clone()))
         .expect("warm architecture cache");
-    let indexer = ServiceIndexer::new(services.clone());
+    let runtime = BootstrapRuntime::new(services.clone());
+    let projects = runtime.watcher().projects().expect("seeded projects");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].project, "demo");
+    let indexer = ServiceIndexer::new(runtime.services().clone());
 
     fs::write(root.join("lib.rs"), "fn first() {}\nfn second() {}\n").expect("updated source");
     assert_eq!(

@@ -6,12 +6,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use goldeneye_bootstrap::{ServiceIndexer, service_dependencies};
+use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_domain::{GraphEdge, GraphNode, ProjectId};
 use goldeneye_mcp::server::Server;
-use goldeneye_services::{IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, Services};
+use goldeneye_services::{IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig};
 use goldeneye_store::{QueryStore, Store};
-use goldeneye_watcher::{WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
@@ -97,40 +96,21 @@ impl ApiError {
 
 pub struct GoldeneyeBackend {
     config: ServiceConfig,
-    services: Services,
     rpc: Server,
     jobs: Arc<Mutex<Vec<IndexJob>>>,
     logs: Arc<Mutex<VecDeque<String>>>,
-    watcher: Arc<Watcher<ServiceIndexer>>,
-    watcher_runtime: Mutex<Option<WatchRuntime>>,
     started: Instant,
 }
 
 impl GoldeneyeBackend {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
-        let services = Services::new(config.clone(), service_dependencies());
-        let watcher = Arc::new(Watcher::new(
-            WatcherConfig::default(),
-            ServiceIndexer::new(services.clone()),
-        ));
-        if config.database_path().is_file()
-            && let Ok(store) = Store::open_read_only(config.database_path())
-            && let Ok(projects) = store.list_projects()
-        {
-            for project in projects {
-                let _ = watcher.watch(project.id.as_str(), project.root_path);
-            }
-        }
-        let watcher_runtime = watcher.spawn().ok();
+        let runtime = BootstrapRuntime::from_config(config.clone());
         Self {
-            rpc: Server::new(services.clone()),
+            rpc: Server::with_runtime(runtime),
             config,
-            services,
             jobs: Arc::new(Mutex::new(Vec::new())),
             logs: Arc::new(Mutex::new(VecDeque::new())),
-            watcher,
-            watcher_runtime: Mutex::new(watcher_runtime),
             started: Instant::now(),
         }
     }
@@ -282,8 +262,8 @@ impl GoldeneyeBackend {
         self.log(&format!("index[{slot}] started {}", root.display()));
         let jobs = Arc::clone(&self.jobs);
         let logs = Arc::clone(&self.logs);
-        let watcher = Arc::clone(&self.watcher);
-        let services = self.services.clone();
+        let watcher = Arc::clone(self.rpc.watcher());
+        let services = self.rpc.services().clone();
         let thread_root = root.clone();
         thread::Builder::new()
             .name(format!("goldeneye-index-{slot}"))
@@ -362,14 +342,15 @@ impl GoldeneyeBackend {
 
     fn handle_delete_project(&self, request: &ApiRequest) -> Result<ApiResponse, ApiError> {
         let project = project_id(request.required_query("name")?)?;
-        if !self.config.database_path().is_file() {
+        if !self
+            .rpc
+            .services()
+            .delete_project(&project)
+            .map_err(internal)?
+        {
             return Err(ApiError::new(404, "project not found"));
         }
-        let mut store = Store::open(self.config.database_path()).map_err(internal)?;
-        if !store.delete_project(&project).map_err(internal)? {
-            return Err(ApiError::new(404, "project not found"));
-        }
-        let _ = self.watcher.unwatch(project.as_str());
+        let _ = self.rpc.watcher().unwatch(project.as_str());
         self.log(&format!("project deleted {}", project.as_str()));
         Ok(ApiResponse::ok(json!({ "deleted": true })))
     }
@@ -578,16 +559,6 @@ impl ApiBackend for GoldeneyeBackend {
                 Err(ApiError::new(405, "method not allowed"))
             }
             _ => Err(ApiError::new(404, "not found")),
-        }
-    }
-}
-
-impl Drop for GoldeneyeBackend {
-    fn drop(&mut self) {
-        if let Ok(runtime) = self.watcher_runtime.get_mut()
-            && let Some(runtime) = runtime.take()
-        {
-            runtime.stop();
         }
     }
 }
@@ -1022,4 +993,124 @@ fn terminate_process(pid: u32) -> Result<(), ApiError> {
         .success()
         .then_some(())
         .ok_or_else(|| ApiError::new(500, "process termination failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use goldeneye_bootstrap::service_dependencies;
+    use goldeneye_services::{
+        ArchitectureRequest, IndexRepositoryRequest, ProjectId, ServiceConfig, ServiceErrorCode,
+        Services,
+    };
+    use goldeneye_store::Store;
+
+    use super::{ApiBackend, ApiRequest, GoldeneyeBackend};
+
+    #[test]
+    fn http_delete_invalidates_rpc_cache_and_untracks_the_single_registry() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let root = temp.path().join("repo");
+        fs::create_dir(&root).expect("repository directory");
+        fs::write(root.join("lib.rs"), "fn indexed() {}\n").expect("source file");
+        let config = ServiceConfig::new(temp.path().join("graph.db"), &root);
+        let services = Services::new(config.clone(), service_dependencies());
+        services
+            .index_repository(
+                &IndexRepositoryRequest::new(&root)
+                    .with_name("demo")
+                    .with_mode(goldeneye_services::IndexRepositoryMode::Fast),
+            )
+            .expect("initial index");
+        drop(services);
+        let backend = GoldeneyeBackend::new(config);
+        let project = ProjectId::new("demo").expect("project ID");
+        backend
+            .rpc
+            .services()
+            .get_architecture(&ArchitectureRequest::new(project.clone()))
+            .expect("warm RPC architecture cache");
+        assert_eq!(
+            backend
+                .rpc
+                .watcher()
+                .projects()
+                .expect("seeded projects")
+                .len(),
+            1
+        );
+        let request = ApiRequest {
+            method: "DELETE".to_owned(),
+            path: "/api/project".to_owned(),
+            query: BTreeMap::from([("name".to_owned(), "demo".to_owned())]),
+            headers: BTreeMap::new(),
+            body: Vec::new(),
+        };
+
+        let response = backend.handle(&request).expect("HTTP delete");
+
+        assert_eq!(response.status, 200);
+        assert!(
+            backend
+                .rpc
+                .watcher()
+                .projects()
+                .expect("projects after delete")
+                .is_empty()
+        );
+        let error = backend
+            .rpc
+            .services()
+            .get_architecture(&ArchitectureRequest::new(project))
+            .expect_err("HTTP delete invalidates RPC cache");
+        assert_eq!(error.code(), ServiceErrorCode::NotFound);
+    }
+
+    #[test]
+    fn detached_http_index_finishes_after_backend_drop() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let root = temp.path().join("repo");
+        fs::create_dir(&root).expect("repository directory");
+        for index in 0..100 {
+            fs::write(
+                root.join(format!("file_{index}.rs")),
+                format!("fn symbol_{index}() {{}}\n"),
+            )
+            .expect("source file");
+        }
+        let database = temp.path().join("graph.db");
+        let backend = GoldeneyeBackend::new(ServiceConfig::new(&database, &root));
+        let request = ApiRequest {
+            method: "POST".to_owned(),
+            path: "/api/index".to_owned(),
+            query: BTreeMap::new(),
+            headers: BTreeMap::new(),
+            body: serde_json::to_vec(&serde_json::json!({
+                "root_path": root,
+                "project_name": "detached",
+                "mode": "fast"
+            }))
+            .expect("index request"),
+        };
+        assert_eq!(backend.handle(&request).expect("start index").status, 202);
+
+        drop(backend);
+
+        let project = ProjectId::new("detached").expect("project ID");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if Store::open_read_only(&database)
+                .and_then(|store| store.get_project(&project))
+                .is_ok_and(|record| record.is_some())
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("detached index did not persist after backend drop");
+    }
 }

@@ -27,7 +27,9 @@ domain <- ports <- application <- delivery
   Git, artifacts, and other external mechanisms.
 - **Delivery** translates CLI, MCP, HTTP, and watcher events into application
   requests. `goldeneye-bootstrap` owns concrete adapter composition, while
-  `goldeneye-watcher` remains generic over its indexing boundary.
+  `goldeneye-watcher` remains generic over its indexing boundary. One
+  `BootstrapRuntime` owns the shared services, watcher registry, and watcher
+  thread for each MCP or embedded HTTP server lifetime.
 
 Delivery may depend on every inner layer. Adapters and application are sibling
 branches joined through ports; neither may depend on the other.

@@ -10,12 +10,13 @@ use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
-    IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceDependencies, Services,
+    IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceConfig, ServiceDependencies,
+    ServiceError, Services,
 };
 use goldeneye_store::SqliteRepositoryFactory;
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
-use goldeneye_watcher::{IndexDisposition, Indexer};
+use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, WatcherConfig};
 
 /// Builds the production adapter set used by Goldeneye delivery crates.
 #[must_use]
@@ -29,6 +30,72 @@ pub fn service_dependencies() -> ServiceDependencies {
         Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
         Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
+}
+
+/// Owns one shared application service graph and its single background watcher runtime.
+///
+/// Dropping this value signals the watcher to stop, wakes its thread, and joins it. Drop may
+/// block until an active poll or index operation completes because those operations are
+/// intentionally synchronous and are not forcefully cancelled.
+pub struct BootstrapRuntime {
+    services: Services,
+    watcher: Arc<Watcher<ServiceIndexer>>,
+    watch_runtime: Option<WatchRuntime>,
+}
+
+impl BootstrapRuntime {
+    /// Creates, seeds, and starts one best-effort watcher over `services`.
+    #[must_use]
+    pub fn new(services: Services) -> Self {
+        let watcher = Arc::new(Watcher::new(
+            WatcherConfig::default(),
+            ServiceIndexer::new(services.clone()),
+        ));
+        if let Ok(projects) = services.list_projects() {
+            for project in projects {
+                let _ = watcher.watch(project.project, project.root_path);
+            }
+        }
+        let watch_runtime = watcher.spawn().ok();
+        Self {
+            services,
+            watcher,
+            watch_runtime,
+        }
+    }
+
+    /// Creates one runtime from explicit service configuration.
+    #[must_use]
+    pub fn from_config(config: ServiceConfig) -> Self {
+        Self::new(Services::new(config, service_dependencies()))
+    }
+
+    /// Creates one runtime from process environment configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed configuration or recovery error when services cannot be opened.
+    pub fn from_env() -> Result<Self, ServiceError> {
+        Services::from_env(service_dependencies()).map(Self::new)
+    }
+
+    #[must_use]
+    pub const fn services(&self) -> &Services {
+        &self.services
+    }
+
+    #[must_use]
+    pub const fn watcher(&self) -> &Arc<Watcher<ServiceIndexer>> {
+        &self.watcher
+    }
+}
+
+impl Drop for BootstrapRuntime {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.watch_runtime.take() {
+            runtime.stop();
+        }
+    }
 }
 
 /// Adapts shared application services to the generic background watcher.

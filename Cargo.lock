@@ -455,7 +455,6 @@ dependencies = [
  "goldeneye-mcp",
  "goldeneye-services",
  "goldeneye-store",
- "goldeneye-watcher",
  "serde",
  "serde_json",
  "tempfile",

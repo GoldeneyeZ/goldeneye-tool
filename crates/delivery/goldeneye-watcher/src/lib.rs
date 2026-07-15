@@ -180,6 +180,12 @@ impl<I: Indexer> Watcher<I> {
             .collect()
     }
 
+    /// Returns whether the shared watcher runtime has been asked to stop.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.wake.stopped.load(Ordering::Acquire)
+    }
+
     /// Polls every due project once.
     ///
     /// Failed or busy reindexes retain their observed baseline so the next poll retries.
