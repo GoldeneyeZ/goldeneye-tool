@@ -303,6 +303,7 @@ name = "goldeneye"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-bootstrap",
  "goldeneye-discovery",
  "goldeneye-edit",
  "goldeneye-http",

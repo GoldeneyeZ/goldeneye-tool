@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
-use goldeneye_bootstrap::{BootstrapRuntime, service_dependencies};
+use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
@@ -685,10 +685,7 @@ impl Server {
 
 impl Default for Server {
     fn default() -> Self {
-        Self::new(Services::new(
-            ServiceConfig::default(),
-            service_dependencies(),
-        ))
+        Self::with_runtime(BootstrapRuntime::from_config(ServiceConfig::default()))
     }
 }
 
@@ -981,7 +978,7 @@ mod tests {
 
     use super::{LATEST_PROTOCOL_VERSION, Server};
     use crate::protocol::RequestId;
-    use goldeneye_bootstrap::BootstrapRuntime;
+    use goldeneye_bootstrap::{BootstrapRuntime, service_dependencies};
     use goldeneye_services::{ServiceConfig, Services};
     use serde_json::json;
     use tempfile::TempDir;
@@ -1114,6 +1111,10 @@ mod tests {
 
         assert!(Arc::ptr_eq(&watcher, server.watcher()));
         assert_eq!(server.watcher().projects().expect("projects").len(), 1);
+        let ping = server
+            .handle_line(r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#)
+            .expect("injected runtime protocol response");
+        assert_eq!(ping.result, Some(json!({})));
     }
 
     #[test]
@@ -1125,7 +1126,7 @@ mod tests {
         fs::write(repository.join("src/lib.rs"), "pub fn ready() {}\n").expect("source file");
         let server = Server::new(Services::new(
             ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
-            super::service_dependencies(),
+            service_dependencies(),
         ));
         let request = json!({
             "jsonrpc": "2.0",

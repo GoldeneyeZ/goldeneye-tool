@@ -1,3 +1,4 @@
+use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::transport::FrameReader;
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -12,7 +13,21 @@ pub fn run_session<R: Read, W: Write>(
     reader: R,
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let server = Server::from_env()?;
+    let runtime = BootstrapRuntime::from_env()?;
+    run_session_with_runtime(reader, writer, runtime)
+}
+
+/// Runs one MCP session against an injected production runtime until EOF.
+///
+/// # Errors
+///
+/// Returns an error when input framing, JSON serialization, or output writing fails.
+pub fn run_session_with_runtime<R: Read, W: Write>(
+    reader: R,
+    writer: W,
+    runtime: BootstrapRuntime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let server = Server::with_runtime(runtime);
     run_session_with_server(reader, writer, &server)
 }
 

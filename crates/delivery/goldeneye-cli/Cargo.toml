@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
+goldeneye-bootstrap = { path = "../goldeneye-bootstrap" }
 goldeneye-http = { path = "../goldeneye-http" }
 goldeneye-index = { path = "../../application/goldeneye-index" }
 goldeneye-mcp = { path = "../goldeneye-mcp" }

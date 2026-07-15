@@ -29,7 +29,9 @@ domain <- ports <- application <- delivery
   requests. `goldeneye-bootstrap` owns concrete adapter composition, while
   `goldeneye-watcher` remains generic over its indexing boundary. One
   `BootstrapRuntime` owns the shared services, watcher registry, and watcher
-  thread for each MCP or embedded HTTP server lifetime.
+  thread for each MCP or embedded HTTP server lifetime. The `goldeneye` CLI is
+  the executable composition root: it resolves process configuration and moves
+  one runtime into the selected stdio or HTTP delivery path.
 
 Delivery may depend on every inner layer. Adapters and application are sibling
 branches joined through ports; neither may depend on the other.

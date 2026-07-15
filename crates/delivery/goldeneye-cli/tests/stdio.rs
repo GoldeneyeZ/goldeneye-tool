@@ -1,6 +1,10 @@
 use serde_json::{Value, json};
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::process::{Command, Output, Stdio};
+use std::sync::Arc;
+
+use goldeneye_bootstrap::BootstrapRuntime;
+use goldeneye_services::ServiceConfig;
 
 fn run_server(input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_goldeneye"))
@@ -38,6 +42,23 @@ fn assert_clean_success(output: &Output) {
         "unexpected stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn injected_runtime_stops_on_stdio_eof() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let runtime = BootstrapRuntime::from_config(ServiceConfig::new(
+        temp.path().join("graph.db"),
+        temp.path(),
+    ));
+    let watcher = Arc::clone(runtime.watcher());
+    let mut output = Vec::new();
+
+    goldeneye::run_session_with_runtime(Cursor::new(Vec::<u8>::new()), &mut output, runtime)
+        .expect("EOF session");
+
+    assert!(output.is_empty());
+    assert!(watcher.is_stopped());
 }
 
 #[test]

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use goldeneye_artifact::{
     ArtifactQuality, artifact_commit, artifact_exists, export_artifact, import_artifact,
 };
+use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_http::{BoundServer, GoldeneyeBackend, ServerConfig};
 use goldeneye_index::canonical_project;
 use goldeneye_services::ServiceConfig;
@@ -15,7 +16,7 @@ const USAGE: &str = "Usage:\n  goldeneye\n  goldeneye --version\n  goldeneye ui 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     match args.first().and_then(|value| value.to_str()) {
-        None => goldeneye::run_session(std::io::stdin().lock(), std::io::stdout().lock()),
+        None => run_stdio(),
         Some("--version" | "-V") if args.len() == 1 => {
             println!("goldeneye {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -28,6 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("ui") => run_ui(&args[1..]),
         _ => Err(invalid_arguments().into()),
     }
+}
+
+fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = BootstrapRuntime::from_env()?;
+    goldeneye::run_session_with_runtime(std::io::stdin().lock(), std::io::stdout().lock(), runtime)
 }
 
 fn run_ui(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
@@ -56,7 +62,9 @@ fn run_ui(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let base_path = config.base_path.clone();
-    let server = BoundServer::bind(config, GoldeneyeBackend::from_env()?)?;
+    let service_config = ServiceConfig::from_env()?;
+    let runtime = BootstrapRuntime::from_config(service_config);
+    let server = BoundServer::bind(config, GoldeneyeBackend::with_runtime(runtime))?;
     let address = server.local_addr()?;
     println!("http://{address}{base_path}/");
     server.run()?;

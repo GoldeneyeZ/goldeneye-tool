@@ -105,7 +105,12 @@ pub struct GoldeneyeBackend {
 impl GoldeneyeBackend {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
-        let runtime = BootstrapRuntime::from_config(config.clone());
+        Self::with_runtime(BootstrapRuntime::from_config(config))
+    }
+
+    #[must_use]
+    pub fn with_runtime(runtime: BootstrapRuntime) -> Self {
+        let config = runtime.services().config().clone();
         Self {
             rpc: Server::with_runtime(runtime),
             config,
