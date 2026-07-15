@@ -10,6 +10,7 @@ mod git;
 mod index;
 mod index_syntax;
 mod inspection;
+mod project_administration;
 mod query;
 mod repository;
 
@@ -45,6 +46,7 @@ pub use inspection::{
     MAX_INSPECT_DEPTH, MAX_INSPECT_KIND_FILTERS, MAX_INSPECT_NODES, MAX_PREVIEW_CHARS,
     SyntaxInspection, SyntaxNodeView,
 };
+pub use project_administration::ProjectAdministrationRepository;
 pub use query::{
     ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, QueryRepository,
     STORED_VECTOR_DIM, SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,

@@ -75,8 +75,8 @@ impl Services {
     ///
     /// Returns a typed project, path-policy, or storage error.
     pub fn manage_adr(&self, request: &ManageAdrRequest) -> Result<ManageAdrResult, ServiceError> {
-        let (mut store, project, root) =
-            self.writable_project_store_for_reference(&request.project)?;
+        let (project, root) = self.project_and_root_for_reference(&request.project)?;
+        let mut store = Store::open(self.config().database_path())?;
         let mut adr = store.get_adr(&project)?;
         if adr.is_none() {
             let legacy_path = root.join(".codebase-memory").join("adr.md");
@@ -133,7 +133,8 @@ impl Services {
         &self,
         request: &IngestTracesRequest,
     ) -> Result<IngestTracesResult, ServiceError> {
-        let (mut store, _) = self.writable_project_store(&request.project)?;
+        self.adr_project_root(&request.project)?;
+        let mut store = Store::open(self.config().database_path())?;
         let traces = parse_runtime_traces(&request.traces);
         store.ingest_runtime_traces(&request.project, &traces)?;
         Ok(IngestTracesResult {
@@ -143,23 +144,24 @@ impl Services {
         })
     }
 
-    fn writable_project_store(
-        &self,
-        project: &ProjectId,
-    ) -> Result<(Store, PathBuf), ServiceError> {
+    fn adr_project_root(&self, project: &ProjectId) -> Result<PathBuf, ServiceError> {
         self.prepare_database()?;
-        let store = Store::open(self.config().database_path())?;
-        let record = store
-            .get_project(project)?
+        let repository = self
+            .dependencies
+            .repositories()
+            .open_query(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
+        let record = repository
+            .get_project(project)
+            .map_err(ServiceError::Repository)?
             .ok_or_else(|| QueryError::ProjectNotFound(project.clone()))?;
-        let root = self.resolve_repository(record.root_path.as_ref())?;
-        Ok((store, root))
+        self.resolve_repository(record.root_path.as_ref())
     }
 
-    fn writable_project_store_for_reference(
+    fn project_and_root_for_reference(
         &self,
         reference: &str,
-    ) -> Result<(Store, ProjectId, PathBuf), ServiceError> {
+    ) -> Result<(ProjectId, PathBuf), ServiceError> {
         let reference_path = std::path::Path::new(reference);
         let looks_like_path =
             reference_path.is_absolute() || reference.contains('/') || reference.contains('\\');
@@ -168,15 +170,20 @@ impl Services {
                 code: crate::ServiceErrorCode::InvalidInput,
                 message: format!("invalid project: {error}"),
             })?;
-            let (store, root) = self.writable_project_store(&project)?;
-            return Ok((store, project, root));
+            let root = self.adr_project_root(&project)?;
+            return Ok((project, root));
         }
 
         let canonical = self.resolve_repository(reference_path)?;
         self.prepare_database()?;
-        let store = Store::open(self.config().database_path())?;
-        let project = store
-            .list_projects()?
+        let repository = self
+            .dependencies
+            .repositories()
+            .open_query(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
+        let project = repository
+            .list_projects()
+            .map_err(ServiceError::Repository)?
             .into_iter()
             .find_map(|record| {
                 std::path::Path::new(&record.root_path)
@@ -189,7 +196,7 @@ impl Services {
                 code: crate::ServiceErrorCode::NotFound,
                 message: format!("project not found or not indexed: {reference}"),
             })?;
-        Ok((store, project, canonical))
+        Ok((project, canonical))
     }
 }
 

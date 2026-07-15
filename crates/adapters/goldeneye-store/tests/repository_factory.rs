@@ -1,6 +1,7 @@
 use goldeneye_domain::{Generation, ProjectId, ProjectRecord};
 use goldeneye_ports::{
-    CrossLinkRepository, EditRepository, IndexRepository, QueryRepository, RepositoryFactory,
+    CrossLinkRepository, EditRepository, IndexRepository, ProjectAdministrationRepository,
+    QueryRepository, RepositoryFactory,
 };
 use goldeneye_store::SqliteRepositoryFactory;
 
@@ -29,6 +30,13 @@ fn crosslink_project_count(repository: &impl CrossLinkRepository) -> usize {
         .list_projects()
         .expect("crosslink projects")
         .len()
+}
+
+fn delete_project(
+    repository: &mut impl ProjectAdministrationRepository,
+    project: &ProjectId,
+) -> bool {
+    repository.delete_project(project).expect("delete project")
 }
 
 #[test]
@@ -90,4 +98,10 @@ fn factory_boxes_forward_repository_ports_and_edit_opens_are_independent() {
         .open_query(&database)
         .expect("open query repository");
     assert_eq!(query_project_count(&query), 1);
+    let mut administration = factory
+        .open_project_administration(&database)
+        .expect("open project administration repository");
+    assert!(delete_project(&mut administration, &project_id));
+    assert!(!delete_project(&mut administration, &project_id));
+    assert_eq!(query_project_count(&query), 0);
 }

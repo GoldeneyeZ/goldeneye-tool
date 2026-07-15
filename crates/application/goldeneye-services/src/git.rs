@@ -72,7 +72,7 @@ impl Services {
         project: &ProjectId,
         cancellation: &CancellationToken,
     ) -> Result<GitContext, ServiceError> {
-        let (_, root) = self.project_store_and_root(project)?;
+        let root = self.git_project_root(project)?;
         let cancelled = || cancellation.is_cancelled();
         Ok(self.dependencies.git().resolve_context(&root, &cancelled)?)
     }
@@ -87,7 +87,7 @@ impl Services {
         project: &ProjectId,
         cancellation: &CancellationToken,
     ) -> Result<GitHistoryResult, ServiceError> {
-        let (_, root) = self.project_store_and_root(project)?;
+        let root = self.git_project_root(project)?;
         self.refresh_git_history_at(project, &root, cancellation)
     }
 
@@ -137,7 +137,7 @@ impl Services {
             .filter(|value| !value.is_empty())
             .unwrap_or(&request.base_branch);
         self.dependencies.git().validate_reference(reference)?;
-        let (store, root) = self.project_store_and_root(&request.project)?;
+        let root = self.git_project_root(&request.project)?;
         let cancelled = || cancellation.is_cancelled();
         let changes = self.dependencies.git().detect_changes(
             &root,
@@ -153,6 +153,7 @@ impl Services {
             .as_deref()
             .is_none_or(|scope| matches!(scope, "symbols" | "impact"));
         let impacted_symbols = if wants_symbols {
+            let store = Store::open(self.config().database_path())?;
             impacted_symbols(&store, &request.project, &changes.files, depth)?
         } else {
             Vec::new()
@@ -173,17 +174,18 @@ impl Services {
         })
     }
 
-    fn project_store_and_root(
-        &self,
-        project: &ProjectId,
-    ) -> Result<(Store, std::path::PathBuf), ServiceError> {
+    fn git_project_root(&self, project: &ProjectId) -> Result<std::path::PathBuf, ServiceError> {
         self.prepare_database()?;
-        let store = Store::open(self.config().database_path())?;
-        let record = store
-            .get_project(project)?
+        let repository = self
+            .dependencies
+            .repositories()
+            .open_query(self.config().database_path())
+            .map_err(ServiceError::Repository)?;
+        let record = repository
+            .get_project(project)
+            .map_err(ServiceError::Repository)?
             .ok_or_else(|| QueryError::ProjectNotFound(project.clone()))?;
-        let root = self.resolve_repository(Path::new(&record.root_path))?;
-        Ok((store, root))
+        self.resolve_repository(Path::new(&record.root_path))
     }
 }
 

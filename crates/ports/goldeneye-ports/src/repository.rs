@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::{CrossLinkRepository, EditRepository, IndexRepository, PortError, QueryRepository};
+use crate::{
+    CrossLinkRepository, EditRepository, IndexRepository, PortError,
+    ProjectAdministrationRepository, QueryRepository,
+};
 
 /// Creates application repository ports without exposing adapter-owned stores.
 pub trait RepositoryFactory: Send + Sync {
@@ -38,4 +41,14 @@ pub trait RepositoryFactory: Send + Sync {
     ///
     /// Returns an adapter error when the repository cannot be opened or migrated.
     fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError>;
+
+    /// Opens a writable repository for project administration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an adapter error when the repository cannot be opened or migrated.
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError>;
 }

@@ -14,8 +14,8 @@ use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
     ArtifactPersistence, CrossLinkRepository, DetectChangesOptions, DetectedChanges,
     EditRepository, GitContext, GitHistory, GitPortError, GitRepository, IndexRepository,
-    LanguageClassifier, PortError, QueryRepository, RepositoryDiscovery,
-    RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
+    LanguageClassifier, PortError, ProjectAdministrationRepository, QueryRepository,
+    RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
 };
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
@@ -77,6 +77,13 @@ impl RepositoryFactory for FailingRepositoryFactory {
     fn open_crosslink(&self, _path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
         Err(repository_failure())
     }
+
+    fn open_project_administration(
+        &self,
+        _path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        Err(repository_failure())
+    }
 }
 
 impl RepositoryFactory for FailSecondCrosslinkFactory {
@@ -101,6 +108,13 @@ impl RepositoryFactory for FailSecondCrosslinkFactory {
             store: Store::open(path).map_err(PortError::new)?,
             replacements: 0,
         }))
+    }
+
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        RepositoryFactory::open_project_administration(&SqliteRepositoryFactory, path)
     }
 }
 
@@ -467,11 +481,54 @@ fn injected_source_discovery_drives_indexing_and_language_classification() {
 }
 
 #[test]
+fn project_deletion_invalidates_a_warm_graph_cache_and_preserves_not_found_mapping() {
+    let temp = TempDir::new().expect("temp directory");
+    let allowed = temp.path().join("allowed");
+    let repo = allowed.join("fixture");
+    write_fixture(&repo);
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        service_dependencies(),
+    );
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("index fixture");
+    let project = ProjectId::new(indexed.project).expect("project ID");
+    let warmed = services
+        .get_architecture(&ArchitectureRequest::new(project.clone()))
+        .expect("warm project graph");
+    assert!(warmed.total_nodes > 0);
+
+    assert!(services.delete_project(&project).expect("delete project"));
+    assert!(
+        !services
+            .delete_project(&project)
+            .expect("delete missing project")
+    );
+    assert!(services.list_projects().expect("list projects").is_empty());
+    let error = services
+        .get_architecture(&ArchitectureRequest::new(project.clone()))
+        .expect_err("deleted project must be missing");
+    assert_eq!(error.code(), ServiceErrorCode::NotFound);
+
+    fs::write(repo.join("src/lib.rs"), "pub const VALUE: usize = 1;\n")
+        .expect("replace fixture after deletion");
+    let reindexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("reindex deleted project");
+    assert_eq!(reindexed.project, project.as_str());
+    let refreshed = services
+        .get_architecture(&ArchitectureRequest::new(project))
+        .expect("read recreated project graph");
+    assert_ne!(refreshed.total_nodes, warmed.total_nodes);
+}
+
+#[test]
 fn repository_factory_failures_keep_repository_storage_classification_and_message() {
     let temp = TempDir::new().expect("temp directory");
+    let database = temp.path().join("missing/graph.db");
     let services = Services::new(
-        ServiceConfig::new(temp.path().join("missing/graph.db"), temp.path())
-            .with_allowed_root(temp.path()),
+        ServiceConfig::new(&database, temp.path()).with_allowed_root(temp.path()),
         ServiceDependencies::new(
             Arc::new(FileArtifactPersistence),
             Arc::new(GitCommandRepository),
@@ -492,6 +549,18 @@ fn repository_factory_failures_keep_repository_storage_classification_and_messag
         goldeneye_services::ServiceError::Repository(_)
     ));
     assert_eq!(error.to_string(), "repository factory failed");
+
+    fs::write(&database, b"administration open is intercepted").expect("database marker");
+    let project = ProjectId::new("missing").expect("project ID");
+    let delete_error = services
+        .delete_project(&project)
+        .expect_err("project administration open must fail");
+    assert_eq!(delete_error.code(), ServiceErrorCode::Storage);
+    assert!(matches!(
+        &delete_error,
+        goldeneye_services::ServiceError::Repository(_)
+    ));
+    assert_eq!(delete_error.to_string(), "repository factory failed");
 }
 
 #[test]
@@ -635,9 +704,13 @@ fn allowed_root_unknown_project_and_cancellation_are_typed() {
 
     let missing = ProjectId::new("missing").expect("missing project ID");
     let missing_error = services
-        .index_status(&IndexStatusRequest::new(missing))
+        .index_status(&IndexStatusRequest::new(missing.clone()))
         .expect_err("unknown project must fail");
     assert_eq!(missing_error.code(), ServiceErrorCode::NotFound);
+    let missing_git = services
+        .git_context(&missing, &CancellationToken::new())
+        .expect_err("unknown Git project must fail");
+    assert_eq!(missing_git.code(), ServiceErrorCode::NotFound);
 
     let cancellation = CancellationToken::new();
     cancellation.cancel();

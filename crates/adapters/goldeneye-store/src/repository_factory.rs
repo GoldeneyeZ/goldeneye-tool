@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use goldeneye_ports::{
-    CrossLinkRepository, EditRepository, IndexRepository, PortError, QueryRepository,
-    RepositoryFactory,
+    CrossLinkRepository, EditRepository, IndexRepository, PortError,
+    ProjectAdministrationRepository, QueryRepository, RepositoryFactory,
 };
 
 use crate::Store;
@@ -38,6 +38,15 @@ impl RepositoryFactory for SqliteRepositoryFactory {
     fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
         Store::open(path)
             .map(|repository| Box::new(repository) as Box<dyn CrossLinkRepository>)
+            .map_err(PortError::new)
+    }
+
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        Store::open(path)
+            .map(|repository| Box::new(repository) as Box<dyn ProjectAdministrationRepository>)
             .map_err(PortError::new)
     }
 }

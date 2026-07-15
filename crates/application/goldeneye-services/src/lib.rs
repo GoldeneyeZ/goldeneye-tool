@@ -627,7 +627,18 @@ impl Services {
         if !self.config.database_path.is_file() {
             return Ok(false);
         }
-        Ok(Store::open(&self.config.database_path)?.delete_project(project)?)
+        let mut repository = self
+            .dependencies
+            .repositories()
+            .open_project_administration(&self.config.database_path)
+            .map_err(ServiceError::Repository)?;
+        let deleted = repository
+            .delete_project(project)
+            .map_err(ServiceError::Repository)?;
+        if deleted {
+            self.query.invalidate_project(project);
+        }
+        Ok(deleted)
     }
 
     /// Rebuilds derived cross-project route and channel edges for all persisted projects.

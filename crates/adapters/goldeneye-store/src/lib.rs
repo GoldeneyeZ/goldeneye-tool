@@ -4,6 +4,7 @@ mod adr;
 mod crosslink_port;
 mod edit_port;
 mod index_port;
+mod project_administration_port;
 mod query_port;
 mod repository_factory;
 mod schema;

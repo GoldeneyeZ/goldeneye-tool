@@ -54,9 +54,9 @@ violations fail `cargo xtask architecture verify`.
 
 Current debt is concentrated in:
 
-- orchestration -> SQLite store for remaining project administration, ADR, Git-history, and
-  semantic-index paths. Index, query, edit, and cross-link repository construction now enters
-  through the application-owned `RepositoryFactory` port.
+- orchestration -> SQLite store for remaining ADR/runtime, Git-history/impact, and semantic-index
+  paths. Project administration, index, query, edit, and cross-link repository construction now
+  enters through the application-owned `RepositoryFactory` port.
 
 ## Migration Plan
 
