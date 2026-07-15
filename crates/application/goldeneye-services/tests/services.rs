@@ -14,17 +14,18 @@ use goldeneye_git::GitCommandRepository;
 use goldeneye_ports::{
     AdrTraceRepository, ArtifactPersistence, CrossLinkRepository, DetectChangesOptions,
     DetectedChanges, EditRepository, GitContext, GitHistory, GitPortError, GitRepository,
-    IndexRepository, LanguageClassifier, PortError, ProjectAdministrationRepository,
-    QueryRepository, RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport,
-    RepositoryFactory,
+    IndexRepository, LanguageClassifier, NodeSignatureRecord, NodeVectorRecord, PortError,
+    ProjectAdministrationRepository, QueryRepository, RepositoryDiscovery,
+    RepositoryDiscoveryOptions, RepositoryDiscoveryReport, RepositoryFactory,
+    SemanticIndexRepository, TokenVectorRecord,
 };
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
-    DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult,
-    IndexStatusRequest, InspectSyntaxRequest, LanguageId, ManageAdrRequest, NodeContentRequest,
-    OperationHooks, PageRequest, ProjectId, ProjectRelativePath, QueryGraphRequest,
-    SearchCodeRequest, SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies,
-    ServiceErrorCode, Services, TraceDirection, TracePathRequest,
+    DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode, IndexRepositoryRequest,
+    IndexRepositoryResult, IndexStatusRequest, InspectSyntaxRequest, LanguageId, ManageAdrRequest,
+    NodeContentRequest, OperationHooks, PageRequest, ProjectId, ProjectRelativePath,
+    QueryGraphRequest, SearchCodeRequest, SearchCodeResult, SearchGraphRequest, ServiceConfig,
+    ServiceDependencies, ServiceErrorCode, Services, TraceDirection, TracePathRequest,
 };
 use goldeneye_store::{SqliteRepositoryFactory, Store};
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
@@ -54,6 +55,20 @@ struct FailingRepositoryFactory;
 struct FailingAdrTraceFactory;
 
 struct FailSecondCrosslinkFactory;
+
+type SemanticReplacement = (Generation, usize, usize, usize);
+type RecordedSemanticReplacements = Arc<Mutex<Vec<SemanticReplacement>>>;
+
+struct RecordingSemanticFactory {
+    query_opens: Arc<AtomicUsize>,
+    replacements: RecordedSemanticReplacements,
+    fail_replacement: bool,
+}
+
+struct RecordingSemanticRepository {
+    replacements: RecordedSemanticReplacements,
+    fail_replacement: bool,
+}
 
 struct FailSecondCrosslinkRepository {
     store: Store,
@@ -91,6 +106,13 @@ impl RepositoryFactory for FailingRepositoryFactory {
     fn open_adr_traces(&self, _path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         Err(repository_failure())
     }
+
+    fn open_semantic_index(
+        &self,
+        _path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        Err(repository_failure())
+    }
 }
 
 impl RepositoryFactory for FailingAdrTraceFactory {
@@ -123,6 +145,13 @@ impl RepositoryFactory for FailingAdrTraceFactory {
 
     fn open_adr_traces(&self, _path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         Err(repository_failure())
+    }
+
+    fn open_semantic_index(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        RepositoryFactory::open_semantic_index(&SqliteRepositoryFactory, path)
     }
 }
 
@@ -159,6 +188,84 @@ impl RepositoryFactory for FailSecondCrosslinkFactory {
 
     fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_semantic_index(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        RepositoryFactory::open_semantic_index(&SqliteRepositoryFactory, path)
+    }
+}
+
+impl RepositoryFactory for RecordingSemanticFactory {
+    fn initialize(&self, path: &Path) -> Result<(), PortError> {
+        RepositoryFactory::initialize(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_query(&self, path: &Path) -> Result<Box<dyn QueryRepository>, PortError> {
+        self.query_opens.fetch_add(1, Ordering::Relaxed);
+        RepositoryFactory::open_query(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_index(&self, path: &Path) -> Result<Box<dyn IndexRepository>, PortError> {
+        RepositoryFactory::open_index(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_edit(&self, path: &Path) -> Result<Box<dyn EditRepository>, PortError> {
+        RepositoryFactory::open_edit(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_crosslink(&self, path: &Path) -> Result<Box<dyn CrossLinkRepository>, PortError> {
+        RepositoryFactory::open_crosslink(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_project_administration(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ProjectAdministrationRepository>, PortError> {
+        RepositoryFactory::open_project_administration(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
+        RepositoryFactory::open_adr_traces(&SqliteRepositoryFactory, path)
+    }
+
+    fn open_semantic_index(
+        &self,
+        _path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        Ok(Box::new(RecordingSemanticRepository {
+            replacements: Arc::clone(&self.replacements),
+            fail_replacement: self.fail_replacement,
+        }))
+    }
+}
+
+impl SemanticIndexRepository for RecordingSemanticRepository {
+    fn replace_semantic_index(
+        &mut self,
+        _project: &ProjectId,
+        expected_generation: Generation,
+        node_vectors: &[NodeVectorRecord],
+        token_vectors: &[TokenVectorRecord],
+        signatures: &[NodeSignatureRecord],
+    ) -> Result<(), PortError> {
+        self.replacements
+            .lock()
+            .expect("semantic replacements")
+            .push((
+                expected_generation,
+                node_vectors.len(),
+                token_vectors.len(),
+                signatures.len(),
+            ));
+        if self.fail_replacement {
+            return Err(PortError::new(std::io::Error::other(
+                "semantic repository failed",
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -436,6 +543,94 @@ fn semantic_model_configuration_has_upstream_defaults_and_explicit_overrides() {
     let configured = config.with_semantic_config(true, 0.82);
     assert!(configured.semantic_enabled());
     assert_eq!(configured.semantic_threshold(), 0.82);
+}
+
+#[test]
+fn fast_semantic_refresh_skips_query_work_and_forwards_an_empty_generation_guarded_replace() {
+    let temp = TempDir::new().expect("temp directory");
+    let repo = temp.path().join("fixture");
+    let database = temp.path().join("graph.db");
+    write_fixture(&repo);
+    let query_opens = Arc::new(AtomicUsize::new(0));
+    let replacements = Arc::new(Mutex::new(Vec::new()));
+    let factory = RecordingSemanticFactory {
+        query_opens: Arc::clone(&query_opens),
+        replacements: Arc::clone(&replacements),
+        fail_replacement: false,
+    };
+    let services = Services::new(
+        ServiceConfig::new(&database, temp.path()).with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+            Arc::new(factory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo).with_mode(IndexRepositoryMode::Fast))
+        .expect("fast index");
+
+    assert_eq!(query_opens.load(Ordering::Relaxed), 0);
+    assert!(
+        indexed
+            .warnings
+            .iter()
+            .all(|warning| !warning.starts_with("semantic_index:"))
+    );
+    let project = ProjectId::new(indexed.project).expect("project ID");
+    let current_generation = Store::open(&database)
+        .expect("store")
+        .get_project(&project)
+        .expect("project query")
+        .expect("project")
+        .generation;
+    assert_eq!(
+        replacements
+            .lock()
+            .expect("semantic replacements")
+            .as_slice(),
+        [(current_generation, 0, 0, 0)]
+    );
+}
+
+#[test]
+fn semantic_repository_failures_are_downgraded_to_the_exact_warning() {
+    let temp = TempDir::new().expect("temp directory");
+    let repo = temp.path().join("fixture");
+    write_fixture(&repo);
+    let replacements = Arc::new(Mutex::new(Vec::new()));
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), temp.path())
+            .with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            Arc::new(FileSystemDiscovery),
+            Arc::new(RecordingSemanticFactory {
+                query_opens: Arc::new(AtomicUsize::new(0)),
+                replacements: Arc::clone(&replacements),
+                fail_replacement: true,
+            }),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo).with_mode(IndexRepositoryMode::Fast))
+        .expect("semantic failure must not block indexing");
+
+    assert!(
+        indexed
+            .warnings
+            .iter()
+            .any(|warning| warning == "semantic_index: semantic repository failed")
+    );
+    assert_eq!(replacements.lock().expect("semantic replacements").len(), 1);
 }
 
 #[test]

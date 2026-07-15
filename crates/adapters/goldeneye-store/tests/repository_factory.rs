@@ -2,6 +2,7 @@ use goldeneye_domain::{Generation, ProjectId, ProjectRecord};
 use goldeneye_ports::{
     AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository,
     ProjectAdministrationRepository, QueryRepository, RepositoryFactory, RuntimeTraceObservation,
+    SemanticIndexRepository, StoredVector, TokenVectorRecord,
 };
 use goldeneye_store::SqliteRepositoryFactory;
 
@@ -73,6 +74,17 @@ fn roundtrip_adr(repository: &mut impl AdrTraceRepository, project: &ProjectId) 
     );
 }
 
+fn replace_semantic_tokens(
+    repository: &mut impl SemanticIndexRepository,
+    project: &ProjectId,
+    generation: Generation,
+    token_vectors: &[TokenVectorRecord],
+) {
+    repository
+        .replace_semantic_index(project, generation, &[], token_vectors, &[])
+        .expect("replace semantic index");
+}
+
 #[test]
 fn query_open_never_creates_a_missing_database_and_initialize_is_idempotent() {
     let temp = tempfile::tempdir().expect("temporary directory");
@@ -132,6 +144,33 @@ fn factory_boxes_forward_repository_ports_and_edit_opens_are_independent() {
         .open_query(&database)
         .expect("open query repository");
     assert_eq!(query_project_count(&query), 1);
+    let token = TokenVectorRecord {
+        token: "factory".to_owned(),
+        vector: StoredVector::from_array([1_i8; 768]),
+        idf_milli: 1_000,
+    };
+    let mut semantic = factory
+        .open_semantic_index(&database)
+        .expect("open semantic repository");
+    replace_semantic_tokens(
+        &mut semantic,
+        &project_id,
+        generation,
+        std::slice::from_ref(&token),
+    );
+    assert_eq!(
+        query
+            .get_token_vector(&project_id, "factory")
+            .expect("warm query sees semantic write"),
+        Some(token)
+    );
+    replace_semantic_tokens(&mut semantic, &project_id, generation, &[]);
+    assert_eq!(
+        query
+            .get_token_vector(&project_id, "factory")
+            .expect("warm query sees semantic clear"),
+        None
+    );
     let mut adr_traces = factory
         .open_adr_traces(&database)
         .expect("open ADR/runtime repository");

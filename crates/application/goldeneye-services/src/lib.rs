@@ -17,11 +17,10 @@ use goldeneye_index::{
 };
 use goldeneye_ports::{
     ArtifactPersistence, GitPortError, GitRepository, IndexSyntaxExtractor, LanguageClassifier,
-    PortError, RepositoryFactory, ServiceSyntax, SourceDiscovery,
+    NodeSignatureRecord, NodeVectorRecord, PortError, RepositoryFactory, ServiceSyntax,
+    SourceDiscovery, StoredVector, TokenVectorRecord,
 };
-use goldeneye_store::{
-    NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
-};
+use goldeneye_store::StoreError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -573,7 +572,11 @@ impl Services {
             Err(error) => result.warnings.push(format!("git_history: {error}")),
         }
         hooks.report("semantic_index");
-        if let Err(error) = self.refresh_semantic_index_at(&result.project.id, request.mode) {
+        if let Err(error) = self.refresh_semantic_index_at(
+            &result.project.id,
+            result.project.generation,
+            request.mode,
+        ) {
             result.warnings.push(format!("semantic_index: {error}"));
         }
         if request.persistence || self.dependencies.artifact().exists(&root) {
@@ -804,20 +807,21 @@ impl Services {
     fn refresh_semantic_index_at(
         &self,
         project: &ProjectId,
+        expected_generation: Generation,
         mode: IndexRepositoryMode,
     ) -> Result<(), ServiceError> {
         if mode == IndexRepositoryMode::Fast {
-            Store::open(&self.config.database_path)?.replace_semantic_index(
-                project,
-                &[],
-                &[],
-                &[],
-            )?;
-            return Ok(());
+            return self.replace_semantic_index_at(project, expected_generation, &[], &[], &[]);
         }
 
-        let query = Store::open_read_only(&self.config.database_path)?;
-        let nodes = query.list_nodes(project)?;
+        let query = self
+            .dependencies
+            .repositories()
+            .open_query(&self.config.database_path)
+            .map_err(ServiceError::Repository)?;
+        let nodes = query
+            .list_nodes(project)
+            .map_err(ServiceError::Repository)?;
         drop(query);
         let model = goldeneye_query::PretrainedModel::load_bundled().ok();
         let mut documents = Vec::new();
@@ -897,13 +901,35 @@ impl Services {
             }
         }
 
-        Store::open(&self.config.database_path)?.replace_semantic_index(
+        self.replace_semantic_index_at(
             project,
+            expected_generation,
             &node_vectors,
             &token_vectors,
             &signatures,
-        )?;
-        Ok(())
+        )
+    }
+
+    fn replace_semantic_index_at(
+        &self,
+        project: &ProjectId,
+        expected_generation: Generation,
+        node_vectors: &[NodeVectorRecord],
+        token_vectors: &[TokenVectorRecord],
+        signatures: &[NodeSignatureRecord],
+    ) -> Result<(), ServiceError> {
+        self.dependencies
+            .repositories()
+            .open_semantic_index(&self.config.database_path)
+            .map_err(ServiceError::Repository)?
+            .replace_semantic_index(
+                project,
+                expected_generation,
+                node_vectors,
+                token_vectors,
+                signatures,
+            )
+            .map_err(ServiceError::Repository)
     }
 
     fn prepare_database(&self) -> Result<(), ServiceError> {

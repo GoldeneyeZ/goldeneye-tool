@@ -2,7 +2,7 @@ use std::path::Path;
 
 use goldeneye_ports::{
     AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository, PortError,
-    ProjectAdministrationRepository, QueryRepository, RepositoryFactory,
+    ProjectAdministrationRepository, QueryRepository, RepositoryFactory, SemanticIndexRepository,
 };
 
 use crate::Store;
@@ -53,6 +53,15 @@ impl RepositoryFactory for SqliteRepositoryFactory {
     fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError> {
         Store::open(path)
             .map(|repository| Box::new(repository) as Box<dyn AdrTraceRepository>)
+            .map_err(PortError::new)
+    }
+
+    fn open_semantic_index(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError> {
+        Store::open(path)
+            .map(|repository| Box::new(repository) as Box<dyn SemanticIndexRepository>)
             .map_err(PortError::new)
     }
 }

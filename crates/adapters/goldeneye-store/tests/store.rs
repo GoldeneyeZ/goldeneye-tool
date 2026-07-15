@@ -137,9 +137,10 @@ fn semantic_artifacts_round_trip_and_cascade_with_the_project() {
         "src/lib.rs",
         generation,
     );
-    store
+    let generation = store
         .replace_project_graph(&project, vec![source], vec![function.clone()], Vec::new())
-        .expect("graph");
+        .expect("graph")
+        .generation;
 
     let mut node_values = [0_i8; 768];
     node_values[3] = 127;
@@ -149,6 +150,7 @@ fn semantic_artifacts_round_trip_and_cascade_with_the_project() {
     let outcome = store
         .replace_semantic_index(
             &project.id,
+            generation,
             &[NodeVectorRecord {
                 node_id: function.id.clone(),
                 vector: StoredVector::from_array(node_values),
@@ -226,15 +228,22 @@ fn semantic_replacement_is_validated_before_the_existing_snapshot_is_removed() {
         "src/lib.rs",
         generation,
     );
-    store
+    let generation = store
         .replace_project_graph(&project, vec![source], vec![function.clone()], Vec::new())
-        .expect("graph");
+        .expect("graph")
+        .generation;
     let original = NodeVectorRecord {
         node_id: function.id,
         vector: StoredVector::from_array([1_i8; 768]),
     };
     store
-        .replace_semantic_index(&project.id, std::slice::from_ref(&original), &[], &[])
+        .replace_semantic_index(
+            &project.id,
+            generation,
+            std::slice::from_ref(&original),
+            &[],
+            &[],
+        )
         .expect("initial snapshot");
 
     let invalid = TokenVectorRecord {
@@ -243,12 +252,129 @@ fn semantic_replacement_is_validated_before_the_existing_snapshot_is_removed() {
         idf_milli: 1_000,
     };
     assert!(matches!(
-        store.replace_semantic_index(&project.id, &[], &[invalid], &[]),
+        store.replace_semantic_index(&project.id, generation, &[], &[invalid], &[]),
         Err(StoreError::InvalidSemanticRecord { .. })
     ));
     assert_eq!(
         store.list_node_vectors(&project.id).expect("snapshot"),
         vec![original]
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn semantic_replacement_rejects_stale_generation_without_touching_any_snapshot_table() {
+    let mut store = Store::open_in_memory().expect("store");
+    let project = project("semantic-generation", "D:/semantic-generation");
+    let placeholder = project.generation;
+    let source = file(&project.id, "src/lib.rs", placeholder, b"fn stable() {}");
+    let function = node(
+        &project.id,
+        "function:stable",
+        "Function",
+        "stable",
+        "crate::stable",
+        "src/lib.rs",
+        placeholder,
+    );
+    let stale_generation = store
+        .replace_project_graph(
+            &project,
+            vec![source.clone()],
+            vec![function.clone()],
+            Vec::new(),
+        )
+        .expect("first graph")
+        .generation;
+    store
+        .replace_semantic_index(
+            &project.id,
+            stale_generation,
+            &[NodeVectorRecord {
+                node_id: function.id.clone(),
+                vector: StoredVector::from_array([1_i8; 768]),
+            }],
+            &[TokenVectorRecord {
+                token: "old".to_owned(),
+                vector: StoredVector::from_array([2_i8; 768]),
+                idf_milli: 1_000,
+            }],
+            &[NodeSignatureRecord {
+                node_id: function.id.clone(),
+                minhash_hex: "00000000".repeat(64),
+                ast_profile: Some("old".to_owned()),
+            }],
+        )
+        .expect("old semantic snapshot");
+
+    let current_generation = store
+        .replace_project_graph(&project, vec![source], vec![function.clone()], Vec::new())
+        .expect("second graph")
+        .generation;
+    let current_node_vector = NodeVectorRecord {
+        node_id: function.id.clone(),
+        vector: StoredVector::from_array([3_i8; 768]),
+    };
+    let current_token_vector = TokenVectorRecord {
+        token: "current".to_owned(),
+        vector: StoredVector::from_array([4_i8; 768]),
+        idf_milli: 2_000,
+    };
+    let current_signature = NodeSignatureRecord {
+        node_id: function.id,
+        minhash_hex: "01234567".repeat(64),
+        ast_profile: Some("current".to_owned()),
+    };
+    store
+        .replace_semantic_index(
+            &project.id,
+            current_generation,
+            std::slice::from_ref(&current_node_vector),
+            std::slice::from_ref(&current_token_vector),
+            std::slice::from_ref(&current_signature),
+        )
+        .expect("current semantic snapshot");
+
+    assert!(matches!(
+        store.replace_semantic_index(&project.id, stale_generation, &[], &[], &[]),
+        Err(StoreError::GenerationMismatch { expected, actual })
+            if expected == current_generation && actual == stale_generation
+    ));
+    assert_eq!(
+        store.list_node_vectors(&project.id).expect("node vectors"),
+        vec![current_node_vector]
+    );
+    assert_eq!(
+        store
+            .get_token_vector(&project.id, "current")
+            .expect("token vector"),
+        Some(current_token_vector)
+    );
+    assert_eq!(
+        store.list_node_signatures(&project.id).expect("signatures"),
+        vec![current_signature]
+    );
+
+    store
+        .replace_semantic_index(&project.id, current_generation, &[], &[], &[])
+        .expect("clear current snapshot");
+    assert!(
+        store
+            .list_node_vectors(&project.id)
+            .expect("cleared node vectors")
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .get_token_vector(&project.id, "current")
+            .expect("cleared token vector"),
+        None
+    );
+    assert!(
+        store
+            .list_node_signatures(&project.id)
+            .expect("cleared signatures")
+            .is_empty()
     );
 }
 

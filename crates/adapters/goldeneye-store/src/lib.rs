@@ -9,6 +9,7 @@ mod project_administration_port;
 mod query_port;
 mod repository_factory;
 mod schema;
+mod semantic_index_port;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -1168,6 +1169,7 @@ impl Store {
     pub fn replace_semantic_index(
         &mut self,
         project: &ProjectId,
+        expected_generation: Generation,
         node_vectors: &[NodeVectorRecord],
         token_vectors: &[TokenVectorRecord],
         node_signatures: &[NodeSignatureRecord],
@@ -1177,6 +1179,7 @@ impl Store {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ensure_generation(&transaction, project, expected_generation)?;
         transaction.execute(
             "DELETE FROM node_vectors WHERE project_id = ?1",
             params![project.as_str()],

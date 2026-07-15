@@ -14,6 +14,7 @@ mod inspection;
 mod project_administration;
 mod query;
 mod repository;
+mod semantic_index;
 
 pub use adr_traces::{AdrDocument, AdrTraceRepository, RuntimeTraceObservation};
 pub use artifact::ArtifactPersistence;
@@ -54,3 +55,4 @@ pub use query::{
     STORED_VECTOR_DIM, SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,
 };
 pub use repository::RepositoryFactory;
+pub use semantic_index::SemanticIndexRepository;

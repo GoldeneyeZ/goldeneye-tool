@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     AdrTraceRepository, CrossLinkRepository, EditRepository, IndexRepository, PortError,
-    ProjectAdministrationRepository, QueryRepository,
+    ProjectAdministrationRepository, QueryRepository, SemanticIndexRepository,
 };
 
 /// Creates application repository ports without exposing adapter-owned stores.
@@ -58,4 +58,14 @@ pub trait RepositoryFactory: Send + Sync {
     ///
     /// Returns an adapter error when the repository cannot be opened or migrated.
     fn open_adr_traces(&self, path: &Path) -> Result<Box<dyn AdrTraceRepository>, PortError>;
+
+    /// Opens a writable repository for semantic-index replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an adapter error when the repository cannot be opened or migrated.
+    fn open_semantic_index(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn SemanticIndexRepository>, PortError>;
 }

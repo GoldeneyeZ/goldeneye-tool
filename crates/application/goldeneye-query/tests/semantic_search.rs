@@ -20,9 +20,15 @@ fn vector(entries: &[(usize, i8)]) -> StoredVector {
 fn semantic_search_uses_enriched_tokens_and_the_minimum_multi_keyword_cosine() {
     let fixture = Fixture::seeded();
     let mut store = Store::open(&fixture.database).expect("store");
+    let generation = store
+        .get_project(&fixture.project)
+        .expect("project query")
+        .expect("project")
+        .generation;
     store
         .replace_semantic_index(
             &fixture.project,
+            generation,
             &[
                 NodeVectorRecord {
                     node_id: goldeneye_domain::NodeId::new("alpha").expect("node"),
@@ -73,11 +79,17 @@ fn semantic_search_uses_enriched_tokens_and_the_minimum_multi_keyword_cosine() {
 fn similarity_search_decodes_persisted_minhash_and_excludes_the_origin() {
     let fixture = Fixture::seeded();
     let mut store = Store::open(&fixture.database).expect("store");
+    let generation = store
+        .get_project(&fixture.project)
+        .expect("project query")
+        .expect("project")
+        .generation;
     let same = MinHashSignature::from_values([7_u32; 64]).to_hex();
     let different = MinHashSignature::from_values([9_u32; 64]).to_hex();
     store
         .replace_semantic_index(
             &fixture.project,
+            generation,
             &[],
             &[],
             &[
