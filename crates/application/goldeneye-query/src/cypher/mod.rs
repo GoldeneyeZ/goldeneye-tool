@@ -15,23 +15,22 @@ use goldeneye_domain::{GraphEdge, GraphNode, NodeId};
 
 mod ast;
 mod evaluate;
+mod fast_path;
 mod lexer;
 mod parser;
 mod projection;
 
-use ast::{MatchPattern, Operand, ParsedQuery, Projection, ProjectionExpression, Reference};
-use evaluate::{Binding, evaluate_expression, execute_match_clauses, execute_unwind, node_matches};
-use lexer::{lex, reject_mutations, split_union_tokens};
+use ast::{MatchPattern, Operand, ParsedQuery, ProjectionExpression, Reference};
+use evaluate::{Binding, execute_match_clauses, execute_unwind};
+use fast_path::execute_simple_node_limit;
+use lexer::{Token, lex, reject_mutations, split_union_tokens};
 use parser::Parser;
 use projection::{
     collect_bounded_rows, evaluate_projection_expression, execute_with_clause,
     expand_star_projections, expand_with_star_projections, materialize_rows,
 };
 
-use crate::{
-    engine::node_summary,
-    types::{QueryError, QueryGraphRequest, QueryGraphResult, QueryValue},
-};
+use crate::types::{QueryError, QueryGraphRequest, QueryGraphResult, QueryValue};
 
 const MAX_QUERY_ROWS: usize = 10_000;
 const MAX_QUERY_BYTES: usize = 1_048_576;
@@ -48,6 +47,17 @@ pub(crate) fn execute(
     edges: &[GraphEdge],
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<QueryGraphResult, QueryError> {
+    let (mut branches, union_all) = parse_query_branches(request)?;
+    if union_all.is_empty() {
+        let tokens = branches.pop().expect("query has one branch");
+        return execute_branch(request, tokens, nodes, edges, degrees, request.max_rows);
+    }
+    execute_union(request, branches, union_all, nodes, edges, degrees)
+}
+
+fn parse_query_branches(
+    request: &QueryGraphRequest,
+) -> Result<(Vec<Vec<Token>>, Vec<bool>), QueryError> {
     if request.max_rows == 0 || request.max_rows > MAX_QUERY_ROWS {
         return Err(QueryError::InvalidQueryRowLimit {
             actual: request.max_rows,
@@ -66,31 +76,58 @@ pub(crate) fn execute(
     if branches.len() > MAX_UNION_BRANCHES {
         return Err(unsupported("query exceeds UNION branch safety cap"));
     }
-    if union_all.is_empty() {
-        let query = Parser::new(
-            branches.into_iter().next().expect("query has one branch"),
-            request.query.len(),
-        )
-        .parse()?;
-        return execute_parsed(request, query, nodes, edges, degrees, request.max_rows);
-    }
-    let mut results = branches
+    Ok((branches, union_all))
+}
+
+fn execute_branch(
+    request: &QueryGraphRequest,
+    tokens: Vec<Token>,
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    row_cap: usize,
+) -> Result<QueryGraphResult, QueryError> {
+    let query = Parser::new(tokens, request.query.len()).parse()?;
+    execute_parsed(request, query, nodes, edges, degrees, row_cap)
+}
+
+fn execute_union(
+    request: &QueryGraphRequest,
+    branches: Vec<Vec<Token>>,
+    union_all: Vec<bool>,
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<QueryGraphResult, QueryError> {
+    let results = branches
         .into_iter()
-        .map(|tokens| {
-            Parser::new(tokens, request.query.len())
-                .parse()
-                .and_then(|query| {
-                    execute_parsed(request, query, nodes, edges, degrees, MAX_QUERY_ROWS)
-                })
-        })
+        .map(|tokens| execute_branch(request, tokens, nodes, edges, degrees, MAX_QUERY_ROWS))
         .collect::<Result<Vec<_>, _>>()?;
-    let first = results
+    let columns = results
         .first()
-        .ok_or_else(|| unsupported("UNION requires at least one query"))?;
-    let columns = first.columns.clone();
+        .ok_or_else(|| unsupported("UNION requires at least one query"))?
+        .columns
+        .clone();
     if results.iter().any(|result| result.columns != columns) {
         return Err(unsupported("UNION branches must return identical columns"));
     }
+    let (rows, total, truncated, warning) =
+        merge_union_results(results, union_all, request.max_rows);
+    Ok(QueryGraphResult {
+        project: request.project.as_str().to_owned(),
+        columns,
+        rows,
+        total,
+        truncated,
+        warning,
+    })
+}
+
+fn merge_union_results(
+    mut results: Vec<QueryGraphResult>,
+    union_all: Vec<bool>,
+    row_cap: usize,
+) -> (Vec<Vec<QueryValue>>, usize, bool, Option<String>) {
     let first_result = results.remove(0);
     let mut source_truncated = first_result.truncated;
     let mut warnings = first_result.warning.into_iter().collect::<Vec<_>>();
@@ -105,16 +142,10 @@ pub(crate) fn execute(
         }
     }
     let total = rows.len();
-    let truncated = source_truncated || total > request.max_rows;
-    rows.truncate(request.max_rows);
-    Ok(QueryGraphResult {
-        project: request.project.as_str().to_owned(),
-        columns,
-        rows,
-        total,
-        truncated,
-        warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
-    })
+    let truncated = source_truncated || total > row_cap;
+    rows.truncate(row_cap);
+    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+    (rows, total, truncated, warning)
 }
 
 fn execute_parsed(
@@ -129,235 +160,103 @@ fn execute_parsed(
     {
         return result;
     }
-    let initial = execute_unwind(query.unwind.as_ref(), degrees)?;
-    let mut bindings = execute_match_clauses(&query.matches, initial, nodes, edges, degrees)?;
-    if let Some(with_clause) = &query.with_clause {
-        bindings = execute_with_clause(with_clause, bindings, degrees)?;
-    }
-
-    if query.star {
-        query.projections = query.with_clause.as_ref().map_or_else(
-            || expand_star_projections(&query.matches),
-            expand_with_star_projections,
-        );
-    }
+    let bindings = query_bindings(&query, nodes, edges, degrees)?;
+    expand_projections(&mut query);
     let columns = query
         .projections
         .iter()
         .map(|projection| projection.column.clone())
         .collect();
-    let query_limit = query.limit.unwrap_or(usize::MAX);
-    let materialized_limit = row_cap.min(query_limit);
-    let has_aggregate = query.projections.iter().any(|projection| {
-        matches!(
-            projection.expression,
-            ProjectionExpression::Aggregate { .. }
-        )
-    });
-    let (rows, total, truncated) = if !has_aggregate && !query.distinct && query.order.is_empty() {
-        let projected = bindings.into_iter().map(|binding| {
-            query
-                .projections
-                .iter()
-                .map(|projection| {
-                    evaluate_projection_expression(&projection.expression, &binding, degrees)
-                })
-                .collect::<Result<Vec<_>, _>>()
-        });
-        let bounded = collect_bounded_rows(projected, query.skip, materialized_limit)?;
-        (bounded.rows, bounded.total, bounded.truncated)
-    } else {
-        let mut rows = materialize_rows(&query, bindings, degrees)?;
-        if query.distinct {
-            let mut seen = BTreeSet::new();
-            rows.retain(|row| seen.insert(row_key(row)));
-        }
-        let skipped = query.skip.min(rows.len());
-        rows.drain(..skipped);
-        let total = rows.len();
-        let truncated = total > materialized_limit;
-        rows.truncate(materialized_limit);
-        (rows, total, truncated)
-    };
-    let warning = (!query.warnings.is_empty()).then(|| query.warnings.join("; "));
-
+    let (rows, total, truncated) = project_rows(&query, bindings, degrees, row_cap)?;
     Ok(QueryGraphResult {
         project: request.project.as_str().to_owned(),
         columns,
         rows,
         total,
         truncated,
-        warning,
+        warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
     })
 }
 
-fn execute_simple_node_limit(
-    request: &QueryGraphRequest,
+fn query_bindings<'a>(
     query: &ParsedQuery,
-    nodes: &[GraphNode],
-    edges: &[GraphEdge],
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<Vec<Binding<'a>>, QueryError> {
+    let initial = execute_unwind(query.unwind.as_ref(), degrees)?;
+    let mut bindings = execute_match_clauses(&query.matches, initial, nodes, edges, degrees)?;
+    if let Some(with_clause) = &query.with_clause {
+        bindings = execute_with_clause(with_clause, bindings, degrees)?;
+    }
+    Ok(bindings)
+}
+
+fn expand_projections(query: &mut ParsedQuery) {
+    if query.star {
+        query.projections = query.with_clause.as_ref().map_or_else(
+            || expand_star_projections(&query.matches),
+            expand_with_star_projections,
+        );
+    }
+}
+
+fn project_rows(
+    query: &ParsedQuery,
+    bindings: Vec<Binding<'_>>,
     degrees: &BTreeMap<NodeId, (usize, usize)>,
     row_cap: usize,
-) -> Option<Result<QueryGraphResult, QueryError>> {
-    let query_limit = query.limit?;
-    let [clause] = query.matches.as_slice() else {
-        return None;
-    };
-    let [MatchPattern::Node(pattern)] = clause.patterns.as_slice() else {
-        return None;
-    };
-    if query.unwind.is_some()
-        || query.with_clause.is_some()
-        || clause.optional
-        || query.distinct
-        || query.star
-        || !query.order.is_empty()
-        || query.projections.iter().any(|projection| {
-            matches!(
-                projection.expression,
-                ProjectionExpression::Aggregate { .. }
-            )
-        })
-    {
-        return None;
-    }
-
-    // Buffer only references so binding-cap errors retain priority over expression errors.
-    let mut candidates = Vec::with_capacity(nodes.len().min(MAX_INTERMEDIATE_BINDINGS));
-    for node in nodes {
-        if node_matches(node, pattern, degrees) {
-            if candidates.len() == MAX_INTERMEDIATE_BINDINGS {
-                return Some(Err(unsupported(
-                    "query exceeds intermediate binding safety cap",
-                )));
-            }
-            candidates.push(node);
-        }
-    }
-
-    if clause.filter.is_none()
-        && let [
-            Projection {
-                expression: ProjectionExpression::Reference(Reference::Property { alias, path }),
-                ..
-            },
-        ] = query.projections.as_slice()
-        && alias == &pattern.alias
-        && path.as_slice() == ["qualified_name"]
-    {
-        candidates.sort_by_cached_key(|node| {
-            serde_json::to_string(node.qualified_name.as_str())
-                .unwrap_or_else(|_| node.qualified_name.as_str().to_owned())
-        });
-        let skipped = query.skip.min(candidates.len());
-        let total = candidates.len() - skipped;
-        let limit = row_cap.min(query_limit);
-        let rows = candidates
-            .into_iter()
-            .skip(skipped)
-            .take(limit)
-            .map(|node| vec![QueryValue::String(node.qualified_name.as_str().to_owned())])
-            .collect();
-        return Some(Ok(QueryGraphResult {
-            project: request.project.as_str().to_owned(),
-            columns: query
-                .projections
-                .iter()
-                .map(|projection| projection.column.clone())
-                .collect(),
-            rows,
-            total,
-            truncated: total > limit,
-            warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
-        }));
-    }
-
-    if clause.filter.is_none()
-        && let [
-            Projection {
-                expression: ProjectionExpression::Reference(Reference::Alias(alias)),
-                ..
-            },
-        ] = query.projections.as_slice()
-        && alias == &pattern.alias
-    {
-        // QueryValue::Node row keys start with the unique node ID. Sorting its exact JSON
-        // encoding therefore preserves collect_bounded_rows ordering without constructing a
-        // full NodeSummary for every candidate.
-        candidates.sort_by_cached_key(|node| {
-            serde_json::to_string(node.id.as_str()).unwrap_or_else(|_| node.id.as_str().to_owned())
-        });
-        let skipped = query.skip.min(candidates.len());
-        let total = candidates.len() - skipped;
-        let limit = row_cap.min(query_limit);
-        let rows = candidates
-            .into_iter()
-            .skip(skipped)
-            .take(limit)
-            .map(|node| {
-                vec![QueryValue::Node(node_summary(
-                    node,
-                    None,
-                    degrees,
-                    Vec::new(),
-                ))]
-            })
-            .collect();
-        return Some(Ok(QueryGraphResult {
-            project: request.project.as_str().to_owned(),
-            columns: query
-                .projections
-                .iter()
-                .map(|projection| projection.column.clone())
-                .collect(),
-            rows,
-            total,
-            truncated: total > limit,
-            warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
-        }));
-    }
-
-    let projected = candidates.into_iter().filter_map(|node| {
-        let binding = Binding {
-            nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
-            edges: BTreeMap::new(),
-            values: BTreeMap::new(),
-            all_nodes: Some(nodes),
-            all_edges: Some(edges),
-        };
-        if let Some(filter) = &clause.filter {
-            match evaluate_expression(filter, &binding, degrees) {
-                Ok(true) => {}
-                Ok(false) => return None,
-                Err(error) => return Some(Err(error)),
-            }
-        }
-        Some(
-            query
-                .projections
-                .iter()
-                .map(|projection| {
-                    evaluate_projection_expression(&projection.expression, &binding, degrees)
-                })
-                .collect::<Result<Vec<_>, _>>(),
+) -> Result<(Vec<Vec<QueryValue>>, usize, bool), QueryError> {
+    let materialized_limit = row_cap.min(query.limit.unwrap_or(usize::MAX));
+    let has_aggregate = query.projections.iter().any(|projection| {
+        matches!(
+            projection.expression,
+            ProjectionExpression::Aggregate { .. }
         )
     });
-    let bounded = match collect_bounded_rows(projected, query.skip, row_cap.min(query_limit)) {
-        Ok(bounded) => bounded,
-        Err(error) => return Some(Err(error)),
-    };
-    Some(Ok(QueryGraphResult {
-        project: request.project.as_str().to_owned(),
-        columns: query
+    if !has_aggregate && !query.distinct && query.order.is_empty() {
+        stream_projected_rows(query, bindings, degrees, materialized_limit)
+    } else {
+        materialized_projected_rows(query, bindings, degrees, materialized_limit)
+    }
+}
+
+fn stream_projected_rows(
+    query: &ParsedQuery,
+    bindings: Vec<Binding<'_>>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    limit: usize,
+) -> Result<(Vec<Vec<QueryValue>>, usize, bool), QueryError> {
+    let projected = bindings.into_iter().map(|binding| {
+        query
             .projections
             .iter()
-            .map(|projection| projection.column.clone())
-            .collect(),
-        rows: bounded.rows,
-        total: bounded.total,
-        truncated: bounded.truncated,
-        warning: (!query.warnings.is_empty()).then(|| query.warnings.join("; ")),
-    }))
+            .map(|projection| {
+                evaluate_projection_expression(&projection.expression, &binding, degrees)
+            })
+            .collect::<Result<Vec<_>, _>>()
+    });
+    let bounded = collect_bounded_rows(projected, query.skip, limit)?;
+    Ok((bounded.rows, bounded.total, bounded.truncated))
+}
+
+fn materialized_projected_rows(
+    query: &ParsedQuery,
+    bindings: Vec<Binding<'_>>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    limit: usize,
+) -> Result<(Vec<Vec<QueryValue>>, usize, bool), QueryError> {
+    let mut rows = materialize_rows(query, bindings, degrees)?;
+    if query.distinct {
+        let mut seen = BTreeSet::new();
+        rows.retain(|row| seen.insert(row_key(row)));
+    }
+    let skipped = query.skip.min(rows.len());
+    rows.drain(..skipped);
+    let total = rows.len();
+    let truncated = total > limit;
+    rows.truncate(limit);
+    Ok((rows, total, truncated))
 }
 
 fn pattern_node_aliases(pattern: &MatchPattern) -> Vec<&str> {

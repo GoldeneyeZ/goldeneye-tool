@@ -1,6 +1,8 @@
 use std::{fmt::Write as _, path::Path};
 
-use goldeneye_domain::{ContentHash, FileId, ProjectRecord};
+use goldeneye_domain::{
+    ContentHash, FileId, FileRecord, GraphNode, ProjectRecord, ProjectRelativePath, SourceSpan,
+};
 use goldeneye_ports::QueryRepository;
 
 use crate::types::{CodeSnippetRequest, CodeSnippetResult, QueryError};
@@ -18,6 +20,29 @@ pub(super) fn execute(
 ) -> Result<CodeSnippetResult, QueryError> {
     validate_limit("max_bytes", request.max_bytes, MAX_SNIPPET_BYTES)?;
     validate_limit("max_lines", request.max_lines, MAX_SNIPPET_LINES)?;
+    let (symbol, file_path, span) = resolve_source_location(request, graph)?;
+    let file = indexed_file(repository, request, graph, &file_path)?;
+    let bytes = fresh_source(project, &file_path, &file)?;
+    let (source, start, end, line_count) = decode_snippet(&bytes, &symbol, span, request)?;
+    let start_line = span.start.row + 1;
+    let end_line = start_line + u64::try_from(line_count.saturating_sub(1)).unwrap_or(u64::MAX);
+    Ok(CodeSnippetResult {
+        project: request.project.as_str().to_owned(),
+        symbol: node_summary(&symbol, None, &graph.degrees, Vec::new()),
+        source,
+        file_path: file_path.as_str().to_owned(),
+        start_byte: start,
+        end_byte: end,
+        start_line,
+        end_line,
+        content_hash: hash_hex(&file.content_hash),
+    })
+}
+
+fn resolve_source_location(
+    request: &CodeSnippetRequest,
+    graph: &ProjectGraph,
+) -> Result<(GraphNode, ProjectRelativePath, SourceSpan), QueryError> {
     let symbol = resolve_symbol_in_graph(&request.qualified_name, graph, ResolveMode::Any)?;
     let file_path = symbol
         .file_path
@@ -30,17 +55,32 @@ pub(super) fn execute(
         .ok_or_else(|| QueryError::SourceSpanUnavailable {
             qualified_name: symbol.qualified_name.as_str().to_owned(),
         })?;
-    let file = if let Some(file) = graph.cached_file(file_path.as_str()) {
-        file
-    } else {
-        let file = repository
-            .get_file(&FileId::new(request.project.clone(), file_path.clone()))?
-            .ok_or_else(|| QueryError::IndexedFileNotFound {
-                path: file_path.as_str().to_owned(),
-            })?;
-        graph.cache_file(file.clone());
-        file
-    };
+    Ok((symbol, file_path, span))
+}
+
+fn indexed_file(
+    repository: &dyn QueryRepository,
+    request: &CodeSnippetRequest,
+    graph: &ProjectGraph,
+    file_path: &ProjectRelativePath,
+) -> Result<FileRecord, QueryError> {
+    if let Some(file) = graph.cached_file(file_path.as_str()) {
+        return Ok(file);
+    }
+    let file = repository
+        .get_file(&FileId::new(request.project.clone(), file_path.clone()))?
+        .ok_or_else(|| QueryError::IndexedFileNotFound {
+            path: file_path.as_str().to_owned(),
+        })?;
+    graph.cache_file(file.clone());
+    Ok(file)
+}
+
+fn fresh_source(
+    project: &ProjectRecord,
+    file_path: &ProjectRelativePath,
+    file: &FileRecord,
+) -> Result<Vec<u8>, QueryError> {
     let absolute_path = Path::new(&project.root_path).join(file_path.as_str());
     let bytes = std::fs::read(&absolute_path).map_err(|source| QueryError::SourceRead {
         path: absolute_path,
@@ -54,6 +94,15 @@ pub(super) fn execute(
             actual_hash: hash_hex(&actual_hash),
         });
     }
+    Ok(bytes)
+}
+
+fn decode_snippet(
+    bytes: &[u8],
+    symbol: &GraphNode,
+    span: SourceSpan,
+    request: &CodeSnippetRequest,
+) -> Result<(String, usize, usize, usize), QueryError> {
     let start = usize::try_from(span.bytes.start).map_err(|_| QueryError::CorruptSourceSpan {
         qualified_name: symbol.qualified_name.as_str().to_owned(),
     })?;
@@ -78,19 +127,7 @@ pub(super) fn execute(
         String::from_utf8(source_bytes.to_vec()).map_err(|_| QueryError::SourceNotUtf8 {
             qualified_name: symbol.qualified_name.as_str().to_owned(),
         })?;
-    let start_line = span.start.row + 1;
-    let end_line = start_line + u64::try_from(line_count.saturating_sub(1)).unwrap_or(u64::MAX);
-    Ok(CodeSnippetResult {
-        project: request.project.as_str().to_owned(),
-        symbol: node_summary(&symbol, None, &graph.degrees, Vec::new()),
-        source,
-        file_path: file_path.as_str().to_owned(),
-        start_byte: start,
-        end_byte: end,
-        start_line,
-        end_line,
-        content_hash: hash_hex(&file.content_hash),
-    })
+    Ok((source, start, end, line_count))
 }
 
 fn validate_limit(field: &'static str, actual: usize, maximum: usize) -> Result<(), QueryError> {

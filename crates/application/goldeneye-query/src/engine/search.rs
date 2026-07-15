@@ -1,16 +1,15 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Write as _,
-};
+mod pagination;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use goldeneye_domain::{GraphEdge, GraphNode, NodeId};
 use goldeneye_ports::{QueryRepository, SearchHit};
 use regex::Regex;
-use sha2::{Digest, Sha256};
 
 use crate::types::{QueryError, SearchGraphPage, SearchGraphRequest};
 
 use super::{ProjectGraph, node_summary};
+use pagination::{format_cursor, page_offset, search_fingerprint};
 
 const MAX_PAGE_SIZE: usize = 200;
 const MAX_SEARCH_CANDIDATES: usize = 50_000;
@@ -39,60 +38,115 @@ struct Candidate {
     rank: Option<f64>,
 }
 
+struct CompiledPatterns {
+    name: Option<Regex>,
+    qualified_name: Option<Regex>,
+    file: Option<Regex>,
+}
+
 pub(super) fn execute(
     repository: &dyn QueryRepository,
     request: &SearchGraphRequest,
     graph: &ProjectGraph,
 ) -> Result<SearchGraphPage, QueryError> {
-    if request.page.limit == 0 || request.page.limit > MAX_PAGE_SIZE {
-        return Err(QueryError::InvalidPageLimit {
-            actual: request.page.limit,
-            maximum: MAX_PAGE_SIZE,
-        });
-    }
+    validate_page_limit(request.page.limit)?;
     let fingerprint = search_fingerprint(request);
     let offset = page_offset(request, &fingerprint)?;
     let cache_key = SearchCacheKey::from(request);
     if let Some(page) = graph.cached_search(&cache_key) {
         return Ok(page);
     }
-    let name = compile_pattern("name_pattern", request.name_pattern.as_deref())?;
-    let qualified_name = compile_pattern(
-        "qualified_name_pattern",
-        request.qualified_name_pattern.as_deref(),
-    )?;
-    let file = compile_pattern("file_pattern", request.file_pattern.as_deref())?;
+    let patterns = CompiledPatterns::new(request)?;
+    let candidates = filtered_candidates(repository, request, graph, &patterns)?;
+    let page = search_page(request, graph, &candidates, &fingerprint, offset);
+    graph.cache_search(cache_key, page.clone());
+    Ok(page)
+}
 
+impl CompiledPatterns {
+    fn new(request: &SearchGraphRequest) -> Result<Self, QueryError> {
+        Ok(Self {
+            name: compile_pattern("name_pattern", request.name_pattern.as_deref())?,
+            qualified_name: compile_pattern(
+                "qualified_name_pattern",
+                request.qualified_name_pattern.as_deref(),
+            )?,
+            file: compile_pattern("file_pattern", request.file_pattern.as_deref())?,
+        })
+    }
+}
+
+fn validate_page_limit(limit: usize) -> Result<(), QueryError> {
+    if limit == 0 || limit > MAX_PAGE_SIZE {
+        return Err(QueryError::InvalidPageLimit {
+            actual: limit,
+            maximum: MAX_PAGE_SIZE,
+        });
+    }
+    Ok(())
+}
+
+fn filtered_candidates(
+    repository: &dyn QueryRepository,
+    request: &SearchGraphRequest,
+    graph: &ProjectGraph,
+    patterns: &CompiledPatterns,
+) -> Result<Vec<Candidate>, QueryError> {
     let mut candidates = search_candidates(repository, request, graph)?;
-    candidates.retain(|candidate| {
-        matches_search_filters(
-            &candidate.node,
-            request,
-            name.as_ref(),
-            qualified_name.as_ref(),
-            file.as_ref(),
-            &graph.edges,
-            &graph.degrees,
-        )
-    });
+    candidates
+        .retain(|candidate| matches_search_filters(&candidate.node, request, graph, patterns));
     candidates.sort_by(|left, right| {
         rank_cmp(left.rank, right.rank)
             .then_with(|| left.node.qualified_name.cmp(&right.node.qualified_name))
             .then_with(|| left.node.id.cmp(&right.node.id))
     });
+    Ok(candidates)
+}
 
+fn search_page(
+    request: &SearchGraphRequest,
+    graph: &ProjectGraph,
+    candidates: &[Candidate],
+    fingerprint: &str,
+    offset: usize,
+) -> SearchGraphPage {
     let total = candidates.len();
     let end = offset.saturating_add(request.page.limit).min(total);
-    let connected_nodes = if request.include_connected {
-        graph
-            .nodes
-            .iter()
-            .map(|node| (node.id.clone(), node.name.clone()))
-            .collect()
-    } else {
-        BTreeMap::new()
-    };
-    let results = candidates
+    let connected_nodes = connected_node_index(request, graph);
+    let results = page_results(request, graph, candidates, offset, end, &connected_nodes);
+    let has_more = end < total;
+    SearchGraphPage {
+        project: request.project.as_str().to_owned(),
+        results,
+        total,
+        has_more,
+        next_cursor: has_more.then(|| format_cursor(fingerprint, end)),
+    }
+}
+
+fn connected_node_index(
+    request: &SearchGraphRequest,
+    graph: &ProjectGraph,
+) -> BTreeMap<NodeId, String> {
+    if !request.include_connected {
+        return BTreeMap::new();
+    }
+    graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.name.clone()))
+        .collect()
+}
+
+fn page_results(
+    request: &SearchGraphRequest,
+    graph: &ProjectGraph,
+    candidates: &[Candidate],
+    offset: usize,
+    end: usize,
+    connected_nodes: &BTreeMap<NodeId, String>,
+) -> Vec<crate::types::NodeSummary> {
+    candidates
         .get(offset..end)
         .unwrap_or_default()
         .iter()
@@ -101,7 +155,7 @@ pub(super) fn execute(
                 &candidate.node,
                 request.relationship.as_deref().unwrap_or("CALLS"),
                 &graph.edges,
-                &connected_nodes,
+                connected_nodes,
             );
             node_summary(
                 &candidate.node,
@@ -110,17 +164,7 @@ pub(super) fn execute(
                 connected_names,
             )
         })
-        .collect();
-    let has_more = end < total;
-    let page = SearchGraphPage {
-        project: request.project.as_str().to_owned(),
-        results,
-        total,
-        has_more,
-        next_cursor: has_more.then(|| format_cursor(&fingerprint, end)),
-    };
-    graph.cache_search(cache_key, page.clone());
-    Ok(page)
+        .collect()
 }
 
 fn search_candidates(
@@ -129,28 +173,40 @@ fn search_candidates(
     graph: &ProjectGraph,
 ) -> Result<Vec<Candidate>, QueryError> {
     let Some(query) = request.query.as_deref().filter(|query| !query.is_empty()) else {
-        if let Some(name) = request
-            .name_pattern
-            .as_deref()
-            .and_then(exact_pattern_literal)
-        {
-            return Ok(graph
-                .nodes_by_name
-                .get(name)
-                .into_iter()
-                .flatten()
-                .filter_map(|index| graph.nodes.get(*index))
-                .cloned()
-                .map(|node| Candidate { node, rank: None })
-                .collect());
-        }
-        return Ok(graph
-            .nodes
-            .iter()
+        return Ok(graph_candidates(request, graph));
+    };
+    repository_candidates(repository, request, query)
+}
+
+fn graph_candidates(request: &SearchGraphRequest, graph: &ProjectGraph) -> Vec<Candidate> {
+    if let Some(name) = request
+        .name_pattern
+        .as_deref()
+        .and_then(exact_pattern_literal)
+    {
+        return graph
+            .nodes_by_name
+            .get(name)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| graph.nodes.get(*index))
             .cloned()
             .map(|node| Candidate { node, rank: None })
-            .collect());
-    };
+            .collect();
+    }
+    graph
+        .nodes
+        .iter()
+        .cloned()
+        .map(|node| Candidate { node, rank: None })
+        .collect()
+}
+
+fn repository_candidates(
+    repository: &dyn QueryRepository,
+    request: &SearchGraphRequest,
+    query: &str,
+) -> Result<Vec<Candidate>, QueryError> {
     let total = repository.count_search_nodes(&request.project, query)?;
     if total > u64::try_from(MAX_SEARCH_CANDIDATES).expect("constant fits u64") {
         return Err(QueryError::TooManySearchCandidates {
@@ -221,23 +277,36 @@ fn exact_pattern_literal(pattern: &str) -> Option<&str> {
     .then_some(literal)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn matches_search_filters(
     node: &GraphNode,
     request: &SearchGraphRequest,
-    name: Option<&Regex>,
-    qualified_name: Option<&Regex>,
-    file: Option<&Regex>,
-    edges: &[GraphEdge],
-    degrees: &BTreeMap<NodeId, (usize, usize)>,
+    graph: &ProjectGraph,
+    patterns: &CompiledPatterns,
+) -> bool {
+    matches_patterns(node, request, patterns)
+        && matches_degree(node, request, &graph.degrees)
+        && matches_relationship(node, request, &graph.edges)
+        && matches_entry_point(node, request)
+}
+
+fn matches_patterns(
+    node: &GraphNode,
+    request: &SearchGraphRequest,
+    patterns: &CompiledPatterns,
 ) -> bool {
     if request
         .label
         .as_deref()
         .is_some_and(|label| node.label.as_str() != label)
-        || name.is_some_and(|pattern| !pattern.is_match(&node.name))
-        || qualified_name.is_some_and(|pattern| !pattern.is_match(node.qualified_name.as_str()))
-        || file.is_some_and(|pattern| {
+        || patterns
+            .name
+            .as_ref()
+            .is_some_and(|pattern| !pattern.is_match(&node.name))
+        || patterns
+            .qualified_name
+            .as_ref()
+            .is_some_and(|pattern| !pattern.is_match(node.qualified_name.as_str()))
+        || patterns.file.as_ref().is_some_and(|pattern| {
             !node
                 .file_path
                 .as_ref()
@@ -246,20 +315,33 @@ fn matches_search_filters(
     {
         return false;
     }
-    let (in_degree, out_degree) = degrees.get(&node.id).copied().unwrap_or((0, 0));
+    true
+}
+
+fn matches_degree(
+    node: &GraphNode,
+    request: &SearchGraphRequest,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> bool {
+    let (in_degree, out_degree) = degrees.get(&node.id).copied().unwrap_or_default();
     let degree = in_degree + out_degree;
-    if request.min_degree.is_some_and(|minimum| degree < minimum)
-        || request.max_degree.is_some_and(|maximum| degree > maximum)
-    {
-        return false;
-    }
-    if request.relationship.as_deref().is_some_and(|kind| {
+    request.min_degree.is_none_or(|minimum| degree >= minimum)
+        && request.max_degree.is_none_or(|maximum| degree <= maximum)
+}
+
+fn matches_relationship(
+    node: &GraphNode,
+    request: &SearchGraphRequest,
+    edges: &[GraphEdge],
+) -> bool {
+    !request.relationship.as_deref().is_some_and(|kind| {
         !edges.iter().any(|edge| {
             edge.kind.as_str() == kind && (edge.source == node.id || edge.target == node.id)
         })
-    }) {
-        return false;
-    }
+    })
+}
+
+fn matches_entry_point(node: &GraphNode, request: &SearchGraphRequest) -> bool {
     !request.exclude_entry_points
         || !node
             .properties
@@ -300,65 +382,6 @@ fn connected_names(
         }
     }
     connected.into_iter().collect()
-}
-
-fn search_fingerprint(request: &SearchGraphRequest) -> String {
-    let values = [
-        Some(request.project.as_str()),
-        request.query.as_deref(),
-        request.name_pattern.as_deref(),
-        request.qualified_name_pattern.as_deref(),
-        request.label.as_deref(),
-        request.file_pattern.as_deref(),
-        request.relationship.as_deref(),
-    ];
-    let mut hash = Sha256::new();
-    for value in values {
-        hash.update(value.unwrap_or_default().as_bytes());
-        hash.update([0]);
-    }
-    for value in [request.min_degree, request.max_degree] {
-        hash.update([u8::from(value.is_some())]);
-        hash.update(value.unwrap_or_default().to_le_bytes());
-    }
-    hash.update([
-        u8::from(request.exclude_entry_points),
-        u8::from(request.include_connected),
-    ]);
-    let mut fingerprint = String::with_capacity(16);
-    for byte in &hash.finalize()[..8] {
-        write!(&mut fingerprint, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    fingerprint
-}
-
-fn page_offset(request: &SearchGraphRequest, fingerprint: &str) -> Result<usize, QueryError> {
-    let Some(cursor) = request.page.cursor.as_deref() else {
-        return Ok(request.page.offset);
-    };
-    if request.page.offset != 0 {
-        return Err(QueryError::CursorWithOffset);
-    }
-    let mut parts = cursor.split(':');
-    if parts.next() != Some("geq1") {
-        return Err(QueryError::InvalidCursor);
-    }
-    if parts.next() != Some(fingerprint) {
-        return Err(QueryError::CursorMismatch);
-    }
-    let offset = parts
-        .next()
-        .ok_or(QueryError::InvalidCursor)?
-        .parse()
-        .map_err(|_| QueryError::InvalidCursor)?;
-    if parts.next().is_some() {
-        return Err(QueryError::InvalidCursor);
-    }
-    Ok(offset)
-}
-
-fn format_cursor(fingerprint: &str, offset: usize) -> String {
-    format!("geq1:{fingerprint}:{offset}")
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use goldeneye_domain::{GraphNode, NodeId};
-use goldeneye_ports::{QueryRepository, StoredVector};
+use goldeneye_ports::{NodeVectorRecord, QueryRepository, StoredVector};
 
 use crate::{
     MinHashSignature, SemanticVector,
@@ -20,11 +20,40 @@ const DEFAULT_SEMANTIC_LIMIT: usize = 16;
 const MAX_SEMANTIC_LIMIT: usize = 200;
 const MAX_SIMILARITY_LIMIT: usize = 200;
 
+struct SemanticSearchInput<'a> {
+    keywords: Vec<&'a String>,
+    limit: usize,
+}
+
+struct SemanticCandidate {
+    record: NodeVectorRecord,
+    node: GraphNode,
+    initial_score: f64,
+}
+
 pub(crate) fn semantic_search(
     repository: &dyn QueryRepository,
     request: &SemanticSearchRequest,
 ) -> Result<SemanticSearchResult, QueryError> {
     require_project(repository, &request.project)?;
+    let input = validate_semantic_search(request)?;
+    let keyword_vectors = input
+        .keywords
+        .iter()
+        .map(|keyword| keyword_vector(repository, &request.project, keyword))
+        .collect::<Result<Vec<_>, _>>()?;
+    let results = rank_semantic_hits(repository, request, &keyword_vectors, input.limit)?;
+
+    Ok(SemanticSearchResult {
+        project: request.project.as_str().to_owned(),
+        keyword_count: input.keywords.len(),
+        results,
+    })
+}
+
+fn validate_semantic_search(
+    request: &SemanticSearchRequest,
+) -> Result<SemanticSearchInput<'_>, QueryError> {
     let keywords = request
         .keywords
         .iter()
@@ -47,11 +76,15 @@ pub(crate) fn semantic_search(
             maximum: MAX_SEMANTIC_LIMIT,
         });
     }
+    Ok(SemanticSearchInput { keywords, limit })
+}
 
-    let keyword_vectors = keywords
-        .iter()
-        .map(|keyword| keyword_vector(repository, &request.project, keyword))
-        .collect::<Result<Vec<_>, _>>()?;
+fn rank_semantic_hits(
+    repository: &dyn QueryRepository,
+    request: &SemanticSearchRequest,
+    keyword_vectors: &[StoredVector],
+    limit: usize,
+) -> Result<Vec<SemanticSearchHit>, QueryError> {
     let nodes = repository.list_nodes(&request.project)?;
     let nodes_by_id: BTreeMap<NodeId, GraphNode> = nodes
         .iter()
@@ -60,9 +93,24 @@ pub(crate) fn semantic_search(
         .collect();
     let edges = repository.list_edges(&request.project)?;
     let node_degrees = degrees(&edges);
+    let node_vectors = repository.list_node_vectors(&request.project)?;
+    let candidates =
+        initial_semantic_candidates(node_vectors, &nodes_by_id, &keyword_vectors[0], limit);
+    Ok(final_semantic_hits(
+        candidates,
+        &keyword_vectors[1..],
+        &node_degrees,
+        limit,
+    ))
+}
 
-    let mut candidates = repository
-        .list_node_vectors(&request.project)?
+fn initial_semantic_candidates(
+    node_vectors: Vec<NodeVectorRecord>,
+    nodes_by_id: &BTreeMap<NodeId, GraphNode>,
+    keyword_vector: &StoredVector,
+    limit: usize,
+) -> Vec<SemanticCandidate> {
+    let mut candidates = node_vectors
         .into_iter()
         .filter_map(|record| {
             let node = nodes_by_id.get(&record.node_id)?;
@@ -70,27 +118,39 @@ pub(crate) fn semantic_search(
                 .then_some((record, node.clone()))
         })
         .map(|(record, node)| {
-            let first_score = quantized_cosine(&record.vector, &keyword_vectors[0]);
-            (record, node, first_score)
+            let initial_score = quantized_cosine(&record.vector, keyword_vector);
+            SemanticCandidate {
+                record,
+                node,
+                initial_score,
+            }
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
         right
-            .2
-            .total_cmp(&left.2)
-            .then_with(|| left.1.id.cmp(&right.1.id))
+            .initial_score
+            .total_cmp(&left.initial_score)
+            .then_with(|| left.node.id.cmp(&right.node.id))
     });
     candidates.truncate(limit.saturating_mul(5));
+    candidates
+}
 
+fn final_semantic_hits(
+    candidates: Vec<SemanticCandidate>,
+    remaining_keywords: &[StoredVector],
+    node_degrees: &BTreeMap<NodeId, (usize, usize)>,
+    limit: usize,
+) -> Vec<SemanticSearchHit> {
     let mut results = candidates
         .into_iter()
-        .map(|(record, node, initial_score)| {
-            let combined_score = keyword_vectors[1..]
+        .map(|candidate| {
+            let combined_score = remaining_keywords
                 .iter()
-                .map(|keyword| quantized_cosine(&record.vector, keyword))
-                .fold(initial_score, f64::min);
+                .map(|keyword| quantized_cosine(&candidate.record.vector, keyword))
+                .fold(candidate.initial_score, f64::min);
             SemanticSearchHit {
-                node: node_summary(&node, None, &node_degrees, Vec::new()),
+                node: node_summary(&candidate.node, None, node_degrees, Vec::new()),
                 score: combined_score,
             }
         })
@@ -102,12 +162,7 @@ pub(crate) fn semantic_search(
             .then_with(|| left.node.id.cmp(&right.node.id))
     });
     results.truncate(limit);
-
-    Ok(SemanticSearchResult {
-        project: request.project.as_str().to_owned(),
-        keyword_count: keywords.len(),
-        results,
-    })
+    results
 }
 
 pub(crate) fn similarity_search(
