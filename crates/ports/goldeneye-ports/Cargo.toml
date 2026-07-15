@@ -9,5 +9,8 @@ license.workspace = true
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 serde.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

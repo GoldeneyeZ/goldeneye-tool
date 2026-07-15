@@ -410,6 +410,7 @@ dependencies = [
 name = "goldeneye-git"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-ports",
  "serde",
  "tempfile",
  "thiserror",
@@ -435,6 +436,7 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
  "goldeneye-domain",
+ "goldeneye-git",
  "goldeneye-index",
  "goldeneye-mcp",
  "goldeneye-services",
@@ -468,6 +470,7 @@ name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-git",
  "goldeneye-services",
  "goldeneye-watcher",
  "serde",
@@ -482,6 +485,7 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -574,6 +578,7 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
  "goldeneye-domain",
+ "goldeneye-git",
  "goldeneye-services",
  "goldeneye-store",
  "sha2",

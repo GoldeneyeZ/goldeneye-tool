@@ -6,6 +6,7 @@ mod discovery;
 mod edit;
 mod edit_syntax;
 mod error;
+mod git;
 mod index;
 mod index_syntax;
 mod query;
@@ -26,6 +27,10 @@ pub use edit_syntax::{
     EditSyntaxNodeView, EditSyntaxPlan, EditSyntaxPlanRequest,
 };
 pub use error::PortError;
+pub use git::{
+    DetectChangesOptions, DetectedChanges, GitCoChange, GitContext, GitFailure, GitFileHistory,
+    GitHistory, GitPortError, GitRepository,
+};
 pub use index::IndexRepository;
 pub use index_syntax::{
     IndexDiagnosticKind, IndexExtractedCall, IndexExtractedFile, IndexExtractedImport,

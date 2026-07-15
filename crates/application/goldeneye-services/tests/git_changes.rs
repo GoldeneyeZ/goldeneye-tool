@@ -7,13 +7,17 @@ use goldeneye_domain::{
     ContentHash, EdgeKind, FileId, FileRecord, Generation, GraphEdge, GraphNode, NodeId, NodeLabel,
     ProjectId, ProjectRecord, ProjectRelativePath, QualifiedName,
 };
+use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
     CancellationToken, DetectChangesRequest, ServiceConfig, ServiceDependencies, Services,
 };
 use goldeneye_store::Store;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 fn git(root: &std::path::Path, args: &[&str]) {

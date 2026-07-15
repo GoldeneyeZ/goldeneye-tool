@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 serde.workspace = true
 thiserror.workspace = true
 

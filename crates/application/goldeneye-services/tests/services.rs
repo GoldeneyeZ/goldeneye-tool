@@ -5,19 +5,26 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use goldeneye_artifact::FileArtifactPersistence;
-use goldeneye_ports::{ArtifactPersistence, PortError};
+use goldeneye_git::GitCommandRepository;
+use goldeneye_ports::{
+    ArtifactPersistence, DetectChangesOptions, DetectedChanges, GitContext, GitHistory,
+    GitPortError, GitRepository, PortError,
+};
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
-    GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult, IndexStatusRequest,
-    InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId,
-    ProjectRelativePath, QueryGraphRequest, SearchCodeRequest, SearchCodeResult,
+    DetectChangesRequest, GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult,
+    IndexStatusRequest, InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest,
+    ProjectId, ProjectRelativePath, QueryGraphRequest, SearchCodeRequest, SearchCodeResult,
     SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode, Services,
     TraceDirection, TracePathRequest,
 };
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 #[derive(Debug, Default)]
@@ -31,6 +38,54 @@ struct RecordingArtifact {
     fail_import: bool,
     fail_export: bool,
     calls: Arc<Mutex<ArtifactCalls>>,
+}
+
+struct FailingGit {
+    invalid_reference: bool,
+    cancel_history: bool,
+}
+
+impl GitRepository for FailingGit {
+    fn validate_reference(&self, _reference: &str) -> Result<(), GitPortError> {
+        if self.invalid_reference {
+            return Err(GitPortError::InvalidReference);
+        }
+        Ok(())
+    }
+
+    fn resolve_context(
+        &self,
+        _root: &Path,
+        _cancellation: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<GitContext, GitPortError> {
+        Err(GitPortError::Adapter(PortError::new(
+            std::io::Error::other("context failed"),
+        )))
+    }
+
+    fn collect_history(
+        &self,
+        _root: &Path,
+        _cancellation: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<GitHistory, GitPortError> {
+        if self.cancel_history {
+            return Err(GitPortError::Cancelled);
+        }
+        Err(GitPortError::Adapter(PortError::new(
+            std::io::Error::other("history failed"),
+        )))
+    }
+
+    fn detect_changes(
+        &self,
+        _root: &Path,
+        _options: &DetectChangesOptions,
+        _cancellation: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<DetectedChanges, GitPortError> {
+        Err(GitPortError::Adapter(PortError::new(
+            std::io::Error::other("changes failed"),
+        )))
+    }
 }
 
 impl ArtifactPersistence for RecordingArtifact {
@@ -75,7 +130,10 @@ fn recording_dependencies(
         fail_export,
         calls: Arc::clone(&calls),
     };
-    (ServiceDependencies::new(Arc::new(artifact)), calls)
+    (
+        ServiceDependencies::new(Arc::new(artifact), Arc::new(GitCommandRepository)),
+        calls,
+    )
 }
 
 fn write_fixture(root: &std::path::Path) {
@@ -420,4 +478,82 @@ fn artifact_export_is_opt_in_and_failure_maps_to_storage() {
         .expect_err("requested export failure must propagate");
     assert_eq!(error.code(), ServiceErrorCode::Storage);
     assert_eq!(calls.lock().expect("artifact calls").exports.len(), 1);
+}
+
+#[test]
+fn automatic_git_history_adapter_failures_are_downgraded_to_warnings() {
+    let temp = TempDir::new().expect("temp dir");
+    let repo = temp.path().join("fixture");
+    write_fixture(&repo);
+    let dependencies = ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(FailingGit {
+            invalid_reference: false,
+            cancel_history: false,
+        }),
+    );
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.db"), temp.path())
+            .with_allowed_root(temp.path()),
+        dependencies,
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("history failure must not block indexing");
+    assert!(
+        indexed
+            .warnings
+            .iter()
+            .any(|warning| warning == "git_history: history failed")
+    );
+    let project = ProjectId::new(indexed.project).expect("project ID");
+    let error = services
+        .git_context(&project, &CancellationToken::new())
+        .expect_err("adapter context error");
+    assert_eq!(error.code(), ServiceErrorCode::Index);
+    assert_eq!(error.to_string(), "context failed");
+}
+
+#[test]
+fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_lookup() {
+    let temp = TempDir::new().expect("temp dir");
+    let repo = temp.path().join("fixture");
+    write_fixture(&repo);
+    let cancelling = Services::new(
+        ServiceConfig::new(temp.path().join("cancelled.db"), temp.path())
+            .with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(FailingGit {
+                invalid_reference: false,
+                cancel_history: true,
+            }),
+        ),
+    );
+    let error = cancelling
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect_err("history cancellation must stop indexing");
+    assert_eq!(error.code(), ServiceErrorCode::Cancelled);
+    assert_eq!(error.to_string(), "index operation was cancelled");
+
+    let validating = Services::new(
+        ServiceConfig::new(temp.path().join("validation.db"), temp.path())
+            .with_allowed_root(temp.path()),
+        ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(FailingGit {
+                invalid_reference: true,
+                cancel_history: false,
+            }),
+        ),
+    );
+    let missing = ProjectId::new("missing").expect("project ID");
+    let mut request = DetectChangesRequest::new(missing);
+    request.base_branch = "--unsafe".to_owned();
+    let error = validating
+        .detect_changes(&request, &CancellationToken::new())
+        .expect_err("invalid ref must precede missing project lookup");
+    assert_eq!(error.code(), ServiceErrorCode::InvalidInput);
+    assert_eq!(error.to_string(), "base_branch contains invalid characters");
 }

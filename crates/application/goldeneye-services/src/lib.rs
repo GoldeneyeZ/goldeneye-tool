@@ -16,7 +16,7 @@ use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_index::{
     IndexError, IndexMode, IndexOptions, IndexService, IndexStatus, project_id_for_name,
 };
-use goldeneye_ports::{ArtifactPersistence, PortError};
+use goldeneye_ports::{ArtifactPersistence, GitPortError, GitRepository, PortError};
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
@@ -40,8 +40,8 @@ pub use git::{
 };
 pub use goldeneye_domain::{Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath};
 pub use goldeneye_edit::{RecoveryAction, RecoveryEntry, RecoveryReport};
-pub use goldeneye_git::GitContext;
 pub use goldeneye_index::CancellationToken;
+pub use goldeneye_ports::GitContext;
 pub use goldeneye_query::{
     ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
     CodeSnippetResult, CountSummary, EdgeSummary, GraphSchemaRequest, GraphSchemaResult,
@@ -348,7 +348,7 @@ pub enum ServiceError {
     #[error(transparent)]
     Query(#[from] QueryError),
     #[error(transparent)]
-    Git(#[from] goldeneye_git::GitError),
+    Git(#[from] GitPortError),
     #[error(transparent)]
     Artifact(#[from] PortError),
     #[error(transparent)]
@@ -373,11 +373,11 @@ impl ServiceError {
             Self::OutsideAllowedRoot => ServiceErrorCode::Forbidden,
             Self::Cancelled
             | Self::Index(IndexError::Cancelled)
-            | Self::Git(goldeneye_git::GitError::Cancelled) => ServiceErrorCode::Cancelled,
+            | Self::Git(GitPortError::Cancelled) => ServiceErrorCode::Cancelled,
             Self::Store(_) | Self::Artifact(_) => ServiceErrorCode::Storage,
             Self::Query(QueryError::ProjectNotFound(_)) => ServiceErrorCode::NotFound,
             Self::Query(_) => ServiceErrorCode::Query,
-            Self::Git(goldeneye_git::GitError::InvalidReference) => ServiceErrorCode::InvalidInput,
+            Self::Git(GitPortError::InvalidReference) => ServiceErrorCode::InvalidInput,
             Self::Index(_) | Self::Git(_) | Self::CrossLink(_) => ServiceErrorCode::Index,
             Self::Edit { code, .. } => *code,
         }
@@ -388,16 +388,21 @@ impl ServiceError {
 #[derive(Clone)]
 pub struct ServiceDependencies {
     artifact: Arc<dyn ArtifactPersistence>,
+    git: Arc<dyn GitRepository>,
 }
 
 impl ServiceDependencies {
     #[must_use]
-    pub fn new(artifact: Arc<dyn ArtifactPersistence>) -> Self {
-        Self { artifact }
+    pub fn new(artifact: Arc<dyn ArtifactPersistence>, git: Arc<dyn GitRepository>) -> Self {
+        Self { artifact, git }
     }
 
     pub(crate) fn artifact(&self) -> &dyn ArtifactPersistence {
         self.artifact.as_ref()
+    }
+
+    pub(crate) fn git(&self) -> &dyn GitRepository {
+        self.git.as_ref()
     }
 }
 
@@ -515,7 +520,7 @@ impl Services {
                 }
             }
             Ok(_) => {}
-            Err(ServiceError::Git(goldeneye_git::GitError::Cancelled)) => {
+            Err(ServiceError::Git(GitPortError::Cancelled)) => {
                 return Err(ServiceError::Cancelled);
             }
             Err(error) => result.warnings.push(format!("git_history: {error}")),

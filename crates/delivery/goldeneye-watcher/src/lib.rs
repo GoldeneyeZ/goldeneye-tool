@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::ProjectId;
+use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
 };
@@ -24,7 +25,10 @@ pub const DEFAULT_PRUNE_GRACE: Duration = Duration::from_mins(10);
 pub const DEFAULT_MISSING_POLLS: u32 = 3;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

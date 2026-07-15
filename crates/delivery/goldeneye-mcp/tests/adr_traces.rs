@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::tools::ToolRegistry;
 use goldeneye_services::{IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services};
@@ -10,7 +11,10 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 fn fixture(root: &Path) {

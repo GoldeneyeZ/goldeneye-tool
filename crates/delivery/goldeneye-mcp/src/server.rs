@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
@@ -24,7 +25,10 @@ pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
 pub const LATEST_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 fn negotiated_protocol_version(params: &Value) -> &'static str {

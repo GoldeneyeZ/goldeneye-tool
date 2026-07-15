@@ -8,6 +8,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::{GraphEdge, GraphNode, ProjectId};
+use goldeneye_git::GitCommandRepository;
 use goldeneye_mcp::server::Server;
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
@@ -24,7 +25,10 @@ const MAX_LOG_LINES: usize = 2_000;
 const LOG_CAPACITY: usize = 4_096;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 pub trait ApiBackend: Send + Sync + 'static {

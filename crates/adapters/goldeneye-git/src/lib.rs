@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod port;
+
+pub use goldeneye_ports::GitContext;
+pub use port::GitCommandRepository;
+
 pub const MAX_HISTORY_COMMITS: usize = 10_000;
 pub const MAX_FILES_PER_COMMIT: usize = 20;
 pub const MAX_COUPLINGS: usize = 8_192;
@@ -75,58 +80,21 @@ pub enum GitError {
     InvalidReference,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct GitContext {
-    pub input_path: String,
-    pub is_git: bool,
-    pub is_worktree: bool,
-    pub is_detached: bool,
-    pub root_exists: bool,
-    pub worktree_root: String,
-    pub git_dir: String,
-    pub git_common_dir: String,
-    pub canonical_root: String,
-    pub branch: String,
-    pub branch_slug: String,
-    pub head_sha: String,
-    pub base_sha: String,
-}
-
-impl GitContext {
-    fn empty(path: &Path, root_exists: bool) -> Self {
-        Self {
-            input_path: path.to_string_lossy().into_owned(),
-            is_git: false,
-            is_worktree: false,
-            is_detached: false,
-            root_exists,
-            worktree_root: String::new(),
-            git_dir: String::new(),
-            git_common_dir: String::new(),
-            canonical_root: String::new(),
-            branch: String::new(),
-            branch_slug: String::new(),
-            head_sha: String::new(),
-            base_sha: String::new(),
-        }
-    }
-
-    #[must_use]
-    pub fn branch_qualified_name(&self, project: &str) -> String {
-        let project = if project.is_empty() {
-            "project"
-        } else {
-            project
-        };
-        let slug = if self.is_detached {
-            "detached"
-        } else if self.is_git && !self.branch_slug.is_empty() {
-            &self.branch_slug
-        } else {
-            "working-tree"
-        };
-        format!("{project}.__branch__.{slug}")
+fn empty_context(path: &Path, root_exists: bool) -> GitContext {
+    GitContext {
+        input_path: path.to_string_lossy().into_owned(),
+        is_git: false,
+        is_worktree: false,
+        is_detached: false,
+        root_exists,
+        worktree_root: String::new(),
+        git_dir: String::new(),
+        git_common_dir: String::new(),
+        canonical_root: String::new(),
+        branch: String::new(),
+        branch_slug: String::new(),
+        head_sha: String::new(),
+        base_sha: String::new(),
     }
 }
 
@@ -211,7 +179,7 @@ pub fn resolve_context(
     limits: &GitLimits,
 ) -> Result<GitContext, GitError> {
     let root_exists = path.exists();
-    let mut context = GitContext::empty(path, root_exists);
+    let mut context = empty_context(path, root_exists);
     if !root_exists {
         return Ok(context);
     }

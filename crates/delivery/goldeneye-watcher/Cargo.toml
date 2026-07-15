@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
+goldeneye-git = { path = "../../adapters/goldeneye-git" }
 goldeneye-services = { path = "../../application/goldeneye-services" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
 sha2.workspace = true

@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
+goldeneye-git = { path = "../../adapters/goldeneye-git" }
 goldeneye-services = { path = "../../application/goldeneye-services" }
 goldeneye-watcher = { path = "../goldeneye-watcher" }
 serde.workspace = true

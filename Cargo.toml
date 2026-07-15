@@ -7,7 +7,6 @@ layers = ["domain", "ports", "application", "adapters", "delivery"]
 excluded = ["xtask"]
 exceptions = [
     "goldeneye-services->goldeneye-discovery",
-    "goldeneye-services->goldeneye-git",
     "goldeneye-services->goldeneye-store",
     "goldeneye-services->goldeneye-syntax",
     "goldeneye-services->goldeneye-tree-sitter-index",

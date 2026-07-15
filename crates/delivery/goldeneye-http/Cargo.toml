@@ -9,6 +9,7 @@ build = "build.rs"
 [dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
+goldeneye-git = { path = "../../adapters/goldeneye-git" }
 goldeneye-index = { path = "../../application/goldeneye-index" }
 goldeneye-mcp = { path = "../goldeneye-mcp" }
 goldeneye-services = { path = "../../application/goldeneye-services" }

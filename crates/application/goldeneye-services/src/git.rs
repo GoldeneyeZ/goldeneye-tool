@@ -2,10 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use goldeneye_domain::{FileId, NodeId, ProjectId, ProjectRelativePath};
-use goldeneye_git::{
-    DetectChangesOptions, GitCoChange, GitFileHistory, GitLimits, collect_history, detect_changes,
-    resolve_context,
-};
+use goldeneye_ports::{DetectChangesOptions, GitCoChange, GitContext, GitFileHistory};
 use goldeneye_store::{GitCoChangeRecord, GitFileHistoryRecord, Store};
 use serde::{Deserialize, Serialize};
 
@@ -74,10 +71,10 @@ impl Services {
         &self,
         project: &ProjectId,
         cancellation: &CancellationToken,
-    ) -> Result<goldeneye_git::GitContext, ServiceError> {
+    ) -> Result<GitContext, ServiceError> {
         let (_, root) = self.project_store_and_root(project)?;
         let cancelled = || cancellation.is_cancelled();
-        Ok(resolve_context(&root, &cancelled, &GitLimits::default())?)
+        Ok(self.dependencies.git().resolve_context(&root, &cancelled)?)
     }
 
     /// Recomputes bounded Git history and atomically refreshes graph enrichment.
@@ -101,7 +98,7 @@ impl Services {
         cancellation: &CancellationToken,
     ) -> Result<GitHistoryResult, ServiceError> {
         let cancelled = || cancellation.is_cancelled();
-        let history = collect_history(root, &cancelled, &GitLimits::default())?;
+        let history = self.dependencies.git().collect_history(root, &cancelled)?;
         let files = history
             .files
             .iter()
@@ -138,17 +135,16 @@ impl Services {
             .as_deref()
             .filter(|value| !value.is_empty())
             .unwrap_or(&request.base_branch);
-        goldeneye_git::validate_reference(reference)?;
+        self.dependencies.git().validate_reference(reference)?;
         let (store, root) = self.project_store_and_root(&request.project)?;
         let cancelled = || cancellation.is_cancelled();
-        let changes = detect_changes(
+        let changes = self.dependencies.git().detect_changes(
             &root,
             &DetectChangesOptions {
                 base_branch: request.base_branch.clone(),
                 since: request.since.clone(),
             },
             &cancelled,
-            &GitLimits::default(),
         )?;
         let depth = request.depth.min(MAX_CHANGE_DEPTH);
         let wants_symbols = request

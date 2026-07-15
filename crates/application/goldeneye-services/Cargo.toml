@@ -10,7 +10,6 @@ goldeneye-crosslink = { path = "../goldeneye-crosslink" }
 goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 goldeneye-edit = { path = "../goldeneye-edit" }
-goldeneye-git = { path = "../../adapters/goldeneye-git" }
 goldeneye-index = { path = "../goldeneye-index" }
 goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 goldeneye-query = { path = "../goldeneye-query" }
@@ -23,6 +22,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
+goldeneye-git = { path = "../../adapters/goldeneye-git" }
 tempfile.workspace = true
 
 [lints]

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::ProjectRecord;
+use goldeneye_git::GitCommandRepository;
 use goldeneye_services::{
     IngestTracesRequest, MAX_PERSISTED_TRACE_BATCH, ManageAdrRequest, ProjectId, ServiceConfig,
     ServiceDependencies, ServiceErrorCode, Services,
@@ -12,7 +13,10 @@ use serde_json::json;
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
-    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+    ServiceDependencies::new(
+        Arc::new(FileArtifactPersistence),
+        Arc::new(GitCommandRepository),
+    )
 }
 
 fn registered_services(
