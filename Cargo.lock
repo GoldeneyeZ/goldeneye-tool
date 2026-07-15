@@ -341,6 +341,7 @@ name = "goldeneye-crosslink"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-ports",
  "goldeneye-store",
  "serde_json",
  "tempfile",
@@ -466,6 +467,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldeneye-ports"
+version = "0.1.0"
+dependencies = [
+ "goldeneye-domain",
+]
+
+[[package]]
 name = "goldeneye-query"
 version = "0.1.0"
 dependencies = [
@@ -505,6 +513,7 @@ name = "goldeneye-store"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-ports",
  "rusqlite",
  "serde_json",
  "tempfile",

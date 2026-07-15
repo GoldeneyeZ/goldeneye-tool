@@ -600,7 +600,7 @@ def parse_language_ids(workspace_root: Path, enum_source: str) -> list[str]:
         )
         if value != "COUNT"
     ]
-    tsv_path = workspace_root / "crates/goldeneye-discovery/data/languages.tsv"
+    tsv_path = workspace_root / "crates/adapters/goldeneye-discovery/data/languages.tsv"
     tsv_lines = tsv_path.read_text(encoding="utf-8-sig").splitlines()
     data_lines = [line for line in tsv_lines if line and not line.startswith("#")]
     if not data_lines or data_lines[0].split("\t")[0] != "id":

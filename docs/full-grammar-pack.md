@@ -32,7 +32,7 @@ $env:GOLDENEYE_GRAMMAR_PACK_DIR = "target/goldeneye-grammars"
 python tools/export_grammar_lock.py --check --source .upstream/codebase-memory-mcp --expected-commit $Commit --output grammars/full-pack.toml
 cargo xtask grammars sync --lock grammars/full-pack.toml --git-repo .upstream/codebase-memory-mcp --git-prefix internal/cbm/vendored/grammars --dest target/goldeneye-grammars
 cargo xtask grammars verify --lock grammars/full-pack.toml --source target/goldeneye-grammars
-cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/goldeneye-full-grammars/src/generated.rs --check
+cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/adapters/goldeneye-full-grammars/src/generated.rs --check
 cargo xtask grammars generate-notices --lock grammars/full-pack.toml --output grammars/full-pack-license-ledger.md --check
 ```
 
@@ -79,7 +79,7 @@ export GOLDENEYE_GRAMMAR_PACK_DIR=target/goldeneye-grammars
 python tools/export_grammar_lock.py --check --source .upstream/codebase-memory-mcp --expected-commit "$commit" --output grammars/full-pack.toml
 cargo xtask grammars sync --lock grammars/full-pack.toml --git-repo .upstream/codebase-memory-mcp --git-prefix internal/cbm/vendored/grammars --dest target/goldeneye-grammars
 cargo xtask grammars verify --lock grammars/full-pack.toml --source target/goldeneye-grammars
-cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/goldeneye-full-grammars/src/generated.rs --check
+cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/adapters/goldeneye-full-grammars/src/generated.rs --check
 cargo xtask grammars generate-notices --lock grammars/full-pack.toml --output grammars/full-pack-license-ledger.md --check
 ```
 

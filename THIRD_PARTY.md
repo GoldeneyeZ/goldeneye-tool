@@ -82,7 +82,7 @@ publishable artifact.
 
 ## Generated Language Registry Data
 
-`crates/goldeneye-discovery/data/languages.tsv` is MIT-derived data generated
+`crates/adapters/goldeneye-discovery/data/languages.tsv` is MIT-derived data generated
 by `tools/export_upstream_languages.py` from these files in the audited
 `codebase-memory-mcp` commit above:
 
@@ -95,7 +95,7 @@ and MIT provenance. Goldeneye retains the upstream MIT license in `NOTICE`.
 Regenerate the data without changing provenance using:
 
 ```text
-python tools/export_upstream_languages.py --upstream .upstream/codebase-memory-mcp --output crates/goldeneye-discovery/data/languages.tsv
+python tools/export_upstream_languages.py --upstream .upstream/codebase-memory-mcp --output crates/adapters/goldeneye-discovery/data/languages.tsv
 ```
 
 ## Rust Crates

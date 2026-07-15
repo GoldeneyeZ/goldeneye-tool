@@ -45,7 +45,7 @@ jobs:
           python tools/export_grammar_lock.py --check --source .upstream/codebase-memory-mcp --expected-commit 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c --output grammars/full-pack.toml
           cargo xtask grammars sync --lock grammars/full-pack.toml --git-repo .upstream/codebase-memory-mcp --git-prefix internal/cbm/vendored/grammars --dest target/goldeneye-grammars
           cargo xtask grammars verify --lock grammars/full-pack.toml --source target/goldeneye-grammars
-          cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/goldeneye-full-grammars/src/generated.rs --check
+          cargo xtask grammars generate-provider --lock grammars/full-pack.toml --output crates/adapters/goldeneye-full-grammars/src/generated.rs --check
           cargo xtask grammars generate-notices --lock grammars/full-pack.toml --output grammars/full-pack-license-ledger.md --check
       - name: Compile and audit the native full provider
         run: |

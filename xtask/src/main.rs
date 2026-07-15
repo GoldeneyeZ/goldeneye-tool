@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use xtask::{
     GenerationOutcome, SyncOutcome, generate_notices, generate_provider, sync_git_grammars,
-    sync_grammars, verify_git_grammars, verify_grammars,
+    sync_grammars, verify_architecture, verify_git_grammars, verify_grammars,
 };
 
 enum GrammarSource {
@@ -28,6 +28,13 @@ fn main() -> ExitCode {
 }
 
 fn run(arguments: &[String]) -> Result<String, String> {
+    if arguments == ["architecture", "verify"] {
+        let report = verify_architecture().map_err(|error| error.to_string())?;
+        return Ok(format!(
+            "verified {} packages / {} internal dependencies / {} migration exceptions",
+            report.packages, report.dependencies, report.exceptions
+        ));
+    }
     if arguments.len() < 2 || arguments[0] != "grammars" {
         return Err(usage());
     }
@@ -163,7 +170,7 @@ fn reject_unknown(options: &BTreeMap<String, String>, allowed: &[&str]) -> Resul
 }
 
 fn usage() -> String {
-    "usage: cargo xtask grammars verify --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) | cargo xtask grammars sync --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) --dest <dir> | cargo xtask grammars generate-provider --lock <file> --output <file> [--check] | cargo xtask grammars generate-notices --lock <file> --output <file> [--check]".into()
+    "usage: cargo xtask architecture verify | cargo xtask grammars verify --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) | cargo xtask grammars sync --lock <file> (--source <dir> | --git-repo <dir> --git-prefix <path>) --dest <dir> | cargo xtask grammars generate-provider --lock <file> --output <file> [--check] | cargo xtask grammars generate-notices --lock <file> --output <file> [--check]".into()
 }
 
 #[cfg(test)]

@@ -1,6 +1,44 @@
 [workspace]
-members = ["crates/*", "xtask"]
+members = ["crates/*/*", "xtask"]
 resolver = "3"
+
+[workspace.metadata.architecture]
+layers = ["domain", "ports", "application", "adapters", "delivery"]
+excluded = ["xtask"]
+exceptions = [
+    "goldeneye-edit->goldeneye-store",
+    "goldeneye-edit->goldeneye-syntax",
+    "goldeneye-index->goldeneye-discovery",
+    "goldeneye-index->goldeneye-store",
+    "goldeneye-index->goldeneye-syntax",
+    "goldeneye-query->goldeneye-store",
+    "goldeneye-services->goldeneye-artifact",
+    "goldeneye-services->goldeneye-discovery",
+    "goldeneye-services->goldeneye-git",
+    "goldeneye-services->goldeneye-store",
+    "goldeneye-services->goldeneye-syntax",
+]
+
+[workspace.metadata.architecture.packages]
+goldeneye-domain = "domain"
+goldeneye-ports = "ports"
+goldeneye-crosslink = "application"
+goldeneye-edit = "application"
+goldeneye-index = "application"
+goldeneye-query = "application"
+goldeneye-services = "application"
+goldeneye-artifact = "adapters"
+goldeneye-discovery = "adapters"
+goldeneye-full-grammars = "adapters"
+goldeneye-git = "adapters"
+goldeneye-grammar-pack = "adapters"
+goldeneye-store = "adapters"
+goldeneye-syntax = "adapters"
+goldeneye = "delivery"
+goldeneye-compat-tests = "delivery"
+goldeneye-http = "delivery"
+goldeneye-mcp = "delivery"
+goldeneye-watcher = "delivery"
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,12 @@
+[package]
+name = "goldeneye-ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+goldeneye-domain = { path = "../../domain/goldeneye-domain" }
+
+[lints]
+workspace = true

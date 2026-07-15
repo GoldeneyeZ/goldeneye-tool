@@ -7,7 +7,7 @@ const upstream = resolve(workspace, ".upstream/codebase-memory-mcp");
 const specsPath = resolve(upstream, "internal/cbm/lang_specs.c");
 const generatedGrammarsPath = resolve(
   workspace,
-  "crates/goldeneye-full-grammars/src/generated.rs",
+  "crates/adapters/goldeneye-full-grammars/src/generated.rs",
 );
 
 const specsSource = readFileSync(specsPath, "utf8");

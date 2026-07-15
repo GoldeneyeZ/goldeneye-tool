@@ -337,24 +337,24 @@ Fresh verification at commit `14cdb59`:
 - Isolated exact-HEAD self-index: 211 files, 15,487 nodes, 22,068 edges,
   0 diagnostics.
 - ACK status and symbol search resolved `GoldeneyeBackend` from
-  `crates/goldeneye-http/src/backend.rs`.
+  `crates/delivery/goldeneye-http/src/backend.rs`.
 
 ## Source map
 
-- `crates/goldeneye-mcp/src/tools.rs`: canonical tool schemas.
-- `crates/goldeneye-mcp/src/server.rs`: dispatch and compatibility behavior.
+- `crates/delivery/goldeneye-mcp/src/tools.rs`: canonical tool schemas.
+- `crates/delivery/goldeneye-mcp/src/server.rs`: dispatch and compatibility behavior.
 - `tests/fixtures/mcp/foundation.expected.jsonl`: frozen 21-tool protocol.
-- `crates/goldeneye-services/src/edit.rs`: edit requests, results, and runtime.
-- `crates/goldeneye-services/src/git.rs`: change-impact contract.
-- `crates/goldeneye-services/src/adr_traces.rs`: ADR and trace contracts.
-- `crates/goldeneye-index/src/enrichment.rs`: derived graph semantics.
-- `crates/goldeneye-index/src/identity.rs`: project-name normalization.
-- `crates/goldeneye-crosslink/src/lib.rs`: cross-project edge derivation.
-- `crates/goldeneye-artifact/src/lib.rs`: artifact format and installation.
-- `crates/goldeneye-store/src/lib.rs`: project registration and shared store.
-- `crates/goldeneye-syntax/src/grammar.rs`: shipped core grammar provider.
-- `crates/goldeneye-http/src/backend.rs`: HTTP API behavior.
-- `crates/goldeneye-watcher/src/lib.rs`: watcher behavior and defaults.
-- `crates/goldeneye-cli/src/main.rs`: direct CLI contract.
+- `crates/application/goldeneye-services/src/edit.rs`: edit requests, results, and runtime.
+- `crates/application/goldeneye-services/src/git.rs`: change-impact contract.
+- `crates/application/goldeneye-services/src/adr_traces.rs`: ADR and trace contracts.
+- `crates/application/goldeneye-index/src/enrichment.rs`: derived graph semantics.
+- `crates/application/goldeneye-index/src/identity.rs`: project-name normalization.
+- `crates/application/goldeneye-crosslink/src/lib.rs`: cross-project edge derivation.
+- `crates/adapters/goldeneye-artifact/src/lib.rs`: artifact format and installation.
+- `crates/adapters/goldeneye-store/src/lib.rs`: project registration and shared store.
+- `crates/adapters/goldeneye-syntax/src/grammar.rs`: shipped core grammar provider.
+- `crates/delivery/goldeneye-http/src/backend.rs`: HTTP API behavior.
+- `crates/delivery/goldeneye-watcher/src/lib.rs`: watcher behavior and defaults.
+- `crates/delivery/goldeneye-cli/src/main.rs`: direct CLI contract.
 - `ui/HTTP_API_CONTRACT.md`: UI route contract.
 - `docs/ack-acceptance.md`: current ACK Phase-1 baseline.

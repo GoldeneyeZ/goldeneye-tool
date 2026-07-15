@@ -1,5 +1,9 @@
 //! Workspace maintenance commands.
 
+pub mod architecture;
+
+pub use architecture::{ArchitectureError, ArchitectureReport, verify_architecture};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};

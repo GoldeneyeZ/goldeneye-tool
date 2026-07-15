@@ -139,7 +139,7 @@ fn full_pack_job_reproduces_verifies_builds_and_guards_claims() {
         "cargo xtask grammars verify",
         "--source target/goldeneye-grammars",
         "cargo xtask grammars generate-provider",
-        "--output crates/goldeneye-full-grammars/src/generated.rs --check",
+        "--output crates/adapters/goldeneye-full-grammars/src/generated.rs --check",
         "cargo xtask grammars generate-notices",
         "--output grammars/full-pack-license-ledger.md --check",
         "cargo clippy -p goldeneye-full-grammars --all-targets --features compiled -- -D warnings",
