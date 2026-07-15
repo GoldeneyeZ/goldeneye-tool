@@ -1,7 +1,7 @@
 use super::{
     BTreeSet, Connection, Generation, MINHASH_SIGNATURE_HEX_LEN, NodeId, NodeSignatureRecord,
     NodeVectorRecord, OptionalExtension, ProjectId, STORED_VECTOR_DIM, SemanticIndexOutcome, Store,
-    StoreError, StoredVector, TokenVectorRecord, TransactionBehavior, corrupt_graph,
+    StoreError, StoredVector, TokenVectorRecord, Transaction, TransactionBehavior, corrupt_graph,
     ensure_generation, ensure_project_exists, params, sqlite_u64,
 };
 
@@ -25,60 +25,10 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         ensure_generation(&transaction, project, expected_generation)?;
-        transaction.execute(
-            "DELETE FROM node_vectors WHERE project_id = ?1",
-            params![project.as_str()],
-        )?;
-        transaction.execute(
-            "DELETE FROM token_vectors WHERE project_id = ?1",
-            params![project.as_str()],
-        )?;
-        transaction.execute(
-            "DELETE FROM node_signatures WHERE project_id = ?1",
-            params![project.as_str()],
-        )?;
-
-        {
-            let mut statement = transaction.prepare(
-                "INSERT INTO node_vectors(project_id, node_id, vector) VALUES (?1, ?2, ?3)",
-            )?;
-            for record in node_vectors {
-                statement.execute(params![
-                    project.as_str(),
-                    record.node_id.as_str(),
-                    stored_vector_to_blob(&record.vector),
-                ])?;
-            }
-        }
-        {
-            let mut statement = transaction.prepare(
-                "INSERT INTO token_vectors(project_id, token, vector, idf_milli) \
-                 VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for record in token_vectors {
-                statement.execute(params![
-                    project.as_str(),
-                    record.token,
-                    stored_vector_to_blob(&record.vector),
-                    i64::from(record.idf_milli),
-                ])?;
-            }
-        }
-        {
-            let mut statement = transaction.prepare(
-                "INSERT INTO node_signatures(\
-                   project_id, node_id, minhash_hex, ast_profile\
-                 ) VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for record in node_signatures {
-                statement.execute(params![
-                    project.as_str(),
-                    record.node_id.as_str(),
-                    record.minhash_hex,
-                    record.ast_profile,
-                ])?;
-            }
-        }
+        delete_semantic_index(&transaction, project)?;
+        insert_node_vectors(&transaction, project, node_vectors)?;
+        insert_token_vectors(&transaction, project, token_vectors)?;
+        insert_node_signatures(&transaction, project, node_signatures)?;
         transaction.commit()?;
         Ok(SemanticIndexOutcome {
             node_vectors: node_vectors.len(),
@@ -93,6 +43,12 @@ pub(super) fn validate_semantic_index(
     token_vectors: &[TokenVectorRecord],
     node_signatures: &[NodeSignatureRecord],
 ) -> Result<(), StoreError> {
+    validate_node_vectors(node_vectors)?;
+    validate_token_vectors(token_vectors)?;
+    validate_node_signatures(node_signatures)
+}
+
+fn validate_node_vectors(node_vectors: &[NodeVectorRecord]) -> Result<(), StoreError> {
     let mut vector_nodes = BTreeSet::new();
     for record in node_vectors {
         if !vector_nodes.insert(&record.node_id) {
@@ -101,7 +57,10 @@ pub(super) fn validate_semantic_index(
             });
         }
     }
+    Ok(())
+}
 
+fn validate_token_vectors(token_vectors: &[TokenVectorRecord]) -> Result<(), StoreError> {
     let mut tokens = BTreeSet::new();
     for record in token_vectors {
         if record.token.is_empty() || record.token.contains('\0') {
@@ -115,7 +74,10 @@ pub(super) fn validate_semantic_index(
             });
         }
     }
+    Ok(())
+}
 
+fn validate_node_signatures(node_signatures: &[NodeSignatureRecord]) -> Result<(), StoreError> {
     let mut signature_nodes = BTreeSet::new();
     for record in node_signatures {
         if !signature_nodes.insert(&record.node_id) {
@@ -145,6 +107,83 @@ pub(super) fn validate_semantic_index(
                 reason: format!("AST profile for {:?} contains a NUL byte", record.node_id),
             });
         }
+    }
+    Ok(())
+}
+
+fn delete_semantic_index(
+    transaction: &Transaction<'_>,
+    project: &ProjectId,
+) -> Result<(), StoreError> {
+    transaction.execute(
+        "DELETE FROM node_vectors WHERE project_id = ?1",
+        params![project.as_str()],
+    )?;
+    transaction.execute(
+        "DELETE FROM token_vectors WHERE project_id = ?1",
+        params![project.as_str()],
+    )?;
+    transaction.execute(
+        "DELETE FROM node_signatures WHERE project_id = ?1",
+        params![project.as_str()],
+    )?;
+    Ok(())
+}
+
+fn insert_node_vectors(
+    transaction: &Transaction<'_>,
+    project: &ProjectId,
+    records: &[NodeVectorRecord],
+) -> Result<(), StoreError> {
+    let mut statement = transaction
+        .prepare("INSERT INTO node_vectors(project_id, node_id, vector) VALUES (?1, ?2, ?3)")?;
+    for record in records {
+        statement.execute(params![
+            project.as_str(),
+            record.node_id.as_str(),
+            stored_vector_to_blob(&record.vector),
+        ])?;
+    }
+    Ok(())
+}
+
+fn insert_token_vectors(
+    transaction: &Transaction<'_>,
+    project: &ProjectId,
+    records: &[TokenVectorRecord],
+) -> Result<(), StoreError> {
+    let mut statement = transaction.prepare(
+        "INSERT INTO token_vectors(project_id, token, vector, idf_milli) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for record in records {
+        statement.execute(params![
+            project.as_str(),
+            record.token,
+            stored_vector_to_blob(&record.vector),
+            i64::from(record.idf_milli),
+        ])?;
+    }
+    Ok(())
+}
+
+fn insert_node_signatures(
+    transaction: &Transaction<'_>,
+    project: &ProjectId,
+    records: &[NodeSignatureRecord],
+) -> Result<(), StoreError> {
+    let mut statement = transaction.prepare(
+        "INSERT INTO node_signatures(\
+           project_id, node_id, minhash_hex, ast_profile\
+         ) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for record in records {
+        statement.execute(params![
+            project.as_str(),
+            record.node_id.as_str(),
+            record.minhash_hex,
+            record.ast_profile,
+        ])?;
     }
     Ok(())
 }

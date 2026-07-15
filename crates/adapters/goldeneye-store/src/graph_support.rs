@@ -60,6 +60,11 @@ pub(super) fn validate_replacement(
     nodes: &[GraphNode],
     edges: &[GraphEdge],
 ) -> Result<(), StoreError> {
+    validate_replacement_nodes(file, nodes)?;
+    validate_replacement_edges(file, edges)
+}
+
+fn validate_replacement_nodes(file: &FileRecord, nodes: &[GraphNode]) -> Result<(), StoreError> {
     let mut node_ids = BTreeSet::new();
     let mut qualified_names = BTreeSet::new();
     for node in nodes {
@@ -90,7 +95,10 @@ pub(super) fn validate_replacement(
             ));
         }
     }
+    Ok(())
+}
 
+fn validate_replacement_edges(file: &FileRecord, edges: &[GraphEdge]) -> Result<(), StoreError> {
     let mut edge_ids = BTreeSet::new();
     for edge in edges {
         if edge.project != file.id.project {
@@ -123,6 +131,15 @@ pub(super) fn validate_project_replacement(
     nodes: &[GraphNode],
     edges: &[GraphEdge],
 ) -> Result<(), StoreError> {
+    let file_paths = validate_project_files(project, files)?;
+    let node_ids = validate_project_nodes(project, &file_paths, nodes)?;
+    validate_project_edges(project, &node_ids, edges)
+}
+
+fn validate_project_files(
+    project: &ProjectId,
+    files: &[FileRecord],
+) -> Result<BTreeSet<ProjectRelativePath>, StoreError> {
     let mut file_paths = BTreeSet::new();
     for file in files {
         if file.id.project != *project {
@@ -135,7 +152,14 @@ pub(super) fn validate_project_replacement(
             return Err(StoreError::DuplicateFilePath(file.id.path.clone()));
         }
     }
+    Ok(file_paths)
+}
 
+fn validate_project_nodes(
+    project: &ProjectId,
+    file_paths: &BTreeSet<ProjectRelativePath>,
+    nodes: &[GraphNode],
+) -> Result<BTreeSet<NodeId>, StoreError> {
     let mut node_ids = BTreeSet::new();
     let mut qualified_names = BTreeSet::new();
     for node in nodes {
@@ -162,7 +186,14 @@ pub(super) fn validate_project_replacement(
             ));
         }
     }
+    Ok(node_ids)
+}
 
+fn validate_project_edges(
+    project: &ProjectId,
+    node_ids: &BTreeSet<NodeId>,
+    edges: &[GraphEdge],
+) -> Result<(), StoreError> {
     let mut edge_ids = BTreeSet::new();
     for edge in edges {
         if edge.project != *project {
