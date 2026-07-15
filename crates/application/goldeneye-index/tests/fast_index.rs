@@ -3,6 +3,7 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{EdgeKind, Generation, NodeId, ProjectRelativePath};
 use goldeneye_index::{
     CancellationToken, FileRefreshStatus, IndexError, IndexOptions, IndexService, IndexStatus,
@@ -29,6 +30,7 @@ fn service(options: IndexOptions) -> IndexService<CoreGrammarProvider> {
         Store::open_in_memory().expect("memory store"),
         CoreGrammarProvider,
         options,
+        FileSystemDiscovery,
     )
 }
 

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{
     FileContext, Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath,
 };
@@ -32,7 +33,12 @@ impl Fixture {
         fs::write(root.join("src/lib.rs"), source).expect("write source");
         let database = allowed_root.join("graph.sqlite");
         let store = Store::open(&database).expect("open store");
-        let mut index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
+        let mut index = IndexService::new(
+            store,
+            CoreGrammarProvider,
+            IndexOptions::default(),
+            FileSystemDiscovery,
+        );
         let indexed = index.index_repository(&root).expect("initial index");
         Self {
             _temp: temp,
@@ -45,7 +51,12 @@ impl Fixture {
 
     fn open(&self) -> (DurableEditService, goldeneye_edit::RecoveryReport) {
         let store = Store::open(&self.database).expect("reopen store");
-        let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
+        let index = IndexService::new(
+            store,
+            CoreGrammarProvider,
+            IndexOptions::default(),
+            FileSystemDiscovery,
+        );
         let journal = Store::open(&self.database).expect("open edit journal");
         DurableEditService::open(
             index,

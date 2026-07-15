@@ -303,6 +303,7 @@ name = "goldeneye"
 version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
+ "goldeneye-discovery",
  "goldeneye-edit",
  "goldeneye-http",
  "goldeneye-index",
@@ -353,6 +354,7 @@ name = "goldeneye-discovery"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-ports",
  "ignore",
  "tempfile",
  "thiserror",
@@ -372,6 +374,7 @@ dependencies = [
 name = "goldeneye-edit"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-discovery",
  "goldeneye-domain",
  "goldeneye-index",
  "goldeneye-ports",

@@ -6,11 +6,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use goldeneye_discovery::{DiscoveryError, DiscoveryOptions, IndexMode};
 use goldeneye_domain::{
     DomainError, Generation, GraphIdentityError, ProjectId, ProjectRecord, ProjectRelativePath,
     SyntaxIdentityError,
 };
+use goldeneye_ports::{IndexMode, PortError, RepositoryDiscoveryOptions};
 use goldeneye_store::{GraphCounts, StoreError};
 use goldeneye_syntax::{SyntaxDiagnostic, SyntaxError};
 use thiserror::Error;
@@ -38,7 +38,7 @@ impl CancellationToken {
 
 #[derive(Debug, Clone)]
 pub struct IndexOptions {
-    pub discovery: DiscoveryOptions,
+    pub discovery: RepositoryDiscoveryOptions,
     pub max_workers: NonZeroUsize,
     pub max_files: Option<usize>,
     pub cancellation: CancellationToken,
@@ -47,9 +47,9 @@ pub struct IndexOptions {
 
 impl Default for IndexOptions {
     fn default() -> Self {
-        let discovery = DiscoveryOptions {
+        let discovery = RepositoryDiscoveryOptions {
             mode: IndexMode::Fast,
-            ..DiscoveryOptions::default()
+            ..RepositoryDiscoveryOptions::default()
         };
         let workers = std::thread::available_parallelism()
             .map_or(1, NonZeroUsize::get)
@@ -118,7 +118,7 @@ pub enum IndexError {
     #[error(transparent)]
     CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
     #[error(transparent)]
-    Discovery(#[from] DiscoveryError),
+    Discovery(#[from] PortError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("I/O error for {path}: {source}")]

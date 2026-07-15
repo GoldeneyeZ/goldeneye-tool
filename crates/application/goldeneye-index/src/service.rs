@@ -8,11 +8,11 @@ use std::sync::{
 };
 use std::time::UNIX_EPOCH;
 
-use goldeneye_discovery::{DiscoveredFile, discover};
 use goldeneye_domain::{
     ContentHash, FileId, FileRecord, Generation, GraphEdge, GraphNode, ProjectId, ProjectRecord,
     ProjectRelativePath,
 };
+use goldeneye_ports::{RepositoryDiscovery, RepositorySourceFile};
 use goldeneye_store::Store;
 use goldeneye_syntax::GrammarProvider;
 
@@ -45,6 +45,7 @@ pub struct IndexService<P> {
     store: Store,
     provider: P,
     options: IndexOptions,
+    discovery: Box<dyn RepositoryDiscovery>,
 }
 
 impl<P> IndexService<P>
@@ -52,11 +53,17 @@ where
     P: GrammarProvider + Clone + Send + Sync,
 {
     #[must_use]
-    pub const fn new(store: Store, provider: P, options: IndexOptions) -> Self {
+    pub fn new(
+        store: Store,
+        provider: P,
+        options: IndexOptions,
+        discovery: impl RepositoryDiscovery + 'static,
+    ) -> Self {
         Self {
             store,
             provider,
             options,
+            discovery: Box::new(discovery),
         }
     }
 
@@ -84,7 +91,9 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn index_repository(&mut self, root: impl AsRef<Path>) -> Result<IndexResult, IndexError> {
         self.ensure_not_cancelled()?;
-        let report = discover(root.as_ref(), &self.options.discovery)?;
+        let report = self
+            .discovery
+            .discover(root.as_ref(), &self.options.discovery)?;
         self.enforce_file_limit(report.files.len())?;
         self.ensure_not_cancelled()?;
 
@@ -214,7 +223,9 @@ where
             .store
             .get_project(project_id)?
             .ok_or_else(|| goldeneye_store::StoreError::ProjectNotFound(project_id.clone()))?;
-        let report = discover(Path::new(&project.root_path), &self.options.discovery)?;
+        let report = self
+            .discovery
+            .discover(Path::new(&project.root_path), &self.options.discovery)?;
         self.enforce_file_limit(report.files.len())?;
         let discovered = report
             .files
@@ -451,7 +462,7 @@ where
 
     fn parse_matching_records(
         &self,
-        discovered: &[DiscoveredFile],
+        discovered: &[RepositorySourceFile],
         records: &[FileRecord],
         project: &ProjectId,
         excluded: Option<&ProjectRelativePath>,
@@ -492,7 +503,7 @@ where
 
     fn read_candidates(
         &self,
-        files: &[DiscoveredFile],
+        files: &[RepositorySourceFile],
         project: &ProjectId,
     ) -> Result<Vec<Candidate>, IndexError> {
         let supported_ids = self.provider.supported_ids();
@@ -506,7 +517,10 @@ where
             .collect()
     }
 
-    fn read_candidate(file: &DiscoveredFile, project: &ProjectId) -> Result<Candidate, IndexError> {
+    fn read_candidate(
+        file: &RepositorySourceFile,
+        project: &ProjectId,
+    ) -> Result<Candidate, IndexError> {
         let source = fs::read(&file.absolute_path).map_err(|source| IndexError::Io {
             path: file.absolute_path.clone(),
             source,

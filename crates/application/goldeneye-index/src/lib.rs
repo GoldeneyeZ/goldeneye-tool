@@ -9,6 +9,7 @@ mod language_specs;
 mod service;
 mod types;
 
+pub use goldeneye_ports::{IndexMode, RepositoryDiscoveryOptions};
 pub use identity::{
     canonical_project, canonical_root_string, project_id_for_name, project_id_for_root,
 };

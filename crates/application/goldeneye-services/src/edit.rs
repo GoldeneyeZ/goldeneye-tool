@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use goldeneye_discovery::LanguageRegistry;
+use goldeneye_discovery::{FileSystemDiscovery, LanguageRegistry};
 use goldeneye_domain::{ContentHash, FileContext, FileId, SourceSpan};
 use goldeneye_edit::path_auth::{PathAuthorizationError, PathAuthorizer, PathIntent};
 use goldeneye_edit::{
@@ -480,7 +480,12 @@ impl Services {
     fn build_edit_service(&self) -> Result<(DurableEditService, RecoveryReport), ServiceError> {
         self.prepare_database()?;
         let store = Store::open(self.config.database_path())?;
-        let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
+        let index = IndexService::new(
+            store,
+            CoreGrammarProvider,
+            IndexOptions::default(),
+            FileSystemDiscovery,
+        );
         let journal = Store::open(self.config.database_path())?;
         DurableEditService::open(
             index,

@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_edit::{
     DurableEditRequest, DurableEditService, EditOperation, EditOptions, FaultInjector, FaultPoint,
 };
@@ -465,7 +466,12 @@ fn stdio_startup_recovers_interrupted_edit_before_first_response() {
             .expect("roundtrip locator");
 
     let store = Store::open(&database).expect("open edit store");
-    let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
+    let index = IndexService::new(
+        store,
+        CoreGrammarProvider,
+        IndexOptions::default(),
+        FileSystemDiscovery,
+    );
     let journal = Store::open(&database).expect("open edit journal");
     let (mut edit, startup) = DurableEditService::open(
         index,
@@ -531,7 +537,12 @@ fn stdio_startup_reports_recovery_conflict_before_protocol_readiness() {
         serde_json::from_value(locator_with_preview(&inspected, "fn helper"))
             .expect("roundtrip locator");
     let store = Store::open(&database).expect("open edit store");
-    let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
+    let index = IndexService::new(
+        store,
+        CoreGrammarProvider,
+        IndexOptions::default(),
+        FileSystemDiscovery,
+    );
     let journal = Store::open(&database).expect("open edit journal");
     let (mut edit, _) = DurableEditService::open(
         index,

@@ -2,9 +2,11 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
-use goldeneye_discovery::{DiscoveryOptions, IndexMode};
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{FileId, LanguageId, ProjectRelativePath};
-use goldeneye_index::{CancellationToken, IndexOptions, IndexService};
+use goldeneye_index::{
+    CancellationToken, IndexMode, IndexOptions, IndexService, RepositoryDiscoveryOptions,
+};
 use goldeneye_store::Store;
 use goldeneye_syntax::{CoreGrammarProvider, Grammar, GrammarProvider, SyntaxError};
 use tempfile::TempDir;
@@ -40,9 +42,9 @@ fn write_fixture(root: &Path) {
 
 fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
     let options = IndexOptions {
-        discovery: DiscoveryOptions {
+        discovery: RepositoryDiscoveryOptions {
             mode,
-            ..DiscoveryOptions::default()
+            ..RepositoryDiscoveryOptions::default()
         },
         max_workers: NonZeroUsize::new(1).expect("one worker"),
         max_files: None,
@@ -53,6 +55,7 @@ fn index_mode(root: &Path, mode: IndexMode) -> (Vec<String>, bool) {
         Store::open_in_memory().expect("memory store"),
         NonCoreFixtureProvider,
         options,
+        FileSystemDiscovery,
     );
     let result = service.index_repository(root).expect("index fixture");
     assert_eq!(result.parsed_files, 1);

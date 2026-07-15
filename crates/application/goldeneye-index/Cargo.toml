@@ -11,7 +11,6 @@ full-grammar-tests = ["goldeneye-syntax/full-grammar-pack"]
 [dependencies]
 blake3 = "1.8"
 goldeneye-crosslink = { path = "../goldeneye-crosslink" }
-goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-domain = { path = "../../domain/goldeneye-domain" }
 goldeneye-ports = { path = "../../ports/goldeneye-ports" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
@@ -21,6 +20,7 @@ thiserror.workspace = true
 tree-sitter = "=0.26.11"
 
 [dev-dependencies]
+goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 tempfile.workspace = true
 
 [lints]

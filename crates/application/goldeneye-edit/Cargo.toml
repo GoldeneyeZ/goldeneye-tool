@@ -13,6 +13,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+goldeneye-discovery = { path = "../../adapters/goldeneye-discovery" }
 goldeneye-index = { path = "../goldeneye-index" }
 goldeneye-store = { path = "../../adapters/goldeneye-store" }
 goldeneye-syntax = { path = "../../adapters/goldeneye-syntax" }

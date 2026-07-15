@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use goldeneye_discovery::IndexMode;
 use goldeneye_domain::{
     ByteSpan, EdgeKind, FileRecord, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId,
     NodeId, NodeLabel, ProjectId, ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan,
 };
+use goldeneye_ports::IndexMode;
 use goldeneye_syntax::{GrammarProvider, SyntaxEngine, SyntaxSnapshot};
 use serde_json::{Value, json};
 use tree_sitter::Node;
@@ -2300,10 +2300,10 @@ mod full_language_tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
-    use goldeneye_discovery::IndexMode;
     use goldeneye_domain::{
         ContentHash, FileId, FileRecord, Generation, LanguageId, ProjectId, ProjectRelativePath,
     };
+    use goldeneye_ports::IndexMode;
     use goldeneye_syntax::FullGrammarProvider;
 
     use super::{Candidate, extract};

@@ -5,9 +5,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::num::NonZeroUsize;
 
-use goldeneye_discovery::{DiscoveryOptions, IndexMode};
+use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_domain::{FileId, LanguageId, ProjectRelativePath};
-use goldeneye_index::{CancellationToken, IndexOptions, IndexService, IndexStatus};
+use goldeneye_index::{
+    CancellationToken, IndexMode, IndexOptions, IndexService, IndexStatus,
+    RepositoryDiscoveryOptions,
+};
 use goldeneye_store::Store;
 use goldeneye_syntax::{FullGrammarProvider, GrammarProvider};
 use tempfile::TempDir;
@@ -135,9 +138,9 @@ const HYBRID_FIXTURES: &[HybridFixture] = &[
 
 fn full_options() -> IndexOptions {
     IndexOptions {
-        discovery: DiscoveryOptions {
+        discovery: RepositoryDiscoveryOptions {
             mode: IndexMode::Full,
-            ..DiscoveryOptions::default()
+            ..RepositoryDiscoveryOptions::default()
         },
         max_workers: NonZeroUsize::new(1).expect("one worker"),
         max_files: None,
@@ -186,6 +189,7 @@ fn elixir_definition_calls_use_audited_language_rules() {
         Store::open_in_memory().expect("memory store"),
         FullGrammarProvider,
         full_options(),
+        FileSystemDiscovery,
     );
     let result = service
         .index_repository(temp.path())
@@ -229,6 +233,7 @@ fn audited_hybrid_lsp_languages_resolve_cross_file_calls() {
             Store::open_in_memory().expect("memory store"),
             FullGrammarProvider,
             full_options(),
+            FileSystemDiscovery,
         );
         let result = service
             .index_repository(temp.path())
@@ -321,6 +326,7 @@ fn hybrid_relations_resolve_cross_file_inheritance_and_interfaces() {
         Store::open_in_memory().expect("memory store"),
         FullGrammarProvider,
         full_options(),
+        FileSystemDiscovery,
     );
     let result = service
         .index_repository(temp.path())
@@ -397,6 +403,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
             Store::open_in_memory().expect("memory store"),
             FullGrammarProvider,
             corpus_options(fixture.language),
+            FileSystemDiscovery,
         );
         let result = service
             .index_repository(&root)
