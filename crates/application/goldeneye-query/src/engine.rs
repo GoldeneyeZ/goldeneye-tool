@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use goldeneye_domain::{
     ContentHash, FileId, FileRecord, Generation, GraphEdge, GraphNode, NodeId, ProjectId,
 };
-use goldeneye_store::{QueryStore, SearchHit, Store};
+use goldeneye_ports::{QueryRepository, SearchHit};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -29,7 +29,7 @@ const MAX_CACHED_SEARCH_PAGES: usize = 16;
 const MAX_CACHED_TRACE_RESULTS: usize = 16;
 
 pub struct QueryEngine {
-    store: QueryStore,
+    repository: Box<dyn QueryRepository>,
     cache: Arc<QueryCache>,
 }
 
@@ -333,35 +333,16 @@ impl ArchitectureSummary {
 }
 
 impl QueryEngine {
-    /// Opens an existing graph database in read-only/query-only mode.
-    ///
-    /// # Errors
-    ///
-    /// Returns a query error when the database is missing or cannot be opened safely.
-    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, QueryError> {
-        Self::open_with_cache(path, Arc::new(QueryCache::default()))
-    }
-
-    /// Opens an existing graph database with a process-shared graph cache.
-    ///
-    /// # Errors
-    ///
-    /// Returns a query error when the database is missing or cannot be opened safely.
-    pub fn open_with_cache(
-        path: impl AsRef<std::path::Path>,
-        cache: Arc<QueryCache>,
-    ) -> Result<Self, QueryError> {
-        Ok(Self {
-            store: Store::open_read_only(path)?,
-            cache,
-        })
+    #[must_use]
+    pub fn new(repository: impl QueryRepository + 'static) -> Self {
+        Self::with_cache(repository, Arc::new(QueryCache::default()))
     }
 
     #[must_use]
-    pub fn from_store(store: QueryStore) -> Self {
+    pub fn with_cache(repository: impl QueryRepository + 'static, cache: Arc<QueryCache>) -> Self {
         Self {
-            store,
-            cache: Arc::new(QueryCache::default()),
+            repository: Box::new(repository),
+            cache,
         }
     }
 
@@ -371,7 +352,7 @@ impl QueryEngine {
     ///
     /// Returns a query error when the registry cannot be read.
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>, QueryError> {
-        self.store
+        self.repository
             .list_projects()?
             .into_iter()
             .map(|project| {
@@ -394,8 +375,8 @@ impl QueryEngine {
         request: &IndexStatusRequest,
     ) -> Result<IndexStatusResult, QueryError> {
         let project = self.require_project(&request.project)?;
-        let counts = self.store.counts(&request.project)?;
-        let settings = self.store.connection_settings()?;
+        let counts = self.repository.counts(&request.project)?;
+        let settings = self.repository.connection_settings()?;
         Ok(IndexStatusResult {
             project: project.id.as_str().to_owned(),
             root_path: project.root_path,
@@ -417,7 +398,7 @@ impl QueryEngine {
         request: &GraphSchemaRequest,
     ) -> Result<GraphSchemaResult, QueryError> {
         let graph = self.cached_graph(&request.project)?;
-        let schema = self.store.schema_info()?;
+        let schema = self.repository.schema_info()?;
         Ok(GraphSchemaResult {
             project: request.project.as_str().to_owned(),
             schema_version: schema.version,
@@ -440,7 +421,7 @@ impl QueryEngine {
     ///
     /// # Errors
     ///
-    /// Returns a query error for invalid filters/cursors, absent projects, or store failures.
+    /// Returns a query error for invalid filters/cursors, absent projects, or repository failures.
     pub fn search_graph(
         &self,
         request: &SearchGraphRequest,
@@ -529,7 +510,7 @@ impl QueryEngine {
     ///
     /// # Errors
     ///
-    /// Returns a query error for invalid bounds, ambiguous/missing symbols, or store failures.
+    /// Returns a query error for invalid bounds, ambiguous/missing symbols, or repository failures.
     pub fn trace_path(&self, request: &TracePathRequest) -> Result<TracePathResult, QueryError> {
         let graph = self.cached_graph(&request.project)?;
         if request.depth == 0 || request.depth > MAX_TRACE_DEPTH {
@@ -604,7 +585,7 @@ impl QueryEngine {
             file
         } else {
             let file = self
-                .store
+                .repository
                 .get_file(&FileId::new(request.project.clone(), file_path.clone()))?
                 .ok_or_else(|| QueryError::IndexedFileNotFound {
                     path: file_path.as_str().to_owned(),
@@ -697,7 +678,7 @@ impl QueryEngine {
     /// # Errors
     ///
     /// Returns a query error for mutation attempts, unsupported/syntax-invalid queries, absent
-    /// projects, invalid row bounds, or store failures.
+    /// projects, invalid row bounds, or repository failures.
     pub fn query_graph(&self, request: &QueryGraphRequest) -> Result<QueryGraphResult, QueryError> {
         let graph = self.cached_graph(&request.project)?;
         crate::cypher::execute(request, &graph.nodes, &graph.edges, &graph.degrees)
@@ -709,7 +690,7 @@ impl QueryEngine {
     ///
     /// Returns a query error for invalid patterns, missing projects, unsafe paths, or source I/O.
     pub fn search_code(&self, request: &SearchCodeRequest) -> Result<SearchCodeResult, QueryError> {
-        crate::search_code::execute(&self.store, request)
+        crate::search_code::execute(self.repository.as_ref(), request)
     }
 
     /// Ranks callable/type nodes by the minimum cosine across semantic keywords.
@@ -721,7 +702,7 @@ impl QueryEngine {
         &self,
         request: &SemanticSearchRequest,
     ) -> Result<SemanticSearchResult, QueryError> {
-        crate::semantic_query::semantic_search(&self.store, request)
+        crate::semantic_query::semantic_search(self.repository.as_ref(), request)
     }
 
     /// Finds nodes whose persisted weighted-MinHash signature resembles one symbol.
@@ -733,7 +714,7 @@ impl QueryEngine {
         &self,
         request: &SimilaritySearchRequest,
     ) -> Result<SimilaritySearchResult, QueryError> {
-        crate::semantic_query::similarity_search(&self.store, request)
+        crate::semantic_query::similarity_search(self.repository.as_ref(), request)
     }
 
     /// Compatibility alias with the agent-facing operation name.
@@ -752,7 +733,7 @@ impl QueryEngine {
         &self,
         project: &ProjectId,
     ) -> Result<goldeneye_domain::ProjectRecord, QueryError> {
-        self.store
+        self.repository
             .get_project(project)?
             .ok_or_else(|| QueryError::ProjectNotFound(project.clone()))
     }
@@ -765,8 +746,8 @@ impl QueryEngine {
             }
             let graph = self.cache.get_or_load(project, before, || {
                 Ok((
-                    self.store.list_nodes(project)?,
-                    self.store.list_edges(project)?,
+                    self.repository.list_nodes(project)?,
+                    self.repository.list_edges(project)?,
                 ))
             })?;
             let after = self.require_project(project)?.generation;
@@ -786,8 +767,8 @@ impl QueryEngine {
         }
         let graph = self.cache.get_or_load(project, generation, || {
             Ok((
-                self.store.list_nodes(project)?,
-                self.store.list_edges(project)?,
+                self.repository.list_nodes(project)?,
+                self.repository.list_edges(project)?,
             ))
         })?;
         if self.require_project(project)?.generation == generation {
@@ -824,7 +805,9 @@ impl QueryEngine {
                 .map(|node| Candidate { node, rank: None })
                 .collect());
         };
-        let total = self.store.count_search_nodes(&request.project, query)?;
+        let total = self
+            .repository
+            .count_search_nodes(&request.project, query)?;
         if total > u64::try_from(MAX_SEARCH_CANDIDATES).expect("constant fits u64") {
             return Err(QueryError::TooManySearchCandidates {
                 actual: total,
@@ -836,7 +819,7 @@ impl QueryEngine {
         for offset in (0..total).step_by(SEARCH_CHUNK) {
             let limit = SEARCH_CHUNK.min(total - offset);
             candidates.extend(
-                self.store
+                self.repository
                     .search_nodes_page(&request.project, query, limit, offset)?
                     .into_iter()
                     .map(Candidate::from),

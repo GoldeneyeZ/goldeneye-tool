@@ -157,7 +157,9 @@ impl Fixture {
     }
 
     pub fn engine(&self) -> QueryEngine {
-        QueryEngine::open(&self.database).expect("open read-only query engine")
+        QueryEngine::new(
+            Store::open_read_only(&self.database).expect("open read-only query repository"),
+        )
     }
 }
 

@@ -2,6 +2,7 @@
 
 mod adr;
 mod crosslink_port;
+mod query_port;
 mod schema;
 
 use std::{
@@ -26,10 +27,13 @@ use thiserror::Error;
 pub use adr::{
     ADR_MAX_LENGTH, ADR_MAX_SECTIONS, AdrSection, parse_adr_sections, render_adr_sections,
 };
+pub use goldeneye_ports::{
+    ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, STORED_VECTOR_DIM,
+    SchemaInfo, SearchHit, StoredVector, TokenVectorRecord,
+};
 pub use schema::CURRENT_SCHEMA_VERSION;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
-pub const STORED_VECTOR_DIM: usize = 768;
 pub const MINHASH_SIGNATURE_HEX_LEN: usize = 512;
 const NODE_COLUMNS: &str = "project_id, node_id, label, name, qualified_name, file_path, \
     start_byte, end_byte, start_row, start_column, end_row, end_column, generation, properties_json";
@@ -133,23 +137,6 @@ pub enum StoreError {
     InvalidCrossProjectEdge { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemaInfo {
-    pub version: u32,
-    pub tables: BTreeSet<String>,
-    pub indexes: BTreeSet<String>,
-    pub fts5_enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectionSettings {
-    pub foreign_keys: bool,
-    pub journal_mode: String,
-    pub synchronous: i64,
-    pub busy_timeout_ms: u64,
-    pub query_only: bool,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReplacementOutcome {
     pub nodes: usize,
@@ -167,13 +154,6 @@ pub struct ProjectReplacementOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReconcileOutcome {
     pub removed_files: usize,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GraphCounts {
-    pub files: u64,
-    pub nodes: u64,
-    pub edges: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,67 +226,11 @@ pub struct GitHistoryOutcome {
     pub enriched_edges: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredVector([i8; STORED_VECTOR_DIM]);
-
-impl StoredVector {
-    #[must_use]
-    pub const fn from_array(values: [i8; STORED_VECTOR_DIM]) -> Self {
-        Self(values)
-    }
-
-    #[must_use]
-    pub const fn values(&self) -> &[i8; STORED_VECTOR_DIM] {
-        &self.0
-    }
-
-    fn to_blob(&self) -> Vec<u8> {
-        self.0.iter().map(|value| value.to_ne_bytes()[0]).collect()
-    }
-
-    fn from_blob(blob: Vec<u8>, field: &'static str) -> Result<Self, StoreError> {
-        let bytes: [u8; STORED_VECTOR_DIM] =
-            blob.try_into()
-                .map_err(|value: Vec<u8>| StoreError::CorruptData {
-                    field,
-                    reason: format!("expected {STORED_VECTOR_DIM} bytes, found {}", value.len()),
-                })?;
-        Ok(Self(bytes.map(|value| i8::from_ne_bytes([value]))))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeVectorRecord {
-    pub node_id: NodeId,
-    pub vector: StoredVector,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenVectorRecord {
-    pub token: String,
-    pub vector: StoredVector,
-    /// Inverse-document frequency multiplied by 1,000, matching upstream storage.
-    pub idf_milli: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeSignatureRecord {
-    pub node_id: NodeId,
-    pub minhash_hex: String,
-    pub ast_profile: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SemanticIndexOutcome {
     pub node_vectors: usize,
     pub token_vectors: usize,
     pub node_signatures: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SearchHit {
-    pub node: GraphNode,
-    pub rank: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1268,7 +1192,7 @@ impl Store {
                 statement.execute(params![
                     project.as_str(),
                     record.node_id.as_str(),
-                    record.vector.to_blob(),
+                    stored_vector_to_blob(&record.vector),
                 ])?;
             }
         }
@@ -1281,7 +1205,7 @@ impl Store {
                 statement.execute(params![
                     project.as_str(),
                     record.token,
-                    record.vector.to_blob(),
+                    stored_vector_to_blob(&record.vector),
                     i64::from(record.idf_milli),
                 ])?;
             }
@@ -1728,7 +1652,7 @@ fn list_node_vectors(
         let (node_id, vector) = row?;
         Ok(NodeVectorRecord {
             node_id: NodeId::new(node_id).map_err(corrupt_graph("node vector ID"))?,
-            vector: StoredVector::from_blob(vector, "node vector")?,
+            vector: stored_vector_from_blob(vector, "node vector")?,
         })
     })
     .collect()
@@ -1750,7 +1674,7 @@ fn get_node_vector(
     raw.map(|(node_id, vector)| {
         Ok(NodeVectorRecord {
             node_id: NodeId::new(node_id).map_err(corrupt_graph("node vector ID"))?,
-            vector: StoredVector::from_blob(vector, "node vector")?,
+            vector: stored_vector_from_blob(vector, "node vector")?,
         })
     })
     .transpose()
@@ -1778,7 +1702,7 @@ fn get_token_vector(
     raw.map(|(token, vector, idf_milli)| {
         Ok(TokenVectorRecord {
             token,
-            vector: StoredVector::from_blob(vector, "token vector")?,
+            vector: stored_vector_from_blob(vector, "token vector")?,
             idf_milli: u32::try_from(sqlite_u64("token vector IDF", idf_milli)?).map_err(|_| {
                 StoreError::CorruptData {
                     field: "token vector IDF",
@@ -1843,6 +1767,26 @@ fn get_node_signature(
         })
     })
     .transpose()
+}
+
+fn stored_vector_to_blob(vector: &StoredVector) -> Vec<u8> {
+    vector
+        .values()
+        .iter()
+        .map(|value| value.to_ne_bytes()[0])
+        .collect()
+}
+
+fn stored_vector_from_blob(blob: Vec<u8>, field: &'static str) -> Result<StoredVector, StoreError> {
+    let bytes: [u8; STORED_VECTOR_DIM] =
+        blob.try_into()
+            .map_err(|value: Vec<u8>| StoreError::CorruptData {
+                field,
+                reason: format!("expected {STORED_VECTOR_DIM} bytes, found {}", value.len()),
+            })?;
+    Ok(StoredVector::from_array(
+        bytes.map(|value| i8::from_ne_bytes([value])),
+    ))
 }
 
 fn configure_writable(connection: &Connection, in_memory: bool) -> Result<(), StoreError> {

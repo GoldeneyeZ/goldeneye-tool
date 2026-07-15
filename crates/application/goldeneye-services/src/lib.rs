@@ -833,10 +833,11 @@ impl Services {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if engine.is_none() {
-            *engine = Some(goldeneye_query::QueryEngine::open_with_cache(
-                &self.config.database_path,
+            let repository = Store::open_read_only(&self.config.database_path)?;
+            *engine = Some(goldeneye_query::QueryEngine::with_cache(
+                repository,
                 Arc::clone(&self.query),
-            )?);
+            ));
         }
         Ok(action(engine.as_ref().expect("query engine initialized"))?)
     }

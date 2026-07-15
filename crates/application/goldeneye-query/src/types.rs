@@ -8,7 +8,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum QueryError {
     #[error(transparent)]
-    Store(#[from] goldeneye_store::StoreError),
+    Repository(#[from] goldeneye_ports::PortError),
     #[error("project is not indexed: {0:?}")]
     ProjectNotFound(ProjectId),
     #[error("invalid regular expression for {field}: {source}")]

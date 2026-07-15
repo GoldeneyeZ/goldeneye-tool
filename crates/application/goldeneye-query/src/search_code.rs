@@ -9,7 +9,7 @@ use std::{
 };
 
 use goldeneye_domain::{GraphNode, NodeId};
-use goldeneye_store::QueryStore;
+use goldeneye_ports::QueryRepository;
 use regex::Regex;
 
 use crate::{
@@ -28,7 +28,7 @@ const FULL_SOURCE_LEAD: u64 = 5;
 const SLOW_SEARCH_MS: u64 = 5_000;
 
 pub(crate) fn execute(
-    store: &QueryStore,
+    repository: &dyn QueryRepository,
     request: &SearchCodeRequest,
 ) -> Result<SearchCodeResult, QueryError> {
     let started = Instant::now();
@@ -41,7 +41,7 @@ pub(crate) fn execute(
             maximum: MAX_SEARCH_CODE_LIMIT,
         });
     }
-    let project = store
+    let project = repository
         .get_project(&request.project)?
         .ok_or_else(|| QueryError::ProjectNotFound(request.project.clone()))?;
     if !valid_search_path_argument(&project.root_path)
@@ -61,14 +61,14 @@ pub(crate) fn execute(
         path: root.clone(),
         source,
     })?;
-    let edges = store.list_edges(&request.project)?;
+    let edges = repository.list_edges(&request.project)?;
     let node_degrees = degrees(&edges);
     let mut classified = BTreeMap::<NodeId, ClassifiedMatch>::new();
     let mut raw_matches = Vec::new();
     let mut total_grep_matches = 0_usize;
     let mut sources = BTreeMap::<String, String>::new();
 
-    for file in store.list_files(&request.project)? {
+    for file in repository.list_files(&request.project)? {
         let relative = file.id.path.as_str();
         if path_filter
             .as_ref()
@@ -92,7 +92,7 @@ pub(crate) fn execute(
             source,
         })?;
         let source = String::from_utf8_lossy(&bytes).into_owned();
-        let file_nodes = store.nodes_for_file(&file.id)?;
+        let file_nodes = repository.nodes_for_file(&file.id)?;
         for (line_index, line) in source.lines().enumerate() {
             if !pattern.is_match(line) {
                 continue;

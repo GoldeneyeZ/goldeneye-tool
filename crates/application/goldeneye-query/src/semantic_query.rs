@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use goldeneye_domain::{GraphNode, NodeId};
-use goldeneye_store::{QueryStore, StoredVector};
+use goldeneye_ports::{QueryRepository, StoredVector};
 
 use crate::{
     MinHashSignature, SemanticVector,
@@ -21,10 +21,10 @@ const MAX_SEMANTIC_LIMIT: usize = 200;
 const MAX_SIMILARITY_LIMIT: usize = 200;
 
 pub(crate) fn semantic_search(
-    store: &QueryStore,
+    repository: &dyn QueryRepository,
     request: &SemanticSearchRequest,
 ) -> Result<SemanticSearchResult, QueryError> {
-    require_project(store, &request.project)?;
+    require_project(repository, &request.project)?;
     let keywords = request
         .keywords
         .iter()
@@ -50,18 +50,18 @@ pub(crate) fn semantic_search(
 
     let keyword_vectors = keywords
         .iter()
-        .map(|keyword| keyword_vector(store, &request.project, keyword))
+        .map(|keyword| keyword_vector(repository, &request.project, keyword))
         .collect::<Result<Vec<_>, _>>()?;
-    let nodes = store.list_nodes(&request.project)?;
+    let nodes = repository.list_nodes(&request.project)?;
     let nodes_by_id: BTreeMap<NodeId, GraphNode> = nodes
         .iter()
         .cloned()
         .map(|node| (node.id.clone(), node))
         .collect();
-    let edges = store.list_edges(&request.project)?;
+    let edges = repository.list_edges(&request.project)?;
     let node_degrees = degrees(&edges);
 
-    let mut candidates = store
+    let mut candidates = repository
         .list_node_vectors(&request.project)?
         .into_iter()
         .filter_map(|record| {
@@ -111,10 +111,10 @@ pub(crate) fn semantic_search(
 }
 
 pub(crate) fn similarity_search(
-    store: &QueryStore,
+    repository: &dyn QueryRepository,
     request: &SimilaritySearchRequest,
 ) -> Result<SimilaritySearchResult, QueryError> {
-    require_project(store, &request.project)?;
+    require_project(repository, &request.project)?;
     if !(request.threshold > 0.0 && request.threshold <= 1.0) {
         return Err(QueryError::InvalidSimilarityThreshold {
             actual: request.threshold,
@@ -127,8 +127,8 @@ pub(crate) fn similarity_search(
         });
     }
 
-    let nodes = store.list_nodes(&request.project)?;
-    let edges = store.list_edges(&request.project)?;
+    let nodes = repository.list_nodes(&request.project)?;
+    let edges = repository.list_edges(&request.project)?;
     let node_degrees = degrees(&edges);
     let origin = resolve_symbol(
         &request.qualified_name,
@@ -136,7 +136,7 @@ pub(crate) fn similarity_search(
         &node_degrees,
         ResolveMode::Any,
     )?;
-    let origin_record = store
+    let origin_record = repository
         .get_node_signature(&request.project, &origin.id)?
         .ok_or_else(|| QueryError::SignatureNotFound {
             qualified_name: origin.qualified_name.as_str().to_owned(),
@@ -149,7 +149,7 @@ pub(crate) fn similarity_search(
         .collect();
 
     let mut results = Vec::new();
-    for record in store.list_node_signatures(&request.project)? {
+    for record in repository.list_node_signatures(&request.project)? {
         if record.node_id == origin.id {
             continue;
         }
@@ -185,21 +185,21 @@ pub(crate) fn similarity_search(
 }
 
 fn require_project(
-    store: &QueryStore,
+    repository: &dyn QueryRepository,
     project: &goldeneye_domain::ProjectId,
 ) -> Result<(), QueryError> {
-    store
+    repository
         .get_project(project)?
         .map(|_| ())
         .ok_or_else(|| QueryError::ProjectNotFound(project.clone()))
 }
 
 fn keyword_vector(
-    store: &QueryStore,
+    repository: &dyn QueryRepository,
     project: &goldeneye_domain::ProjectId,
     keyword: &str,
 ) -> Result<StoredVector, QueryError> {
-    if let Some(record) = store.get_token_vector(project, keyword)? {
+    if let Some(record) = repository.get_token_vector(project, keyword)? {
         return Ok(record.vector);
     }
     let mut vector = SemanticVector::sparse_random_index(keyword);

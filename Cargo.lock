@@ -478,6 +478,7 @@ name = "goldeneye-query"
 version = "0.1.0"
 dependencies = [
  "goldeneye-domain",
+ "goldeneye-ports",
  "goldeneye-store",
  "regex",
  "serde",
