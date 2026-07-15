@@ -247,8 +247,9 @@ async function benchmarkEngine(engine) {
         {
           project,
           function_name: "fs_search",
-          direction: "both",
-          depth: 3,
+          direction: "outbound",
+          depth: 1,
+          mode: "calls",
           edge_types: ["CALLS"],
         },
       ],
@@ -266,10 +267,11 @@ async function benchmarkEngine(engine) {
 
     const queries = {};
     for (const [name, [tool, args]] of Object.entries(cases)) {
+      const request = { tool, arguments: args };
       try {
-        queries[name] = await measure(active.session, tool, args);
+        queries[name] = { request, ...(await measure(active.session, tool, args)) };
       } catch (error) {
-        queries[name] = { error: error.message };
+        queries[name] = { request, error: error.message };
       }
     }
     return {
@@ -343,6 +345,16 @@ function responseSummary(
   else if (Array.isArray(payload.callers) || Array.isArray(payload.callees)) {
     result.returned = (payload.callers?.length ?? 0) + (payload.callees?.length ?? 0);
   }
+  const hopKeys = ["paths", "hops", "callers", "callees"].filter(key =>
+    Array.isArray(payload[key]),
+  );
+  if (hopKeys.length > 0) {
+    result.serialized_hop_instances = hopKeys.reduce(
+      (count, key) => count + payload[key].length,
+      0,
+    );
+  }
+  if (typeof payload.truncated === "boolean") result.truncated = payload.truncated;
   for (const key of ["types", "modules", "entry_points", "file_tree"]) {
     if (Array.isArray(payload[key])) result[`${key}_count`] = payload[key].length;
   }
@@ -376,6 +388,8 @@ function comparisons(goldeneye, comparator) {
       codebase_memory_p95_ms: comparatorQuery.p95_ms,
       ratio: round(goldeneyeQuery.p50_ms / comparatorQuery.p50_ms),
       p95_ratio: round(goldeneyeQuery.p95_ms / comparatorQuery.p95_ms),
+      goldeneye_request: goldeneyeQuery.request,
+      codebase_memory_request: comparatorQuery.request,
       goldeneye_response: goldeneyeQuery.response,
       codebase_memory_response: comparatorQuery.response,
     };
