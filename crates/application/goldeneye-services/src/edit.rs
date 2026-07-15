@@ -482,7 +482,8 @@ impl Services {
         self.prepare_database()?;
         let store = Store::open(self.config.database_path())?;
         let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
-        DurableEditService::open(index, CoreGrammarProvider, self.allowed_roots())
+        let journal = Store::open(self.config.database_path())?;
+        DurableEditService::open(index, journal, CoreGrammarProvider, self.allowed_roots())
             .map_err(ServiceError::from)
     }
 
@@ -737,8 +738,11 @@ impl From<DurableEditError> for ServiceError {
                 | PathAuthorizationError::DestinationNotFile { .. },
             )
             | DurableEditError::ProjectNotFound(_)
-            | DurableEditError::FileNotIndexed(_) => ServiceErrorCode::NotFound,
-            DurableEditError::Store(_) | DurableEditError::Io { .. } => ServiceErrorCode::Storage,
+            | DurableEditError::FileNotIndexed(_)
+            | DurableEditError::OperationNotFound(_) => ServiceErrorCode::NotFound,
+            DurableEditError::Repository(_) | DurableEditError::Io { .. } => {
+                ServiceErrorCode::Storage
+            }
             DurableEditError::Index(_) | DurableEditError::RefreshRejected { .. } => {
                 ServiceErrorCode::Index
             }

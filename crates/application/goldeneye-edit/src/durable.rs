@@ -11,9 +11,9 @@ use goldeneye_domain::{
     ProjectRelativePath, SyntaxIdentityError,
 };
 use goldeneye_index::{FileRefreshResult, FileRefreshStatus, IndexError, IndexService};
-use goldeneye_store::{
-    EditJournalRecord, EditOperationId, EditOperationKind, EditPhase, NewEditJournalRecord,
-    StoreError,
+use goldeneye_ports::{
+    EditJournalRecord, EditOperationId, EditOperationKind, EditPhase, EditRepository,
+    NewEditJournalRecord, PortError,
 };
 use goldeneye_syntax::{GrammarProvider, LocatorError, SyntaxEngine, all_named_locators};
 use thiserror::Error;
@@ -136,7 +136,7 @@ pub enum DurableEditError {
     #[error(transparent)]
     Path(#[from] PathAuthorizationError),
     #[error(transparent)]
-    Store(#[from] StoreError),
+    Repository(#[from] PortError),
     #[error(transparent)]
     Edit(#[from] EditError),
     #[error(transparent)]
@@ -185,11 +185,14 @@ pub enum DurableEditError {
     },
     #[error("journal recovery paths do not match operation {0}")]
     JournalPathMismatch(String),
+    #[error("edit journal operation not found: {0}")]
+    OperationNotFound(String),
 }
 
 /// Owns syntax planning, authorized filesystem mutation, journal recovery, and targeted indexing.
 pub struct DurableEditService<P> {
     index: IndexService<P>,
+    journal: Box<dyn EditRepository>,
     engine: SyntaxEngine<P>,
     authorizer: PathAuthorizer,
     fault_injector: Arc<dyn FaultInjector>,
@@ -207,12 +210,14 @@ where
     /// be listed. Individual recovery conflicts are reported without preventing startup.
     pub fn open(
         index: IndexService<P>,
+        journal: impl EditRepository + 'static,
         provider: P,
         allowed_roots: Vec<PathBuf>,
     ) -> Result<(Self, RecoveryReport), DurableEditError> {
         let authorizer = PathAuthorizer::new(allowed_roots)?;
         let mut service = Self {
             index,
+            journal: Box::new(journal),
             engine: SyntaxEngine::new(provider),
             authorizer,
             fault_injector: Arc::new(NoFault),
@@ -301,7 +306,7 @@ where
             backup_path: Some(artifacts.backup_relative.clone()),
             created_parent_paths: Vec::new(),
         };
-        self.index.store_mut().create_edit_operation(&journal)?;
+        self.journal.create_edit_operation(&journal)?;
 
         let outcome = self.commit_update(&operation_id, &authorized, &artifacts, &plan.source);
         if let Err(error) = &outcome {
@@ -370,7 +375,7 @@ where
             backup_path: None,
             created_parent_paths,
         };
-        self.index.store_mut().create_edit_operation(&journal)?;
+        self.journal.create_edit_operation(&journal)?;
 
         let outcome = self.commit_create(
             &operation_id,
@@ -844,8 +849,7 @@ where
         &self,
         project_id: &ProjectId,
     ) -> Result<goldeneye_domain::ProjectRecord, DurableEditError> {
-        self.index
-            .store()
+        self.journal
             .get_project(project_id)?
             .ok_or_else(|| DurableEditError::ProjectNotFound(project_id.clone()))
     }
@@ -858,8 +862,7 @@ where
     ) -> Result<(), DurableEditError> {
         let file_id = FileId::new(project_id.clone(), path.clone());
         let indexed = self
-            .index
-            .store()
+            .journal
             .get_file(&file_id)?
             .ok_or_else(|| DurableEditError::FileNotIndexed(path.clone()))?;
         if indexed.content_hash != actual_hash {
@@ -878,8 +881,7 @@ where
     ) -> Result<BTreeSet<String>, DurableEditError> {
         let file_id = FileId::new(project_id.clone(), path.clone());
         Ok(self
-            .index
-            .store()
+            .journal
             .nodes_for_file(&file_id)?
             .into_iter()
             .map(|node| node.id.as_str().to_owned())
@@ -907,7 +909,7 @@ where
         ensure_file_hash(&artifacts.temp_absolute, expected_new)?;
         rename_new(authorized.destination(), &artifacts.backup_absolute)?;
         sync_parent(authorized.destination())?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Prepared,
             EditPhase::BackupReady,
@@ -916,7 +918,7 @@ where
 
         rename_new(&artifacts.temp_absolute, authorized.destination())?;
         sync_parent(authorized.destination())?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::BackupReady,
             EditPhase::Replaced,
@@ -939,7 +941,7 @@ where
                 return Err(DurableEditError::RefreshRejected { reason });
             }
         };
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Replaced,
             EditPhase::Indexed,
@@ -948,7 +950,7 @@ where
         remove_if_exists(&artifacts.backup_absolute)?;
         remove_if_exists(&artifacts.temp_absolute)?;
         sync_parent(authorized.destination())?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Indexed,
             EditPhase::Committed,
@@ -975,7 +977,7 @@ where
         let expected_new = required_hash(record.new_hash, operation_id, "new")?;
         ensure_file_hash(&artifacts.temp_absolute, expected_new)?;
         authorized.revalidate()?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Prepared,
             EditPhase::BackupReady,
@@ -985,7 +987,7 @@ where
         hard_link_new(&artifacts.temp_absolute, authorized.destination())?;
         remove_if_exists(&artifacts.temp_absolute)?;
         sync_parent(authorized.destination())?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::BackupReady,
             EditPhase::Replaced,
@@ -1010,7 +1012,7 @@ where
                 return Err(DurableEditError::RefreshRejected { reason });
             }
         };
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Replaced,
             EditPhase::Indexed,
@@ -1018,7 +1020,7 @@ where
         self.check_fault(operation_id, FaultPoint::Cleanup)?;
         remove_if_exists(&artifacts.temp_absolute)?;
         sync_parent(authorized.destination())?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             EditPhase::Indexed,
             EditPhase::Committed,
@@ -1085,7 +1087,7 @@ where
         sync_parent(authorized.destination())?;
         self.refresh_existing(&record.project_id, &record.path)?;
         remove_if_exists(&artifacts.temp_absolute)?;
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             record.phase,
             EditPhase::RolledBack,
@@ -1111,7 +1113,7 @@ where
         if let Some(created) = created {
             created.rollback_empty()?;
         }
-        self.index.store_mut().transition_edit_operation(
+        self.journal.transition_edit_operation(
             operation_id,
             record.phase,
             EditPhase::RolledBack,
@@ -1123,10 +1125,9 @@ where
         &self,
         operation_id: &EditOperationId,
     ) -> Result<EditJournalRecord, DurableEditError> {
-        self.index
-            .store()
+        self.journal
             .get_edit_operation(operation_id)?
-            .ok_or_else(|| StoreError::EditOperationNotFound(operation_id.clone()).into())
+            .ok_or_else(|| DurableEditError::OperationNotFound(operation_id.as_str().to_owned()))
     }
 
     fn check_fault(
@@ -1146,8 +1147,7 @@ where
         let message = error.to_string();
         let compact = message.chars().take(1024).collect::<String>();
         let _ = self
-            .index
-            .store_mut()
+            .journal
             .set_edit_operation_error(operation_id, Some(&compact));
     }
 }
@@ -1163,7 +1163,7 @@ where
     /// Returns a store error only when the incomplete journal cannot be listed. Per-operation
     /// conflicts remain journaled with recovery material and are returned as unresolved entries.
     pub fn recover_incomplete(&mut self) -> Result<RecoveryReport, DurableEditError> {
-        let records = self.index.store().list_incomplete_edit_operations()?;
+        let records = self.journal.list_incomplete_edit_operations()?;
         let mut entries = Vec::with_capacity(records.len());
         for record in records {
             let operation_id = record.operation_id.as_str().to_owned();
@@ -1218,7 +1218,7 @@ where
             let indexed = self.advance_to_indexed(record)?;
             cleanup_artifacts(&artifacts)?;
             sync_parent(authorized.destination())?;
-            self.index.store_mut().transition_edit_operation(
+            self.journal.transition_edit_operation(
                 &record.operation_id,
                 indexed.phase,
                 EditPhase::Committed,
@@ -1288,7 +1288,7 @@ where
                     });
                 }
             };
-            current = self.index.store_mut().transition_edit_operation(
+            current = self.journal.transition_edit_operation(
                 &current.operation_id,
                 current.phase,
                 next,
@@ -1300,7 +1300,7 @@ where
     fn mark_rolled_back(&mut self, initial: &EditJournalRecord) -> Result<(), DurableEditError> {
         let current = self.operation(&initial.operation_id)?;
         if current.phase != EditPhase::RolledBack {
-            self.index.store_mut().transition_edit_operation(
+            self.journal.transition_edit_operation(
                 &current.operation_id,
                 current.phase,
                 EditPhase::RolledBack,

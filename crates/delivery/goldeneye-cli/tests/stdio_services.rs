@@ -466,9 +466,14 @@ fn stdio_startup_recovers_interrupted_edit_before_first_response() {
 
     let store = Store::open(&database).expect("open edit store");
     let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
-    let (mut edit, startup) =
-        DurableEditService::open(index, CoreGrammarProvider, vec![temp.path().to_path_buf()])
-            .expect("open durable edit service");
+    let journal = Store::open(&database).expect("open edit journal");
+    let (mut edit, startup) = DurableEditService::open(
+        index,
+        journal,
+        CoreGrammarProvider,
+        vec![temp.path().to_path_buf()],
+    )
+    .expect("open durable edit service");
     assert!(startup.entries.is_empty());
     edit.set_fault_injector(Arc::new(FailAfterRename));
     edit.edit_node(DurableEditRequest {
@@ -527,9 +532,14 @@ fn stdio_startup_reports_recovery_conflict_before_protocol_readiness() {
             .expect("roundtrip locator");
     let store = Store::open(&database).expect("open edit store");
     let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
-    let (mut edit, _) =
-        DurableEditService::open(index, CoreGrammarProvider, vec![temp.path().to_path_buf()])
-            .expect("open durable edit service");
+    let journal = Store::open(&database).expect("open edit journal");
+    let (mut edit, _) = DurableEditService::open(
+        index,
+        journal,
+        CoreGrammarProvider,
+        vec![temp.path().to_path_buf()],
+    )
+    .expect("open durable edit service");
     edit.set_fault_injector(Arc::new(FailAfterRename));
     edit.edit_node(DurableEditRequest {
         operation_id: "stdio-recovery-conflict".to_owned(),

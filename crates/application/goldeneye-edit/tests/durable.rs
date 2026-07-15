@@ -51,8 +51,14 @@ impl Fixture {
     ) {
         let store = Store::open(&self.database).expect("reopen store");
         let index = IndexService::new(store, CoreGrammarProvider, IndexOptions::default());
-        DurableEditService::open(index, CoreGrammarProvider, vec![self.allowed_root.clone()])
-            .expect("open durable edit service")
+        let journal = Store::open(&self.database).expect("open edit journal");
+        DurableEditService::open(
+            index,
+            journal,
+            CoreGrammarProvider,
+            vec![self.allowed_root.clone()],
+        )
+        .expect("open durable edit service")
     }
 
     fn source_path(&self) -> PathBuf {

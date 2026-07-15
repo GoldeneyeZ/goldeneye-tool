@@ -6,7 +6,6 @@ resolver = "3"
 layers = ["domain", "ports", "application", "adapters", "delivery"]
 excluded = ["xtask"]
 exceptions = [
-    "goldeneye-edit->goldeneye-store",
     "goldeneye-edit->goldeneye-syntax",
     "goldeneye-index->goldeneye-discovery",
     "goldeneye-index->goldeneye-store",
