@@ -16,6 +16,16 @@ import { fileURLToPath } from "node:url";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const suffix = process.platform === "win32" ? ".exe" : "";
+const QUERY_CASE_NAMES = Object.freeze([
+  "exact_search",
+  "bm25_search",
+  "code_search",
+  "trace",
+  "snippet",
+  "architecture",
+  "cypher_node",
+  "cypher_qualified_name",
+]);
 
 const flags = new Map();
 for (let index = 2; index < process.argv.length; index += 1) {
@@ -43,6 +53,7 @@ Options:
   --startup-wait-ms <n>    default: 6000
   --goldeneye-response-mode <text|dual>
                             default: text
+  --cases <names>          comma-separated query cases; default: all
   --skip-build             skip cargo release build
   --keep-temp              keep isolated cache directories`);
   process.exit(0);
@@ -70,6 +81,7 @@ const config = {
   samples: integerFlag("--samples", 20),
   startupWaitMs: integerFlag("--startup-wait-ms", 6000, true),
   goldeneyeResponseMode: choiceFlag("--goldeneye-response-mode", "text", ["text", "dual"]),
+  selectedCases: caseFlag(),
   skipBuild: flags.has("--skip-build"),
   keepTemp: flags.has("--keep-temp"),
 };
@@ -267,6 +279,9 @@ async function benchmarkEngine(engine) {
 
     const queries = {};
     for (const [name, [tool, args]] of Object.entries(cases)) {
+      if (config.selectedCases !== null && !config.selectedCases.has(name)) {
+        continue;
+      }
       const request = { tool, arguments: args };
       try {
         queries[name] = { request, ...(await measure(active.session, tool, args)) };
@@ -428,6 +443,28 @@ function choiceFlag(name, fallback, choices) {
   return value;
 }
 
+function caseFlag() {
+  const raw = flags.get("--cases");
+  if (raw === undefined) return null;
+  if (typeof raw !== "string") {
+    fail("--cases requires a comma-separated value");
+  }
+
+  const names = raw.split(",").map((name) => name.trim());
+  if (names.length === 0 || names.some((name) => name.length === 0)) {
+    fail("--cases: names must be non-empty");
+  }
+
+  const unknown = names.filter((name) => !QUERY_CASE_NAMES.includes(name));
+  if (unknown.length > 0) {
+    fail(
+      `--cases: unknown case(s): ${unknown.join(", ")}; expected one of ${QUERY_CASE_NAMES.join(", ")}`,
+    );
+  }
+
+  return new Set(names);
+}
+
 function round(value) {
   return Math.round(value * 1000) / 1000;
 }
@@ -466,6 +503,9 @@ try {
       samples: config.samples,
       startup_wait_ms: config.startupWaitMs,
       goldeneye_response_mode: config.goldeneyeResponseMode,
+      cases: QUERY_CASE_NAMES.filter(
+        (name) => config.selectedCases === null || config.selectedCases.has(name),
+      ),
     },
     engines: { "codebase-memory-mcp": comparator, goldeneye },
     comparisons: comparisons(goldeneye, comparator),
