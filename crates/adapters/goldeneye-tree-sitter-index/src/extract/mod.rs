@@ -1,16 +1,24 @@
+mod graph;
 mod imports;
+mod relations;
+
+use graph::{
+    graph_edge, graph_node, module_name, path_stem, project_node_id, qualified_segment,
+    source_span, stable_node_id,
+};
 
 use imports::{
     binding_key, embedded_es_imports, import_alias, import_bindings, infer_declared_type,
     normalize_import_path,
 };
+use relations::audited_relations;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use goldeneye_domain::{
-    ByteSpan, EdgeKind, Generation, GraphEdge, GraphNode, GraphProperties, LanguageId, NodeId,
-    NodeLabel, ProjectId, ProjectRelativePath, QualifiedName, SourcePoint, SourceSpan,
+    Generation, GraphEdge, GraphNode, GraphProperties, LanguageId, NodeId, ProjectId,
+    ProjectRelativePath,
 };
 use goldeneye_ports::{
     IndexDiagnosticKind, IndexExtractedCall as ExtractedCall, IndexExtractedFile as ExtractedFile,
@@ -1529,269 +1537,12 @@ fn gomod_requirement_name(text: &str) -> Option<String> {
     import_name_after_keyword(text, "require")
 }
 
-fn audited_relations(language: &str, node: Node<'_>, source: &[u8]) -> Vec<(&'static str, String)> {
-    let text = node_text(node, source);
-    if language == "python" {
-        return python_base_relations(&text);
-    }
-    if language == "smali" {
-        return text
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim();
-                if let Some(target) = line.strip_prefix(".super ") {
-                    return relation_target(target).map(|target| ("INHERITS", target));
-                }
-                line.strip_prefix(".implements ")
-                    .and_then(relation_target)
-                    .map(|target| ("IMPLEMENTS", target))
-            })
-            .collect();
-    }
-    if language == "objc"
-        && let Some(header) = text.lines().next()
-        && let Some((_, base)) = header.split_once(':')
-        && let Some(target) = relation_target(base)
-    {
-        return vec![("INHERITS", target)];
-    }
-
-    let header = text.split('{').next().unwrap_or(&text);
-    let mut relations = Vec::new();
-    relations.extend(
-        relation_names_after_keyword(header, "extends")
-            .into_iter()
-            .map(|target| ("INHERITS", target)),
-    );
-    relations.extend(
-        relation_names_after_keyword(header, "implements")
-            .into_iter()
-            .map(|target| ("IMPLEMENTS", target)),
-    );
-    if relations.is_empty() && matches!(language, "cpp" | "cuda" | "csharp" | "kotlin" | "rust") {
-        relations.extend(colon_base_relations(language, header));
-    }
-    relations
-}
-
-fn python_base_relations(text: &str) -> Vec<(&'static str, String)> {
-    let Some((_, bases)) = text.split_once('(') else {
-        return Vec::new();
-    };
-    let Some((bases, _)) = bases.split_once(')') else {
-        return Vec::new();
-    };
-    bases
-        .split(',')
-        .filter(|base| !base.contains('='))
-        .filter_map(|base| {
-            let base = base.split('[').next().unwrap_or(base);
-            relation_target(base).map(|target| ("INHERITS", target))
-        })
-        .collect()
-}
-
-fn colon_base_relations(language: &str, header: &str) -> Vec<(&'static str, String)> {
-    let Some((_, bases)) = header.split_once(':') else {
-        return Vec::new();
-    };
-    bases
-        .split(',')
-        .enumerate()
-        .filter_map(|(index, base)| {
-            let base = base
-                .trim()
-                .strip_prefix("public ")
-                .or_else(|| base.trim().strip_prefix("protected "))
-                .or_else(|| base.trim().strip_prefix("private "))
-                .unwrap_or(base.trim());
-            let kind = if language == "csharp" && index > 0 {
-                "IMPLEMENTS"
-            } else {
-                "INHERITS"
-            };
-            relation_target(base).map(|target| (kind, target))
-        })
-        .collect()
-}
-
-fn relation_names_after_keyword(text: &str, keyword: &str) -> Vec<String> {
-    let Some(start) = find_word(text, keyword) else {
-        return Vec::new();
-    };
-    let mut rest = text[start + keyword.len()..].trim_start();
-    for terminator in [" extends ", " implements ", " where ", "{"] {
-        if let Some(end) = rest.find(terminator) {
-            rest = &rest[..end];
-        }
-    }
-    rest.split([',', '&']).filter_map(relation_target).collect()
-}
-
-fn find_word(text: &str, word: &str) -> Option<usize> {
-    text.match_indices(word).find_map(|(index, _)| {
-        let before = text[..index].chars().next_back();
-        let after = text[index + word.len()..].chars().next();
-        let boundary = |character: Option<char>| {
-            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
-        };
-        (boundary(before) && boundary(after)).then_some(index)
-    })
-}
-
-fn relation_target(text: &str) -> Option<String> {
-    let target = text
-        .trim()
-        .trim_end_matches(';')
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_matches(|character: char| {
-            matches!(character, ':' | ',' | '(' | ')' | '<' | '>' | '"' | '\'')
-        });
-    (!target.is_empty()).then(|| target.to_owned())
-}
-
 fn last_identifier(value: &str) -> String {
     value
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .rfind(|segment| !segment.is_empty())
         .unwrap_or_default()
         .to_owned()
-}
-
-fn path_stem(path: &ProjectRelativePath) -> String {
-    let mut segments = path.as_str().split('/').collect::<Vec<_>>();
-    if let Some(last) = segments.last_mut()
-        && let Some((stem, _)) = last.rsplit_once('.')
-    {
-        *last = stem;
-    }
-    segments
-        .into_iter()
-        .map(qualified_segment)
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn module_name(path: &ProjectRelativePath, language: &LanguageId) -> String {
-    if language.as_str() != "go" {
-        return path_stem(path);
-    }
-    path.as_str()
-        .rsplit_once('/')
-        .map_or_else(String::new, |(directory, _)| {
-            directory
-                .split('/')
-                .map(qualified_segment)
-                .collect::<Vec<_>>()
-                .join(".")
-        })
-}
-
-fn qualified_segment(value: &str) -> String {
-    let mut result = String::with_capacity(value.len());
-    let mut separator = false;
-    for character in value.chars() {
-        if character.is_alphanumeric() || character == '_' {
-            if separator && !result.is_empty() {
-                result.push('_');
-            }
-            separator = false;
-            result.push(character);
-        } else {
-            separator = true;
-        }
-    }
-    if result.is_empty() {
-        "anonymous".to_owned()
-    } else {
-        result
-    }
-}
-
-fn stable_node_id(label: &str, qualified_name: &str) -> Result<NodeId, IndexError> {
-    let hash = blake3::hash(format!("goldeneye-node-v1\0{label}\0{qualified_name}").as_bytes());
-    Ok(NodeId::new(format!(
-        "{}:{}",
-        label.to_ascii_lowercase(),
-        &hash.to_hex()[..32]
-    ))?)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn graph_node(
-    project: &ProjectId,
-    path: &ProjectRelativePath,
-    language: &LanguageId,
-    label: &str,
-    name: &str,
-    qualified_name: &str,
-    syntax_kind: &str,
-    span: SourceSpan,
-) -> Result<GraphNode, IndexError> {
-    let mut properties = GraphProperties::new();
-    properties.insert("language".into(), json!(language.as_str()));
-    properties.insert("syntax_kind".into(), json!(syntax_kind));
-    properties.insert("file_path".into(), json!(path.as_str()));
-    Ok(GraphNode::new(
-        project.clone(),
-        stable_node_id(label, qualified_name)?,
-        NodeLabel::new(label)?,
-        name,
-        QualifiedName::new(qualified_name)?,
-        Some(path.clone()),
-        Some(span),
-        Generation::new(0),
-    )?
-    .with_properties(properties))
-}
-
-fn project_node_id(project: &ProjectId) -> Result<NodeId, IndexError> {
-    stable_node_id("Project", project.as_str())
-}
-
-fn graph_edge(
-    project: &ProjectId,
-    source: NodeId,
-    target: NodeId,
-    kind: &str,
-    discriminator: Option<String>,
-    properties: GraphProperties,
-) -> Result<GraphEdge, IndexError> {
-    let edge = GraphEdge::new(
-        project.clone(),
-        source,
-        target,
-        EdgeKind::new(kind)?,
-        Generation::new(0),
-    )
-    .with_properties(properties);
-    match discriminator {
-        Some(value) => edge.with_discriminator(value).map_err(IndexError::from),
-        None => Ok(edge),
-    }
-}
-
-fn source_span(node: Node<'_>) -> Result<SourceSpan, IndexError> {
-    let range = node.range();
-    let start_byte = u64::try_from(range.start_byte)
-        .map_err(|_| IndexError::CoordinateOverflow("start byte"))?;
-    let end_byte =
-        u64::try_from(range.end_byte).map_err(|_| IndexError::CoordinateOverflow("end byte"))?;
-    let start_row =
-        u64::try_from(range.start_point.row).map_err(|_| IndexError::CoordinateOverflow("row"))?;
-    let start_column = u64::try_from(range.start_point.column)
-        .map_err(|_| IndexError::CoordinateOverflow("column"))?;
-    let end_row =
-        u64::try_from(range.end_point.row).map_err(|_| IndexError::CoordinateOverflow("row"))?;
-    let end_column = u64::try_from(range.end_point.column)
-        .map_err(|_| IndexError::CoordinateOverflow("column"))?;
-    Ok(SourceSpan::new(
-        ByteSpan::new(start_byte, end_byte)?,
-        SourcePoint::new(start_row, start_column),
-        SourcePoint::new(end_row, end_column),
-    )?)
 }
 
 #[cfg(all(test, feature = "full-grammar-tests"))]
