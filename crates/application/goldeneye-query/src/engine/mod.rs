@@ -1,3 +1,10 @@
+mod resolve;
+mod trace;
+
+use resolve::resolve_symbol_in_graph;
+pub(crate) use resolve::{ResolveMode, resolve_symbol};
+use trace::trace_breadth_first;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,7 +22,7 @@ use crate::types::{
     IndexStatusResult, NodeSummary, ProjectSummary, QueryError, QueryGraphRequest,
     QueryGraphResult, SchemaEntry, SearchCodeRequest, SearchCodeResult, SearchGraphPage,
     SearchGraphRequest, SemanticSearchRequest, SemanticSearchResult, SimilaritySearchRequest,
-    SimilaritySearchResult, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
+    SimilaritySearchResult, TraceDirection, TracePathRequest, TracePathResult,
 };
 
 const MAX_PAGE_SIZE: usize = 200;
@@ -1109,227 +1116,6 @@ fn page_offset(request: &SearchGraphRequest, fingerprint: &str) -> Result<usize,
 
 fn format_cursor(fingerprint: &str, offset: usize) -> String {
     format!("geq1:{fingerprint}:{offset}")
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum ResolveMode {
-    Any,
-    Callable,
-}
-
-fn resolve_symbol_in_graph(
-    query: &str,
-    graph: &ProjectGraph,
-    mode: ResolveMode,
-) -> Result<GraphNode, QueryError> {
-    if let Some(node) = graph
-        .nodes_by_qualified_name
-        .get(query)
-        .and_then(|index| graph.nodes.get(*index))
-        .filter(|node| resolve_eligible(node, mode))
-    {
-        return Ok(node.clone());
-    }
-    resolve_symbol(query, &graph.nodes, &graph.degrees, mode)
-}
-
-pub(crate) fn resolve_symbol(
-    query: &str,
-    nodes: &[GraphNode],
-    degrees: &BTreeMap<NodeId, (usize, usize)>,
-    mode: ResolveMode,
-) -> Result<GraphNode, QueryError> {
-    let eligible = |node: &&GraphNode| resolve_eligible(node, mode);
-    if let Some(node) = nodes
-        .iter()
-        .filter(eligible)
-        .find(|node| node.qualified_name.as_str() == query)
-    {
-        return Ok(node.clone());
-    }
-
-    let mut candidates: Vec<&GraphNode> = if is_qualified_fragment(query) {
-        nodes
-            .iter()
-            .filter(eligible)
-            .filter(|node| qualified_suffix_matches(node.qualified_name.as_str(), query))
-            .collect()
-    } else {
-        nodes
-            .iter()
-            .filter(eligible)
-            .filter(|node| node.name == query)
-            .collect()
-    };
-    candidates.sort_by(|left, right| {
-        left.qualified_name
-            .cmp(&right.qualified_name)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    match candidates.as_slice() {
-        [node] => Ok((*node).clone()),
-        [] => Err(QueryError::SymbolNotFound {
-            query: query.to_owned(),
-            suggestions: symbol_suggestions(query, nodes, degrees, mode),
-        }),
-        _ => Err(QueryError::AmbiguousSymbol {
-            query: query.to_owned(),
-            candidates: candidates
-                .into_iter()
-                .map(|node| node_summary(node, None, degrees, Vec::new()))
-                .collect(),
-        }),
-    }
-}
-
-fn is_qualified_fragment(query: &str) -> bool {
-    query.contains('.') || query.contains("::") || query.contains('/')
-}
-
-fn qualified_suffix_matches(qualified_name: &str, query: &str) -> bool {
-    qualified_name == query
-        || qualified_name.strip_suffix(query).is_some_and(|prefix| {
-            prefix.ends_with('.') || prefix.ends_with("::") || prefix.ends_with('/')
-        })
-}
-
-fn symbol_suggestions(
-    query: &str,
-    nodes: &[GraphNode],
-    degrees: &BTreeMap<NodeId, (usize, usize)>,
-    mode: ResolveMode,
-) -> Vec<NodeSummary> {
-    let folded = query.to_lowercase();
-    let mut matches: Vec<&GraphNode> = nodes
-        .iter()
-        .filter(|node| resolve_eligible(node, mode))
-        .filter(|node| {
-            node.name.to_lowercase().contains(&folded)
-                || node
-                    .qualified_name
-                    .as_str()
-                    .to_lowercase()
-                    .contains(&folded)
-        })
-        .collect();
-    matches.sort_by(|left, right| left.qualified_name.cmp(&right.qualified_name));
-    matches
-        .into_iter()
-        .take(10)
-        .map(|node| node_summary(node, None, degrees, Vec::new()))
-        .collect()
-}
-
-fn resolve_eligible(node: &GraphNode, mode: ResolveMode) -> bool {
-    match mode {
-        ResolveMode::Any => true,
-        ResolveMode::Callable => matches!(node.label.as_str(), "Function" | "Method"),
-    }
-}
-
-fn trace_breadth_first(
-    origin: &GraphNode,
-    graph: &ProjectGraph,
-    request: &TracePathRequest,
-) -> (Vec<TraceHop>, bool) {
-    let nodes = &graph.nodes;
-    let edges = &graph.edges;
-    let edge_types: BTreeSet<&str> = request.edge_types.iter().map(String::as_str).collect();
-    let mut visited = BTreeSet::from([origin.id.clone()]);
-    let mut frontier = vec![origin.id.clone()];
-    let mut paths = Vec::new();
-    let mut truncated = false;
-
-    'depth: for hop in 1..=request.depth {
-        let mut candidates = Vec::new();
-        for current in &frontier {
-            for edge in graph
-                .edges_by_node
-                .get(current)
-                .into_iter()
-                .flatten()
-                .filter_map(|index| edges.get(*index))
-                .filter(|edge| edge_types.contains(edge.kind.as_str()))
-            {
-                let related = match request.direction {
-                    TraceDirection::Outbound | TraceDirection::Both if edge.source == *current => {
-                        Some(&edge.target)
-                    }
-                    TraceDirection::Inbound | TraceDirection::Both if edge.target == *current => {
-                        Some(&edge.source)
-                    }
-                    _ => None,
-                };
-                if let Some(related) = related.filter(|related| !visited.contains(*related)) {
-                    candidates.push((related.clone(), edge));
-                }
-            }
-        }
-        candidates.sort_by(|(left_id, left_edge), (right_id, right_edge)| {
-            node_qualified_name(graph, left_id)
-                .cmp(node_qualified_name(graph, right_id))
-                .then_with(|| left_edge.source.cmp(&right_edge.source))
-                .then_with(|| left_edge.target.cmp(&right_edge.target))
-                .then_with(|| left_edge.kind.cmp(&right_edge.kind))
-        });
-        let mut next = Vec::new();
-        for (related_id, edge) in candidates {
-            if !visited.insert(related_id.clone()) {
-                continue;
-            }
-            if paths.len() == request.limit {
-                truncated = true;
-                break 'depth;
-            }
-            let Some(source) = graph
-                .nodes_by_id
-                .get(&edge.source)
-                .and_then(|index| nodes.get(*index))
-            else {
-                continue;
-            };
-            let Some(target) = graph
-                .nodes_by_id
-                .get(&edge.target)
-                .and_then(|index| nodes.get(*index))
-            else {
-                continue;
-            };
-            let Some(related) = graph
-                .nodes_by_id
-                .get(&related_id)
-                .and_then(|index| nodes.get(*index))
-            else {
-                continue;
-            };
-            paths.push(TraceHop {
-                source_qualified_name: source.qualified_name.as_str().to_owned(),
-                target_qualified_name: target.qualified_name.as_str().to_owned(),
-                related_qualified_name: related.qualified_name.as_str().to_owned(),
-                edge_kind: edge.kind.as_str().to_owned(),
-                hop,
-                file_path: related
-                    .file_path
-                    .as_ref()
-                    .map(|path| path.as_str().to_owned()),
-                line: related.source_span.map(|span| span.start.row + 1),
-            });
-            next.push(related_id);
-        }
-        if next.is_empty() {
-            break;
-        }
-        frontier = next;
-    }
-    (paths, truncated)
-}
-
-fn node_qualified_name<'a>(graph: &'a ProjectGraph, node: &NodeId) -> &'a str {
-    graph
-        .nodes_by_id
-        .get(node)
-        .and_then(|index| graph.nodes.get(*index))
-        .map_or("", |node| node.qualified_name.as_str())
 }
 
 fn validate_snippet_limit(
