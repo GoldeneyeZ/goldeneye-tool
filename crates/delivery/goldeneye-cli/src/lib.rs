@@ -13,8 +13,8 @@ pub fn run_session<R: Read, W: Write>(
     reader: R,
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = BootstrapRuntime::from_env()?;
-    run_session_with_runtime(reader, writer, runtime)
+    let server = Server::from_env()?;
+    run_session_with_server(reader, writer, &server)
 }
 
 /// Runs one MCP session against an injected production runtime until EOF.

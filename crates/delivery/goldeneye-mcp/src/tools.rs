@@ -101,6 +101,39 @@ pub struct ToolCallResult {
     is_error: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ToolResponseMode {
+    #[default]
+    Dual,
+    Text,
+}
+
+impl ToolResponseMode {
+    pub(crate) const ENVIRONMENT_VARIABLE: &str = "GOLDENEYE_MCP_RESPONSE_MODE";
+
+    pub(crate) fn from_environment() -> Result<Self, String> {
+        match std::env::var(Self::ENVIRONMENT_VARIABLE) {
+            Ok(value) => Self::parse(Some(&value)),
+            Err(std::env::VarError::NotPresent) => Ok(Self::Dual),
+            Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+                "{} must contain valid Unicode",
+                Self::ENVIRONMENT_VARIABLE
+            )),
+        }
+    }
+
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None | Some("dual") => Ok(Self::Dual),
+            Some("text") => Ok(Self::Text),
+            Some(value) => Err(format!(
+                "{} must be 'dual' or 'text', got '{value}'",
+                Self::ENVIRONMENT_VARIABLE
+            )),
+        }
+    }
+}
+
 impl ToolCallResult {
     #[must_use]
     pub fn success(value: Value) -> Self {
@@ -109,12 +142,27 @@ impl ToolCallResult {
 
     #[must_use]
     pub fn structured(value: Value, is_error: bool) -> Self {
+        Self::structured_with_mode(value, is_error, ToolResponseMode::Dual)
+    }
+
+    #[must_use]
+    pub(crate) fn success_with_mode(value: Value, mode: ToolResponseMode) -> Self {
+        Self::structured_with_mode(value, false, mode)
+    }
+
+    #[must_use]
+    pub(crate) fn structured_with_mode(
+        value: Value,
+        is_error: bool,
+        mode: ToolResponseMode,
+    ) -> Self {
+        let text = value.to_string();
         Self {
             content: vec![TextContent {
                 content_type: "text",
-                text: value.to_string(),
+                text,
             }],
-            structured_content: Some(value),
+            structured_content: (mode == ToolResponseMode::Dual).then_some(value),
             is_error,
         }
     }
@@ -656,7 +704,7 @@ fn locator_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{ToolDefinition, ToolRegistry};
+    use super::{ToolCallResult, ToolDefinition, ToolRegistry, ToolResponseMode};
     use serde_json::json;
 
     #[test]
@@ -719,6 +767,81 @@ mod tests {
                     "outputSchema": {"type": "object", "additionalProperties": true}
                 }]
             })
+        );
+    }
+
+    #[test]
+    fn response_mode_parser_defaults_to_dual_and_rejects_unknown_values() {
+        assert_eq!(
+            ToolResponseMode::parse(None).expect("default response mode"),
+            ToolResponseMode::Dual
+        );
+        assert_eq!(
+            ToolResponseMode::parse(Some("dual")).expect("dual response mode"),
+            ToolResponseMode::Dual
+        );
+        assert_eq!(
+            ToolResponseMode::parse(Some("text")).expect("text response mode"),
+            ToolResponseMode::Text
+        );
+        assert_eq!(
+            ToolResponseMode::parse(Some("structured")).unwrap_err(),
+            "GOLDENEYE_MCP_RESPONSE_MODE must be 'dual' or 'text', got 'structured'"
+        );
+    }
+
+    #[test]
+    fn text_response_mode_omits_only_the_duplicate_structured_content() {
+        let payload = json!({"rows": [["alpha", 1]], "total": 1});
+        let dual = serde_json::to_value(ToolCallResult::success(payload.clone()))
+            .expect("serialize dual response");
+        let text = serde_json::to_value(ToolCallResult::success_with_mode(
+            payload.clone(),
+            ToolResponseMode::Text,
+        ))
+        .expect("serialize text response");
+
+        assert_eq!(dual["content"], text["content"]);
+        assert_eq!(dual["isError"], text["isError"]);
+        assert_eq!(dual["structuredContent"], payload);
+        assert!(text.get("structuredContent").is_none());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                text["content"][0]["text"].as_str().expect("text content")
+            )
+            .expect("JSON text content"),
+            dual["structuredContent"]
+        );
+    }
+
+    #[test]
+    fn error_responses_remain_text_only() {
+        let value = serde_json::to_value(ToolCallResult::error("broken"))
+            .expect("serialize error response");
+
+        assert_eq!(value["content"][0]["text"], "broken");
+        assert_eq!(value["isError"], true);
+        assert!(value.get("structuredContent").is_none());
+    }
+
+    #[test]
+    fn text_response_mode_preserves_structured_error_envelopes() {
+        let payload = json!({"status": "not_found", "project": "missing"});
+        let value = serde_json::to_value(ToolCallResult::structured_with_mode(
+            payload.clone(),
+            true,
+            ToolResponseMode::Text,
+        ))
+        .expect("serialize structured error response");
+
+        assert_eq!(value["isError"], true);
+        assert!(value.get("structuredContent").is_none());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                value["content"][0]["text"].as_str().expect("text content")
+            )
+            .expect("JSON text content"),
+            payload
         );
     }
 }

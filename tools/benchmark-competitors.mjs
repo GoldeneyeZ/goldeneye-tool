@@ -41,6 +41,8 @@ Options:
   --warmups <n>            default: 3
   --samples <n>            default: 20
   --startup-wait-ms <n>    default: 6000
+  --goldeneye-response-mode <text|dual>
+                            default: text
   --skip-build             skip cargo release build
   --keep-temp              keep isolated cache directories`);
   process.exit(0);
@@ -67,6 +69,7 @@ const config = {
   warmups: integerFlag("--warmups", 3),
   samples: integerFlag("--samples", 20),
   startupWaitMs: integerFlag("--startup-wait-ms", 6000, true),
+  goldeneyeResponseMode: choiceFlag("--goldeneye-response-mode", "text", ["text", "dual"]),
   skipBuild: flags.has("--skip-build"),
   keepTemp: flags.has("--keep-temp"),
 };
@@ -154,6 +157,11 @@ class Mcp {
       payload,
       ms: response.ms,
       contentBytes: Buffer.byteLength(text),
+      structuredContentBytes:
+        response.result?.structuredContent === undefined
+          ? 0
+          : Buffer.byteLength(JSON.stringify(response.result.structuredContent)),
+      representationCount: response.result?.structuredContent === undefined ? 1 : 2,
       wireBytes: response.wireBytes,
     };
   }
@@ -181,8 +189,10 @@ async function start(engine, root) {
   };
   if (engine.name === "goldeneye") {
     environment.GOLDENEYE_DB_PATH = join(root, "goldeneye.db");
+    environment.GOLDENEYE_MCP_RESPONSE_MODE = config.goldeneyeResponseMode;
   } else {
     delete environment.GOLDENEYE_DB_PATH;
+    delete environment.GOLDENEYE_MCP_RESPONSE_MODE;
   }
   const session = new Mcp(engine.command, environment);
   await session.initialize();
@@ -271,6 +281,13 @@ async function benchmarkEngine(engine) {
         files: active.indexed.payload.files,
         nodes: active.indexed.payload.nodes,
         edges: active.indexed.payload.edges,
+        response: responseSummary(
+          active.indexed.payload,
+          active.indexed.contentBytes,
+          active.indexed.structuredContentBytes,
+          active.indexed.representationCount,
+          active.indexed.wireBytes,
+        ),
       },
       queries,
     };
@@ -289,12 +306,29 @@ async function measure(session, tool, args) {
   }
   return {
     ...statistics(samples),
-    response: responseSummary(last.payload, last.contentBytes, last.wireBytes),
+    response: responseSummary(
+      last.payload,
+      last.contentBytes,
+      last.structuredContentBytes,
+      last.representationCount,
+      last.wireBytes,
+    ),
   };
 }
 
-function responseSummary(payload, contentBytes, wireBytes) {
-  const result = { content_bytes: contentBytes, wire_bytes: wireBytes };
+function responseSummary(
+  payload,
+  contentBytes,
+  structuredContentBytes,
+  representationCount,
+  wireBytes,
+) {
+  const result = {
+    content_bytes: contentBytes,
+    structured_content_bytes: structuredContentBytes,
+    representation_count: representationCount,
+    wire_bytes: wireBytes,
+  };
   if (Number.isFinite(payload.total)) result.total = payload.total;
   if (Array.isArray(payload.rows)) {
     result.returned = payload.rows.length;
@@ -338,7 +372,10 @@ function comparisons(goldeneye, comparator) {
     result[name] = {
       goldeneye_p50_ms: goldeneyeQuery.p50_ms,
       codebase_memory_p50_ms: comparatorQuery.p50_ms,
+      goldeneye_p95_ms: goldeneyeQuery.p95_ms,
+      codebase_memory_p95_ms: comparatorQuery.p95_ms,
       ratio: round(goldeneyeQuery.p50_ms / comparatorQuery.p50_ms),
+      p95_ratio: round(goldeneyeQuery.p95_ms / comparatorQuery.p95_ms),
       goldeneye_response: goldeneyeQuery.response,
       codebase_memory_response: comparatorQuery.response,
     };
@@ -368,6 +405,12 @@ async function cleanup(state) {
 function integerFlag(name, fallback, allowZero = false) {
   const value = Number.parseInt(String(flags.get(name) ?? fallback), 10);
   if (!Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) fail(`${name}: invalid integer`);
+  return value;
+}
+
+function choiceFlag(name, fallback, choices) {
+  const value = String(flags.get(name) ?? fallback);
+  if (!choices.includes(value)) fail(`${name}: expected one of ${choices.join(", ")}`);
   return value;
 }
 
@@ -408,6 +451,7 @@ try {
       warmups: config.warmups,
       samples: config.samples,
       startup_wait_ms: config.startupWaitMs,
+      goldeneye_response_mode: config.goldeneyeResponseMode,
     },
     engines: { "codebase-memory-mcp": comparator, goldeneye },
     comparisons: comparisons(goldeneye, comparator),

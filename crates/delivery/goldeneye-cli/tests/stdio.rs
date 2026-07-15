@@ -7,12 +7,24 @@ use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_services::ServiceConfig;
 
 fn run_server(input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_goldeneye"))
+    run_server_with_response_mode(input, None)
+}
+
+fn run_server_with_response_mode(input: &[u8], mode: Option<&str>) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_goldeneye"));
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn goldeneye");
+        .stderr(Stdio::piped());
+    match mode {
+        Some(mode) => {
+            command.env("GOLDENEYE_MCP_RESPONSE_MODE", mode);
+        }
+        None => {
+            command.env_remove("GOLDENEYE_MCP_RESPONSE_MODE");
+        }
+    }
+    let mut child = command.spawn().expect("spawn goldeneye");
 
     child
         .stdin
@@ -86,6 +98,37 @@ fn initialize_round_trip_returns_protocol_and_server_identity() {
     assert_eq!(
         responses[0]["result"]["serverInfo"]["name"],
         "codebase-memory-mcp"
+    );
+}
+
+#[test]
+fn text_response_mode_is_applied_by_the_shipped_stdio_binary() {
+    let output = run_server_with_response_mode(
+        br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}
+"#,
+        Some("text"),
+    );
+    assert_clean_success(&output);
+
+    let responses = parse_json_lines(&output.stdout);
+    let result = &responses[0]["result"];
+    assert_eq!(result["isError"], false);
+    assert!(result.get("structuredContent").is_none());
+    let payload: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().expect("text content"))
+            .expect("JSON text content");
+    assert!(payload["projects"].is_array());
+}
+
+#[test]
+fn invalid_response_mode_fails_stdio_startup_with_configuration_message() {
+    let output = run_server_with_response_mode(&[], Some("invalid"));
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("GOLDENEYE_MCP_RESPONSE_MODE must be 'dual' or 'text', got 'invalid'")
     );
 }
 

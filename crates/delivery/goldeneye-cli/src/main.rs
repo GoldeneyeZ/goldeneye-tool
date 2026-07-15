@@ -32,8 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = BootstrapRuntime::from_env()?;
-    goldeneye::run_session_with_runtime(std::io::stdin().lock(), std::io::stdout().lock(), runtime)
+    goldeneye::run_session(std::io::stdin().lock(), std::io::stdout().lock())
 }
 
 fn run_ui(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {

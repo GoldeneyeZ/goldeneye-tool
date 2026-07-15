@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::protocol::{Request, RequestId, Response};
-use crate::tools::{ToolCallResult, ToolRegistry};
+use crate::tools::{ToolCallResult, ToolRegistry, ToolResponseMode};
 
 pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
     ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -39,6 +39,7 @@ fn negotiated_protocol_version(params: &Value) -> &'static str {
 pub struct Server {
     tools: ToolRegistry,
     runtime: BootstrapRuntime,
+    response_mode: ToolResponseMode,
     active_index: Mutex<Option<(RequestId, CancellationToken)>>,
 }
 
@@ -50,9 +51,17 @@ impl Server {
 
     #[must_use]
     pub fn with_runtime(runtime: BootstrapRuntime) -> Self {
+        Self::with_runtime_and_response_mode(runtime, ToolResponseMode::Dual)
+    }
+
+    fn with_runtime_and_response_mode(
+        runtime: BootstrapRuntime,
+        response_mode: ToolResponseMode,
+    ) -> Self {
         Self {
             tools: ToolRegistry::implemented(),
             runtime,
+            response_mode,
             active_index: Mutex::new(None),
         }
     }
@@ -73,7 +82,10 @@ impl Server {
     ///
     /// Returns a typed configuration error when service configuration cannot be resolved.
     pub fn from_env() -> Result<Self, ServiceError> {
-        BootstrapRuntime::from_env().map(Self::with_runtime)
+        let response_mode =
+            ToolResponseMode::from_environment().map_err(response_mode_configuration_error)?;
+        BootstrapRuntime::from_env()
+            .map(|runtime| Self::with_runtime_and_response_mode(runtime, response_mode))
     }
 
     #[must_use]
@@ -161,12 +173,14 @@ impl Server {
         }
         if name == "detect_changes" {
             return match self.detect_changes(arguments, id) {
-                Ok((value, is_error)) => ToolCallResult::structured(value, is_error),
+                Ok((value, is_error)) => {
+                    ToolCallResult::structured_with_mode(value, is_error, self.response_mode)
+                }
                 Err(message) => ToolCallResult::error(message),
             };
         }
         match self.dispatch(name, arguments, id) {
-            Ok(value) => ToolCallResult::success(value),
+            Ok(value) => ToolCallResult::success_with_mode(value, self.response_mode),
             Err(message) => ToolCallResult::error(message),
         }
     }
@@ -683,6 +697,13 @@ impl Server {
     }
 }
 
+fn response_mode_configuration_error(message: String) -> ServiceError {
+    ServiceError::Edit {
+        code: ServiceErrorCode::Configuration,
+        message,
+    }
+}
+
 impl Default for Server {
     fn default() -> Self {
         Self::with_runtime(BootstrapRuntime::from_config(ServiceConfig::default()))
@@ -976,10 +997,11 @@ mod tests {
     use std::fs;
     use std::sync::Arc;
 
-    use super::{LATEST_PROTOCOL_VERSION, Server};
+    use super::{LATEST_PROTOCOL_VERSION, Server, response_mode_configuration_error};
     use crate::protocol::RequestId;
+    use crate::tools::ToolResponseMode;
     use goldeneye_bootstrap::{BootstrapRuntime, service_dependencies};
-    use goldeneye_services::{ServiceConfig, Services};
+    use goldeneye_services::{ServiceConfig, ServiceErrorCode, Services};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -995,6 +1017,35 @@ mod tests {
             value["result"]["capabilities"]["tools"]["listChanged"],
             false
         );
+    }
+
+    #[test]
+    fn explicitly_configured_text_mode_omits_structured_tool_content() {
+        let runtime = BootstrapRuntime::from_config(ServiceConfig::default());
+        let server = Server::with_runtime_and_response_mode(runtime, ToolResponseMode::Text);
+        let response = server
+            .handle_line(
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}"#,
+            )
+            .expect("tool response");
+        let result = response.result.expect("tool result");
+
+        assert_eq!(result["isError"], false);
+        assert!(result.get("structuredContent").is_none());
+        let payload = serde_json::from_str::<serde_json::Value>(
+            result["content"][0]["text"].as_str().expect("text content"),
+        )
+        .expect("JSON text content");
+        assert!(payload["projects"].is_array());
+    }
+
+    #[test]
+    fn invalid_response_mode_maps_to_an_exact_configuration_error() {
+        let message = "GOLDENEYE_MCP_RESPONSE_MODE must be 'dual' or 'text', got 'invalid'";
+        let error = response_mode_configuration_error(message.to_owned());
+
+        assert_eq!(error.code(), ServiceErrorCode::Configuration);
+        assert_eq!(error.to_string(), message);
     }
 
     #[test]
