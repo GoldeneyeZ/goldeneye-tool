@@ -13,14 +13,10 @@ use goldeneye_edit::{
 };
 use goldeneye_index::{IndexOptions, IndexService};
 use goldeneye_ports::{
-    EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic, LanguageClassifier,
+    EditDiagnosticKind, EditInspectRequest, EditSyntaxDiagnostic, EditSyntaxInspectRequest,
+    InspectRequest, LanguageClassifier, ServiceSyntax, SyntaxInspection,
 };
 use goldeneye_store::Store;
-use goldeneye_syntax::{
-    CoreGrammarProvider, DiagnosticKind, InspectRequest, SyntaxDiagnostic, SyntaxEngine,
-    SyntaxInspection, inspect_syntax as inspect_tree,
-};
-use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -307,12 +303,14 @@ impl Services {
         &self,
         request: &InspectSyntaxRequest,
     ) -> Result<InspectSyntaxResult, ServiceError> {
+        let syntax = self.dependencies.edit_syntax();
         self.with_edit_service(|service| {
             inspect_file(
                 service,
                 request,
                 self.allowed_roots(),
                 self.dependencies.languages(),
+                syntax.as_ref(),
             )
         })
     }
@@ -387,6 +385,7 @@ impl Services {
         let locator = request.locator.clone();
         let allowed_roots = self.allowed_roots();
         let languages = self.dependencies.languages();
+        let syntax = self.dependencies.edit_syntax();
         self.with_edit_service(|service| match service.edit_node(durable) {
             Ok(result) => Ok(mutation_result(result)),
             Err(error) => Err(edit_error_with_fresh(
@@ -395,6 +394,7 @@ impl Services {
                 error,
                 allowed_roots,
                 languages,
+                syntax.as_ref(),
             )),
         })
     }
@@ -467,6 +467,7 @@ impl Services {
         let locator = request.locator.clone();
         let allowed_roots = self.allowed_roots();
         let languages = self.dependencies.languages();
+        let syntax = self.dependencies.edit_syntax();
         self.with_edit_service(|service| match service.edit_node(durable) {
             Ok(result) => Ok(mutation_result(result)),
             Err(error) => Err(edit_error_with_fresh(
@@ -475,6 +476,7 @@ impl Services {
                 error,
                 allowed_roots,
                 languages,
+                syntax.as_ref(),
             )),
         })
     }
@@ -499,7 +501,7 @@ impl Services {
         let store = Store::open(self.config.database_path())?;
         let index = IndexService::new(
             store,
-            TreeSitterIndexExtractor::new(CoreGrammarProvider),
+            self.dependencies.index_syntax(),
             IndexOptions::default(),
             self.dependencies.discovery(),
         );
@@ -507,7 +509,7 @@ impl Services {
         DurableEditService::open(
             index,
             journal,
-            SyntaxEngine::new(CoreGrammarProvider),
+            self.dependencies.edit_syntax(),
             self.allowed_roots(),
         )
         .map_err(ServiceError::from)
@@ -529,6 +531,7 @@ fn inspect_file(
     request: &InspectSyntaxRequest,
     allowed_roots: Vec<PathBuf>,
     languages: &dyn LanguageClassifier,
+    syntax: &dyn ServiceSyntax,
 ) -> Result<InspectSyntaxResult, ServiceError> {
     let project = service.indexed_project(&request.project)?.ok_or_else(|| {
         ServiceError::edit(
@@ -577,30 +580,22 @@ fn inspect_file(
                 ),
             )
         })?;
-    let engine = SyntaxEngine::new(CoreGrammarProvider);
-    let snapshot = engine
-        .parse(
-            language_id.clone(),
-            Arc::<[u8]>::from(source),
-            project.generation,
-        )
+    let source_bytes = source.len();
+    let parsed = syntax
+        .inspect(EditSyntaxInspectRequest {
+            language_id: language_id.clone(),
+            source: Arc::<[u8]>::from(source),
+            generation: project.generation,
+            file_context: FileContext::new(request.project.clone(), request.path.clone()),
+            inspection: request.inspect.clone(),
+        })
         .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
-    let context = FileContext::new(request.project.clone(), request.path.clone());
-    let syntax = inspect_tree(&snapshot, &context, &request.inspect)
-        .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
-    let locators = syntax
-        .nodes
-        .iter()
-        .map(|node| syntax.locator(node.ordinal))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?;
-    let compact_syntax_bytes = serde_json::to_vec(&syntax)
+    let compact_syntax_bytes = serde_json::to_vec(&parsed.inspection)
         .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?
         .len();
-    let locator_bytes = serde_json::to_vec(&locators)
+    let locator_bytes = serde_json::to_vec(&parsed.locators)
         .map_err(|error| ServiceError::edit(ServiceErrorCode::InvalidInput, error.to_string()))?
         .len();
-    let source_bytes = snapshot.source().len();
     let approximate_context_tokens = source_bytes
         .saturating_add(compact_syntax_bytes)
         .saturating_add(locator_bytes)
@@ -609,16 +604,16 @@ fn inspect_file(
         project: request.project.clone(),
         path: request.path.clone(),
         language_id,
-        file_hash: snapshot.file_hash(),
-        generation: snapshot.generation(),
-        syntax,
-        locators,
-        diagnostic_total: snapshot.diagnostic_total(),
-        diagnostics_truncated: snapshot.diagnostics_truncated(),
-        diagnostics: snapshot
-            .diagnostics()
+        file_hash: parsed.content_hash,
+        generation: parsed.generation,
+        syntax: parsed.inspection,
+        locators: parsed.locators,
+        diagnostic_total: parsed.diagnostic_total,
+        diagnostics_truncated: parsed.diagnostics_truncated,
+        diagnostics: parsed
+            .diagnostics
             .iter()
-            .map(diagnostic_result)
+            .map(edit_diagnostic_result)
             .collect(),
         size: InspectionSize {
             source_bytes,
@@ -642,6 +637,7 @@ fn edit_error_with_fresh(
     error: DurableEditError,
     allowed_roots: Vec<PathBuf>,
     languages: &dyn LanguageClassifier,
+    syntax: &dyn ServiceSyntax,
 ) -> ServiceError {
     if !matches!(
         &error,
@@ -653,7 +649,7 @@ fn edit_error_with_fresh(
         locator.scope.file.project_id.clone(),
         locator.scope.file.relative_path.clone(),
     );
-    let fresh = inspect_file(service, &request, allowed_roots, languages)
+    let fresh = inspect_file(service, &request, allowed_roots, languages, syntax)
         .and_then(|result| {
             serde_json::to_string(&result.syntax).map_err(|serialization| {
                 ServiceError::edit(ServiceErrorCode::Storage, serialization.to_string())
@@ -707,18 +703,6 @@ fn mutation_result(result: DurableMutationResult) -> EditMutationResult {
             refreshed_locator_bytes: result.token_size.refreshed_locator_bytes,
             approximate_context_tokens: result.token_size.approximate_context_tokens,
         },
-    }
-}
-
-fn diagnostic_result(diagnostic: &SyntaxDiagnostic) -> SyntaxDiagnosticResult {
-    SyntaxDiagnosticResult {
-        kind: match diagnostic.kind {
-            DiagnosticKind::Error => "error",
-            DiagnosticKind::Missing => "missing",
-        }
-        .to_owned(),
-        node_kind: diagnostic.node_kind.clone(),
-        span: diagnostic.span,
     }
 }
 

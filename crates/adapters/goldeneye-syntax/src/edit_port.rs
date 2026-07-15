@@ -3,8 +3,9 @@ use std::sync::Arc;
 use goldeneye_domain::{ByteSpan, SourcePoint, SyntaxIdentityError};
 use goldeneye_ports::{
     EditDiagnosticKind, EditInspectRequest, EditSyntax, EditSyntaxCreate, EditSyntaxCreateRequest,
-    EditSyntaxDiagnostic, EditSyntaxError, EditSyntaxInspection, EditSyntaxMutation,
-    EditSyntaxNodeView, EditSyntaxPlan, EditSyntaxPlanRequest, PortError,
+    EditSyntaxDiagnostic, EditSyntaxError, EditSyntaxInspect, EditSyntaxInspectRequest,
+    EditSyntaxInspection, EditSyntaxMutation, EditSyntaxNodeView, EditSyntaxPlan,
+    EditSyntaxPlanRequest, PortError, SyntaxInspector,
 };
 use thiserror::Error;
 
@@ -40,6 +41,44 @@ where
     ) -> Result<EditSyntaxCreate, PortError> {
         parse_create(self, request)
     }
+}
+
+impl<P> SyntaxInspector for SyntaxEngine<P>
+where
+    P: GrammarProvider + Send + Sync,
+{
+    fn inspect(&self, request: EditSyntaxInspectRequest) -> Result<EditSyntaxInspect, PortError> {
+        inspect(self, request)
+    }
+}
+
+fn inspect<P>(
+    engine: &SyntaxEngine<P>,
+    request: EditSyntaxInspectRequest,
+) -> Result<EditSyntaxInspect, PortError>
+where
+    P: GrammarProvider,
+{
+    let snapshot = engine
+        .parse(request.language_id, request.source, request.generation)
+        .map_err(PortError::new)?;
+    let inspection = inspect_syntax(&snapshot, &request.file_context, &request.inspection)
+        .map_err(PortError::new)?;
+    let locators = inspection
+        .nodes
+        .iter()
+        .map(|node| inspection.locator(node.ordinal))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(PortError::new)?;
+    Ok(EditSyntaxInspect {
+        content_hash: snapshot.file_hash(),
+        generation: snapshot.generation(),
+        inspection,
+        locators,
+        diagnostic_total: snapshot.diagnostic_total(),
+        diagnostics_truncated: snapshot.diagnostics_truncated(),
+        diagnostics: map_diagnostics(snapshot.diagnostics()),
+    })
 }
 
 fn plan_edit<P>(

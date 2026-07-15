@@ -7,8 +7,6 @@ layers = ["domain", "ports", "application", "adapters", "delivery"]
 excluded = ["xtask"]
 exceptions = [
     "goldeneye-services->goldeneye-store",
-    "goldeneye-services->goldeneye-syntax",
-    "goldeneye-services->goldeneye-tree-sitter-index",
 ]
 
 [workspace.metadata.architecture.packages]

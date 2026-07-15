@@ -442,6 +442,8 @@ dependencies = [
  "goldeneye-mcp",
  "goldeneye-services",
  "goldeneye-store",
+ "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "goldeneye-watcher",
  "serde",
  "serde_json",
@@ -474,6 +476,8 @@ dependencies = [
  "goldeneye-discovery",
  "goldeneye-git",
  "goldeneye-services",
+ "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "goldeneye-watcher",
  "serde",
  "serde_json",
@@ -488,6 +492,7 @@ dependencies = [
  "goldeneye-domain",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -584,6 +589,8 @@ dependencies = [
  "goldeneye-git",
  "goldeneye-services",
  "goldeneye-store",
+ "goldeneye-syntax",
+ "goldeneye-tree-sitter-index",
  "sha2",
  "tempfile",
  "thiserror",

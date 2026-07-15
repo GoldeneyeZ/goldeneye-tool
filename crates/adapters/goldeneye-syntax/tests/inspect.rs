@@ -10,6 +10,26 @@ use goldeneye_syntax::{
     SyntaxSnapshot, all_named_locators, inspect_syntax, resolve_locator,
 };
 
+fn adapter_request_is_port_request(
+    value: goldeneye_syntax::InspectRequest,
+) -> goldeneye_ports::InspectRequest {
+    value
+}
+
+fn adapter_inspection_is_port_inspection(
+    value: goldeneye_syntax::SyntaxInspection,
+) -> goldeneye_ports::SyntaxInspection {
+    value
+}
+
+#[test]
+fn public_inspection_types_are_port_type_identical() {
+    let _ = adapter_request_is_port_request
+        as fn(goldeneye_syntax::InspectRequest) -> goldeneye_ports::InspectRequest;
+    let _ = adapter_inspection_is_port_inspection
+        as fn(goldeneye_syntax::SyntaxInspection) -> goldeneye_ports::SyntaxInspection;
+}
+
 fn rust_snapshot(source: impl Into<Arc<[u8]>>) -> SyntaxSnapshot {
     SyntaxEngine::new(CoreGrammarProvider)
         .parse(

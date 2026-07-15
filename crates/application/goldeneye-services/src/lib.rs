@@ -16,14 +16,12 @@ use goldeneye_index::{
     IndexError, IndexMode, IndexOptions, IndexService, IndexStatus, project_id_for_name,
 };
 use goldeneye_ports::{
-    ArtifactPersistence, GitPortError, GitRepository, LanguageClassifier, PortError,
-    SourceDiscovery,
+    ArtifactPersistence, GitPortError, GitRepository, IndexSyntaxExtractor, LanguageClassifier,
+    PortError, ServiceSyntax, SourceDiscovery,
 };
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
-use goldeneye_syntax::CoreGrammarProvider;
-use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -392,6 +390,8 @@ pub struct ServiceDependencies {
     artifact: Arc<dyn ArtifactPersistence>,
     git: Arc<dyn GitRepository>,
     source: Arc<dyn SourceDiscovery>,
+    index_syntax: Arc<dyn IndexSyntaxExtractor>,
+    edit_syntax: Arc<dyn ServiceSyntax>,
 }
 
 impl ServiceDependencies {
@@ -400,11 +400,15 @@ impl ServiceDependencies {
         artifact: Arc<dyn ArtifactPersistence>,
         git: Arc<dyn GitRepository>,
         source: Arc<dyn SourceDiscovery>,
+        index_syntax: Arc<dyn IndexSyntaxExtractor>,
+        edit_syntax: Arc<dyn ServiceSyntax>,
     ) -> Self {
         Self {
             artifact,
             git,
             source,
+            index_syntax,
+            edit_syntax,
         }
     }
 
@@ -422,6 +426,14 @@ impl ServiceDependencies {
 
     pub(crate) fn languages(&self) -> &dyn LanguageClassifier {
         self.source.as_ref()
+    }
+
+    pub(crate) fn index_syntax(&self) -> Arc<dyn IndexSyntaxExtractor> {
+        Arc::clone(&self.index_syntax)
+    }
+
+    pub(crate) fn edit_syntax(&self) -> Arc<dyn ServiceSyntax> {
+        Arc::clone(&self.edit_syntax)
     }
 }
 
@@ -520,7 +532,7 @@ impl Services {
             .map_err(map_index_error)?;
         let mut index = IndexService::new(
             store,
-            TreeSitterIndexExtractor::new(CoreGrammarProvider),
+            self.dependencies.index_syntax(),
             options,
             self.dependencies.discovery(),
         );

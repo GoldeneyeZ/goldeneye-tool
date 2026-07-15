@@ -13,6 +13,8 @@ use goldeneye_services::{
     SemanticSearchRequest, ServiceConfig, ServiceDependencies, ServiceError, ServiceErrorCode,
     Services, TraceDirection, TracePathRequest,
 };
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -31,6 +33,8 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
 }
 

@@ -93,3 +93,20 @@ pub trait IndexSyntaxExtractor: Send + Sync {
         mode: IndexMode,
     ) -> Result<IndexExtractedFile, PortError>;
 }
+
+impl<T> IndexSyntaxExtractor for Arc<T>
+where
+    T: IndexSyntaxExtractor + ?Sized,
+{
+    fn supported_ids(&self) -> Vec<LanguageId> {
+        self.as_ref().supported_ids()
+    }
+
+    fn extract(
+        &self,
+        request: IndexExtractionRequest,
+        mode: IndexMode,
+    ) -> Result<IndexExtractedFile, PortError> {
+        self.as_ref().extract(request, mode)
+    }
+}

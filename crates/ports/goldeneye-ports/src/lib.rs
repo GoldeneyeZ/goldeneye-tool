@@ -9,6 +9,7 @@ mod error;
 mod git;
 mod index;
 mod index_syntax;
+mod inspection;
 mod query;
 
 pub use artifact::ArtifactPersistence;
@@ -23,8 +24,9 @@ pub use edit::{
 };
 pub use edit_syntax::{
     EditDiagnosticKind, EditInspectRequest, EditSyntax, EditSyntaxCreate, EditSyntaxCreateRequest,
-    EditSyntaxDiagnostic, EditSyntaxError, EditSyntaxInspection, EditSyntaxMutation,
-    EditSyntaxNodeView, EditSyntaxPlan, EditSyntaxPlanRequest,
+    EditSyntaxDiagnostic, EditSyntaxError, EditSyntaxInspect, EditSyntaxInspectRequest,
+    EditSyntaxInspection, EditSyntaxMutation, EditSyntaxNodeView, EditSyntaxPlan,
+    EditSyntaxPlanRequest, ServiceSyntax, SyntaxInspector,
 };
 pub use error::PortError;
 pub use git::{
@@ -36,6 +38,11 @@ pub use index_syntax::{
     IndexDiagnosticKind, IndexExtractedCall, IndexExtractedFile, IndexExtractedImport,
     IndexExtractedRelation, IndexExtractionRequest, IndexFileSyntaxDiagnostics,
     IndexSyntaxDiagnostic, IndexSyntaxExtractor,
+};
+pub use inspection::{
+    DEFAULT_MAX_DEPTH, DEFAULT_MAX_NODES, DEFAULT_PREVIEW_CHARS, InspectError, InspectRequest,
+    MAX_INSPECT_DEPTH, MAX_INSPECT_KIND_FILTERS, MAX_INSPECT_NODES, MAX_PREVIEW_CHARS,
+    SyntaxInspection, SyntaxNodeView,
 };
 pub use query::{
     ConnectionSettings, GraphCounts, NodeSignatureRecord, NodeVectorRecord, QueryRepository,

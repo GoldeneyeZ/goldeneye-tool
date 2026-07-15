@@ -8,7 +8,7 @@ use goldeneye_domain::{
 };
 use serde::{Serialize, Serializer};
 
-use crate::PortError;
+use crate::{InspectRequest, PortError, SyntaxInspection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditDiagnosticKind {
@@ -82,6 +82,26 @@ pub struct EditSyntaxInspection {
     pub truncated: bool,
     #[serde(rename = "t")]
     pub total_named_nodes_seen: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct EditSyntaxInspectRequest {
+    pub language_id: LanguageId,
+    pub source: Arc<[u8]>,
+    pub generation: Generation,
+    pub file_context: FileContext,
+    pub inspection: InspectRequest,
+}
+
+#[derive(Debug, Clone)]
+pub struct EditSyntaxInspect {
+    pub content_hash: ContentHash,
+    pub generation: Generation,
+    pub inspection: SyntaxInspection,
+    pub locators: Vec<NodeLocator>,
+    pub diagnostic_total: usize,
+    pub diagnostics_truncated: bool,
+    pub diagnostics: Vec<EditSyntaxDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +207,46 @@ pub trait EditSyntax: Send + Sync {
     fn parse_create(&self, request: EditSyntaxCreateRequest)
     -> Result<EditSyntaxCreate, PortError>;
 }
+
+impl<T> EditSyntax for Arc<T>
+where
+    T: EditSyntax + ?Sized,
+{
+    fn plan_edit(&self, request: EditSyntaxPlanRequest) -> Result<EditSyntaxPlan, EditSyntaxError> {
+        self.as_ref().plan_edit(request)
+    }
+
+    fn parse_create(
+        &self,
+        request: EditSyntaxCreateRequest,
+    ) -> Result<EditSyntaxCreate, PortError> {
+        self.as_ref().parse_create(request)
+    }
+}
+
+/// Read-only syntax inspection required by application services.
+pub trait SyntaxInspector: Send + Sync {
+    /// Parses source and returns compact syntax, guarded locators, and diagnostics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an adapter failure when parsing, inspection, or locator construction fails.
+    fn inspect(&self, request: EditSyntaxInspectRequest) -> Result<EditSyntaxInspect, PortError>;
+}
+
+impl<T> SyntaxInspector for Arc<T>
+where
+    T: SyntaxInspector + ?Sized,
+{
+    fn inspect(&self, request: EditSyntaxInspectRequest) -> Result<EditSyntaxInspect, PortError> {
+        self.as_ref().inspect(request)
+    }
+}
+
+/// Coherent syntax capabilities used by service composition.
+pub trait ServiceSyntax: EditSyntax + SyntaxInspector {}
+
+impl<T> ServiceSyntax for T where T: EditSyntax + SyntaxInspector + ?Sized {}
 
 fn serialize_source_span<S>(span: &SourceSpan, serializer: S) -> Result<S::Ok, S::Error>
 where

@@ -13,6 +13,8 @@ use goldeneye_services::{
     CancellationToken, DetectChangesRequest, ServiceConfig, ServiceDependencies, Services,
 };
 use goldeneye_store::Store;
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 
 fn service_dependencies() -> ServiceDependencies {
     let discovery = Arc::new(FileSystemDiscovery);
@@ -20,6 +22,8 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
 }
 

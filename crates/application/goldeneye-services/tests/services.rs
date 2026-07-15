@@ -21,6 +21,8 @@ use goldeneye_services::{
     SearchCodeResult, SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode,
     Services, TraceDirection, TracePathRequest,
 };
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
+use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use tempfile::TempDir;
 
 fn service_dependencies() -> ServiceDependencies {
@@ -29,6 +31,8 @@ fn service_dependencies() -> ServiceDependencies {
         Arc::new(FileArtifactPersistence),
         Arc::new(GitCommandRepository),
         discovery,
+        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     )
 }
 
@@ -167,6 +171,8 @@ fn recording_dependencies(
             Arc::new(artifact),
             Arc::new(GitCommandRepository),
             Arc::new(FileSystemDiscovery),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
         calls,
     )
@@ -336,6 +342,8 @@ fn injected_source_discovery_drives_indexing_and_language_classification() {
             Arc::new(FileArtifactPersistence),
             Arc::new(GitCommandRepository),
             source.clone(),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
     );
 
@@ -565,6 +573,8 @@ fn automatic_git_history_adapter_failures_are_downgraded_to_warnings() {
             cancel_history: false,
         }),
         Arc::new(FileSystemDiscovery),
+        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
     );
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), temp.path())
@@ -604,6 +614,8 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 cancel_history: true,
             }),
             Arc::new(FileSystemDiscovery),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
     );
     let error = cancelling
@@ -622,6 +634,8 @@ fn automatic_git_history_cancellation_is_hard_and_invalid_refs_precede_project_l
                 cancel_history: false,
             }),
             Arc::new(FileSystemDiscovery),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
         ),
     );
     let missing = ProjectId::new("missing").expect("project ID");
