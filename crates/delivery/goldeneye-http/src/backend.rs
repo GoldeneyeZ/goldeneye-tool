@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::{GraphEdge, GraphNode, ProjectId};
 use goldeneye_mcp::server::Server;
-use goldeneye_services::{IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, Services};
+use goldeneye_services::{
+    IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
+};
 use goldeneye_store::{QueryStore, Store};
 use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
@@ -19,6 +22,10 @@ const MAX_LAYOUT_NODES: usize = 250_000;
 const DEFAULT_LAYOUT_NODES: usize = 5_000;
 const MAX_LOG_LINES: usize = 2_000;
 const LOG_CAPACITY: usize = 4_096;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 pub trait ApiBackend: Send + Sync + 'static {
     /// # Errors
@@ -121,7 +128,7 @@ impl GoldeneyeBackend {
         }
         let watcher_runtime = watcher.spawn().ok();
         Self {
-            rpc: Server::new(Services::new(config.clone())),
+            rpc: Server::new(Services::new(config.clone(), service_dependencies())),
             config,
             jobs: Arc::new(Mutex::new(Vec::new())),
             logs: Arc::new(Mutex::new(VecDeque::new())),
@@ -284,8 +291,8 @@ impl GoldeneyeBackend {
         thread::Builder::new()
             .name(format!("goldeneye-index-{slot}"))
             .spawn(move || {
-                let result =
-                    Services::new(config.clone()).index_repository(&IndexRepositoryRequest {
+                let result = Services::new(config.clone(), service_dependencies())
+                    .index_repository(&IndexRepositoryRequest {
                         repo_path: thread_root.clone(),
                         name: name_override,
                         mode: body.mode,

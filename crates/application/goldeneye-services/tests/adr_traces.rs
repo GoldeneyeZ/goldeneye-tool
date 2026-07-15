@@ -1,13 +1,19 @@
 use std::fs;
+use std::sync::Arc;
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::ProjectRecord;
 use goldeneye_services::{
     IngestTracesRequest, MAX_PERSISTED_TRACE_BATCH, ManageAdrRequest, ProjectId, ServiceConfig,
-    ServiceErrorCode, Services,
+    ServiceDependencies, ServiceErrorCode, Services,
 };
 use goldeneye_store::Store;
 use serde_json::json;
 use tempfile::TempDir;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 fn registered_services(
     temp: &TempDir,
@@ -23,8 +29,10 @@ fn registered_services(
         )
         .expect("register project");
     drop(store);
-    let services =
-        Services::new(ServiceConfig::new(&database, &root).with_allowed_root(temp.path()));
+    let services = Services::new(
+        ServiceConfig::new(&database, &root).with_allowed_root(temp.path()),
+        service_dependencies(),
+    );
     (services, project, database, root)
 }
 
@@ -202,8 +210,10 @@ fn adr_and_trace_writes_enforce_registered_project_path_policy() {
         )
         .expect("register outside project");
     drop(store);
-    let services =
-        Services::new(ServiceConfig::new(&database, &allowed).with_allowed_root(&allowed));
+    let services = Services::new(
+        ServiceConfig::new(&database, &allowed).with_allowed_root(&allowed),
+        service_dependencies(),
+    );
 
     assert_eq!(
         services

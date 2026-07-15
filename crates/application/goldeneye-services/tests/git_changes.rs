@@ -1,12 +1,20 @@
 use std::fs;
 use std::process::Command;
+use std::sync::Arc;
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::{
     ContentHash, EdgeKind, FileId, FileRecord, Generation, GraphEdge, GraphNode, NodeId, NodeLabel,
     ProjectId, ProjectRecord, ProjectRelativePath, QualifiedName,
 };
-use goldeneye_services::{CancellationToken, DetectChangesRequest, ServiceConfig, Services};
+use goldeneye_services::{
+    CancellationToken, DetectChangesRequest, ServiceConfig, ServiceDependencies, Services,
+};
 use goldeneye_store::Store;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 fn git(root: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -105,7 +113,7 @@ fn history_enrichment_and_change_blast_radius_are_end_to_end() {
         .expect("graph");
     drop(store);
 
-    let services = Services::new(ServiceConfig::new(&database, &repo));
+    let services = Services::new(ServiceConfig::new(&database, &repo), service_dependencies());
     let token = CancellationToken::new();
     let history = services
         .refresh_git_history(&project_id, &token)

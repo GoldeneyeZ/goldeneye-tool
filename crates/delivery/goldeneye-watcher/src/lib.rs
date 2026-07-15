@@ -8,8 +8,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_domain::ProjectId;
-use goldeneye_services::{IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, Services};
+use goldeneye_services::{
+    IndexRepositoryMode, IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services,
+};
 use goldeneye_store::Store;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -19,6 +22,10 @@ pub const DEFAULT_POLL_MAX: Duration = Duration::from_mins(1);
 pub const DEFAULT_FILE_STEP: usize = 500;
 pub const DEFAULT_PRUNE_GRACE: Duration = Duration::from_mins(10);
 pub const DEFAULT_MISSING_POLLS: u32 = 3;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatcherConfig {
@@ -97,12 +104,14 @@ impl Indexer for ServiceIndexer {
         {
             return Ok(IndexDisposition::Busy);
         }
-        let result = Services::new(self.config.clone()).index_repository(&IndexRepositoryRequest {
-            repo_path: root.to_owned(),
-            name: Some(project.to_owned()),
-            mode: IndexRepositoryMode::Fast,
-            persistence: false,
-        });
+        let result = Services::new(self.config.clone(), service_dependencies()).index_repository(
+            &IndexRepositoryRequest {
+                repo_path: root.to_owned(),
+                name: Some(project.to_owned()),
+                mode: IndexRepositoryMode::Fast,
+                persistence: false,
+            },
+        );
         self.busy.store(false, Ordering::Release);
         result.map_err(|error| error.to_string())?;
         Ok(IndexDisposition::Indexed)

@@ -1,5 +1,6 @@
 //! Application-owned interfaces for external mechanisms.
 
+mod artifact;
 mod crosslink;
 mod discovery;
 mod edit;
@@ -9,6 +10,7 @@ mod index;
 mod index_syntax;
 mod query;
 
+pub use artifact::ArtifactPersistence;
 pub use crosslink::CrossLinkRepository;
 pub use discovery::{
     IndexMode, RepositoryDiscovery, RepositoryDiscoveryOptions, RepositoryDiscoveryReport,

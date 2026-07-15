@@ -1,10 +1,16 @@
 use std::fs;
 use std::process::Command;
+use std::sync::Arc;
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::tools::ToolRegistry;
-use goldeneye_services::{IndexRepositoryRequest, ServiceConfig, Services};
+use goldeneye_services::{IndexRepositoryRequest, ServiceConfig, ServiceDependencies, Services};
 use serde_json::{Value, json};
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 fn git(root: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -85,6 +91,7 @@ fn detect_changes_preserves_envelope_errors_precedence_and_untracked_files() {
 
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.sqlite3"), &root).with_allowed_root(temp.path()),
+        service_dependencies(),
     );
     let project = services
         .index_repository(&IndexRepositoryRequest::new(&root))

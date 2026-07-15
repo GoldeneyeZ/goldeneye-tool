@@ -16,6 +16,7 @@ use goldeneye_discovery::FileSystemDiscovery;
 use goldeneye_index::{
     IndexError, IndexMode, IndexOptions, IndexService, IndexStatus, project_id_for_name,
 };
+use goldeneye_ports::{ArtifactPersistence, PortError};
 use goldeneye_store::{
     NodeSignatureRecord, NodeVectorRecord, Store, StoreError, StoredVector, TokenVectorRecord,
 };
@@ -349,7 +350,7 @@ pub enum ServiceError {
     #[error(transparent)]
     Git(#[from] goldeneye_git::GitError),
     #[error(transparent)]
-    Artifact(#[from] goldeneye_artifact::ArtifactError),
+    Artifact(#[from] PortError),
     #[error(transparent)]
     CrossLink(#[from] goldeneye_crosslink::CrossLinkError),
     #[error("{message}")]
@@ -383,9 +384,27 @@ impl ServiceError {
     }
 }
 
+/// External mechanisms required by service use cases.
+#[derive(Clone)]
+pub struct ServiceDependencies {
+    artifact: Arc<dyn ArtifactPersistence>,
+}
+
+impl ServiceDependencies {
+    #[must_use]
+    pub fn new(artifact: Arc<dyn ArtifactPersistence>) -> Self {
+        Self { artifact }
+    }
+
+    pub(crate) fn artifact(&self) -> &dyn ArtifactPersistence {
+        self.artifact.as_ref()
+    }
+}
+
 #[derive(Clone)]
 pub struct Services {
     config: ServiceConfig,
+    dependencies: ServiceDependencies,
     edit: Arc<Mutex<Option<goldeneye_edit::DurableEditService>>>,
     query: Arc<goldeneye_query::QueryCache>,
     query_engine: Arc<Mutex<Option<goldeneye_query::QueryEngine>>>,
@@ -402,9 +421,10 @@ impl std::fmt::Debug for Services {
 
 impl Services {
     #[must_use]
-    pub fn new(config: ServiceConfig) -> Self {
+    pub fn new(config: ServiceConfig, dependencies: ServiceDependencies) -> Self {
         Self {
             config,
+            dependencies,
             edit: Arc::new(Mutex::new(None)),
             query: Arc::new(goldeneye_query::QueryCache::default()),
             query_engine: Arc::new(Mutex::new(None)),
@@ -416,8 +436,8 @@ impl Services {
     /// # Errors
     ///
     /// Returns a typed configuration error when environment resolution fails.
-    pub fn from_env() -> Result<Self, ServiceError> {
-        let (services, recovery) = Self::open(ServiceConfig::from_env()?)?;
+    pub fn from_env(dependencies: ServiceDependencies) -> Result<Self, ServiceError> {
+        let (services, recovery) = Self::open(ServiceConfig::from_env()?, dependencies)?;
         Self::ensure_recovery_resolved(&recovery)?;
         Ok(services)
     }
@@ -454,9 +474,12 @@ impl Services {
         }
         hooks.report("resolving");
         let root = self.resolve_repository(&request.repo_path)?;
-        if !self.config.database_path.is_file() && goldeneye_artifact::artifact_exists(&root) {
+        if !self.config.database_path.is_file() && self.dependencies.artifact().exists(&root) {
             hooks.report("importing_artifact");
-            let _ = goldeneye_artifact::import_artifact(&root, &self.config.database_path);
+            let _ = self
+                .dependencies
+                .artifact()
+                .import(&root, &self.config.database_path);
         }
         hooks.report("opening_store");
         self.prepare_database()?;
@@ -501,13 +524,12 @@ impl Services {
         if let Err(error) = self.refresh_semantic_index_at(&result.project.id, request.mode) {
             result.warnings.push(format!("semantic_index: {error}"));
         }
-        if request.persistence || goldeneye_artifact::artifact_exists(&root) {
+        if request.persistence || self.dependencies.artifact().exists(&root) {
             hooks.report("exporting_artifact");
-            goldeneye_artifact::export_artifact(
+            self.dependencies.artifact().export(
                 &self.config.database_path,
                 &root,
                 result.project.id.as_str(),
-                goldeneye_artifact::ArtifactQuality::Best,
             )?;
         }
         hooks.report("complete");

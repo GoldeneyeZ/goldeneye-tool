@@ -1,17 +1,82 @@
 #![allow(clippy::float_cmp)]
 
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use goldeneye_artifact::FileArtifactPersistence;
+use goldeneye_ports::{ArtifactPersistence, PortError};
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     GraphSchemaRequest, IndexRepositoryRequest, IndexRepositoryResult, IndexStatusRequest,
     InspectSyntaxRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId,
     ProjectRelativePath, QueryGraphRequest, SearchCodeRequest, SearchCodeResult,
-    SearchGraphRequest, ServiceConfig, ServiceErrorCode, Services, TraceDirection,
-    TracePathRequest,
+    SearchGraphRequest, ServiceConfig, ServiceDependencies, ServiceErrorCode, Services,
+    TraceDirection, TracePathRequest,
 };
 use tempfile::TempDir;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
+
+#[derive(Debug, Default)]
+struct ArtifactCalls {
+    imports: Vec<(PathBuf, PathBuf, bool)>,
+    exports: Vec<(PathBuf, PathBuf, String)>,
+}
+
+struct RecordingArtifact {
+    exists: bool,
+    fail_import: bool,
+    fail_export: bool,
+    calls: Arc<Mutex<ArtifactCalls>>,
+}
+
+impl ArtifactPersistence for RecordingArtifact {
+    fn exists(&self, _repository: &Path) -> bool {
+        self.exists
+    }
+
+    fn import(&self, repository: &Path, database: &Path) -> Result<(), PortError> {
+        self.calls.lock().expect("artifact calls").imports.push((
+            repository.to_path_buf(),
+            database.to_path_buf(),
+            database.is_file(),
+        ));
+        if self.fail_import {
+            return Err(PortError::new(std::io::Error::other("import failed")));
+        }
+        Ok(())
+    }
+
+    fn export(&self, database: &Path, repository: &Path, project: &str) -> Result<(), PortError> {
+        self.calls.lock().expect("artifact calls").exports.push((
+            database.to_path_buf(),
+            repository.to_path_buf(),
+            project.to_owned(),
+        ));
+        if self.fail_export {
+            return Err(PortError::new(std::io::Error::other("export failed")));
+        }
+        Ok(())
+    }
+}
+
+fn recording_dependencies(
+    exists: bool,
+    fail_import: bool,
+    fail_export: bool,
+) -> (ServiceDependencies, Arc<Mutex<ArtifactCalls>>) {
+    let calls = Arc::new(Mutex::new(ArtifactCalls::default()));
+    let artifact = RecordingArtifact {
+        exists,
+        fail_import,
+        fail_export,
+        calls: Arc::clone(&calls),
+    };
+    (ServiceDependencies::new(Arc::new(artifact)), calls)
+}
 
 fn write_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("src")).expect("create source directory");
@@ -126,7 +191,7 @@ fn index_then_every_read_surface_paginates_and_reopens() {
     write_fixture(&repo);
     let database = temp.path().join("state/graph.db");
     let config = ServiceConfig::new(&database, &allowed).with_allowed_root(&allowed);
-    let services = Services::new(config.clone());
+    let services = Services::new(config.clone(), service_dependencies());
 
     let events = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&events);
@@ -150,7 +215,7 @@ fn index_then_every_read_surface_paginates_and_reopens() {
     let project = verify_read_surfaces(&services, &indexed);
 
     drop(services);
-    let reopened = Services::new(config);
+    let reopened = Services::new(config, service_dependencies());
     assert_eq!(
         reopened.list_projects().expect("reopened projects").len(),
         1
@@ -172,6 +237,7 @@ fn project_name_override_is_sanitized_and_persisted() {
     write_fixture(&repo);
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        service_dependencies(),
     );
 
     let indexed = services
@@ -203,6 +269,7 @@ fn allowed_root_unknown_project_and_cancellation_are_typed() {
     write_fixture(&outside);
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        service_dependencies(),
     );
 
     let outside_error = services
@@ -235,6 +302,7 @@ fn structural_edits_refresh_source_graph_and_reject_stale_or_existing_targets() 
     write_fixture(&repo);
     let services = Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+        service_dependencies(),
     );
     let indexed = services
         .index_repository(&IndexRepositoryRequest::new(&repo))
@@ -299,4 +367,57 @@ fn structural_edits_refresh_source_graph_and_reject_stale_or_existing_targets() 
         })
         .expect_err("existing destination must fail");
     assert_eq!(existing.code(), ServiceErrorCode::Conflict);
+}
+
+#[test]
+fn artifact_import_is_best_effort_before_store_open_and_existing_artifact_is_refreshed() {
+    let temp = TempDir::new().expect("temp dir");
+    let repo = temp.path().join("fixture");
+    let database = temp.path().join("state/graph.db");
+    write_fixture(&repo);
+    let (dependencies, calls) = recording_dependencies(true, true, false);
+    let services = Services::new(
+        ServiceConfig::new(&database, temp.path()).with_allowed_root(temp.path()),
+        dependencies,
+    );
+
+    let indexed = services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("best-effort import must not block indexing");
+
+    let resolved_repo = fs::canonicalize(&repo).expect("canonical repository");
+    let calls = calls.lock().expect("artifact calls");
+    assert_eq!(calls.imports.len(), 1);
+    assert_eq!(
+        calls.imports[0],
+        (resolved_repo.clone(), database.clone(), false)
+    );
+    assert_eq!(calls.exports.len(), 1);
+    assert_eq!(calls.exports[0].0, database);
+    assert_eq!(calls.exports[0].1, resolved_repo);
+    assert_eq!(calls.exports[0].2, indexed.project);
+}
+
+#[test]
+fn artifact_export_is_opt_in_and_failure_maps_to_storage() {
+    let temp = TempDir::new().expect("temp dir");
+    let repo = temp.path().join("fixture");
+    let database = temp.path().join("graph.db");
+    write_fixture(&repo);
+    let (dependencies, calls) = recording_dependencies(false, false, true);
+    let services = Services::new(
+        ServiceConfig::new(&database, temp.path()).with_allowed_root(temp.path()),
+        dependencies,
+    );
+
+    services
+        .index_repository(&IndexRepositoryRequest::new(&repo))
+        .expect("index without persistence");
+    assert!(calls.lock().expect("artifact calls").exports.is_empty());
+
+    let error = services
+        .index_repository(&IndexRepositoryRequest::new(&repo).with_persistence(true))
+        .expect_err("requested export failure must propagate");
+    assert_eq!(error.code(), ServiceErrorCode::Storage);
+    assert_eq!(calls.lock().expect("artifact calls").exports.len(), 1);
 }

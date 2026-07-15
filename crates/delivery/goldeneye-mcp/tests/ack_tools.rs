@@ -1,10 +1,16 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_mcp::server::Server;
-use goldeneye_services::{ServiceConfig, Services};
+use goldeneye_services::{ServiceConfig, ServiceDependencies, Services};
 use serde_json::{Value, json};
 use tempfile::TempDir;
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 fn fixture(root: &Path) {
     fs::create_dir_all(root.join("src")).expect("create fixture source");
@@ -28,6 +34,7 @@ fn fixture(root: &Path) {
 fn server(temp: &TempDir, allowed: &Path) -> Server {
     Server::new(Services::new(
         ServiceConfig::new(temp.path().join("graph.db"), allowed).with_allowed_root(allowed),
+        service_dependencies(),
     ))
 }
 

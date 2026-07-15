@@ -1,14 +1,15 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
+use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_services::{
     ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
     DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
     IndexRepositoryRequest, IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest,
     ManageAdrRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
     QueryGraphRequest, QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest,
-    SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
-    TracePathRequest,
+    SemanticSearchRequest, ServiceConfig, ServiceDependencies, ServiceError, ServiceErrorCode,
+    Services, TraceDirection, TracePathRequest,
 };
 use goldeneye_watcher::{ServiceIndexer, WatchRuntime, Watcher, WatcherConfig};
 use serde::de::DeserializeOwned;
@@ -21,6 +22,10 @@ use crate::tools::{ToolCallResult, ToolRegistry};
 pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
     ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 pub const LATEST_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
+
+fn service_dependencies() -> ServiceDependencies {
+    ServiceDependencies::new(Arc::new(FileArtifactPersistence))
+}
 
 fn negotiated_protocol_version(params: &Value) -> &'static str {
     params
@@ -71,7 +76,7 @@ impl Server {
     ///
     /// Returns a typed configuration error when service configuration cannot be resolved.
     pub fn from_env() -> Result<Self, ServiceError> {
-        Ok(Self::new(Services::from_env()?))
+        Ok(Self::new(Services::from_env(service_dependencies())?))
     }
 
     #[must_use]
@@ -683,7 +688,10 @@ impl Server {
 
 impl Default for Server {
     fn default() -> Self {
-        Self::new(Services::new(ServiceConfig::default()))
+        Self::new(Services::new(
+            ServiceConfig::default(),
+            service_dependencies(),
+        ))
     }
 }
 
@@ -1110,6 +1118,7 @@ mod tests {
         fs::write(repository.join("src/lib.rs"), "pub fn ready() {}\n").expect("source file");
         let server = Server::new(Services::new(
             ServiceConfig::new(temp.path().join("graph.db"), &allowed).with_allowed_root(&allowed),
+            super::service_dependencies(),
         ));
         let request = json!({
             "jsonrpc": "2.0",

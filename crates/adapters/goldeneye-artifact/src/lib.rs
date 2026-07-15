@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod port;
+
+pub use port::FileArtifactPersistence;
+
 pub const ARTIFACT_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_DIRECTORY: &str = ".codebase-memory";
 pub const ARTIFACT_FILENAME: &str = "graph.db.zst";

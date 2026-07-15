@@ -321,6 +321,7 @@ name = "goldeneye-artifact"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "goldeneye-ports",
  "rusqlite",
  "serde",
  "serde_json",
@@ -432,6 +433,7 @@ dependencies = [
 name = "goldeneye-http"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-artifact",
  "goldeneye-domain",
  "goldeneye-index",
  "goldeneye-mcp",
@@ -465,6 +467,7 @@ dependencies = [
 name = "goldeneye-mcp"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-artifact",
  "goldeneye-services",
  "goldeneye-watcher",
  "serde",
@@ -569,6 +572,7 @@ dependencies = [
 name = "goldeneye-watcher"
 version = "0.1.0"
 dependencies = [
+ "goldeneye-artifact",
  "goldeneye-domain",
  "goldeneye-services",
  "goldeneye-store",

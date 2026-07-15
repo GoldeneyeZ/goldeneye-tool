@@ -264,14 +264,18 @@ impl Services {
     /// # Errors
     ///
     /// Returns configuration, storage, authorization, or journal failures.
-    pub fn open(config: crate::ServiceConfig) -> Result<(Self, RecoveryReport), ServiceError> {
+    pub fn open(
+        config: crate::ServiceConfig,
+        dependencies: crate::ServiceDependencies,
+    ) -> Result<(Self, RecoveryReport), ServiceError> {
         if !config.database_path().is_file()
-            && goldeneye_artifact::artifact_exists(config.project_root())
+            && dependencies.artifact().exists(config.project_root())
         {
-            let _ =
-                goldeneye_artifact::import_artifact(config.project_root(), config.database_path());
+            let _ = dependencies
+                .artifact()
+                .import(config.project_root(), config.database_path());
         }
-        let services = Self::new(config);
+        let services = Self::new(config, dependencies);
         let recovery = services.recover_edits()?;
         Ok((services, recovery))
     }
