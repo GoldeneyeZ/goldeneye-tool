@@ -15,17 +15,17 @@
 
 ## Goal Phases
 
-- Implementation: pending
+- Implementation: active
 - Spec review: unchecked
 - Code quality: unchecked
 - Integration review: unchecked
-- Next action: Implement SUWB-1.
+- Next action: Complete SUWB-1 implementation.
 
 ## Task 1: Build immutable snapshot primitives
 
 - Path: `tasks/SUWB-1/`
-- Status: pending
-- Next action: Start implementation.
+- Status: implemented
+- Next action: Await plan-level spec review after remaining implementation tasks complete.
 
 ## Task 2: Enforce executable timing boundary and snapshot-aware runner
 

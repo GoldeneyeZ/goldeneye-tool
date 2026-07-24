@@ -151,7 +151,8 @@ Create configuration containing:
     "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
     "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
-    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache"
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
   },
   "task": {
     "id": "spring-stringutils-unicode-truncate",

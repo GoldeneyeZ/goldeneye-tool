@@ -127,11 +127,12 @@ export async function createReadySnapshot({
   liveCache,
   snapshotRoot,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   projectRoot,
   baseRef,
 }) {
   const source = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
-  const destination = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const destination = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   await assertNoWriterArtifacts(source);
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -150,10 +151,11 @@ export async function restoreReadySnapshot({
   snapshotRoot,
   liveCache,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   expectedProjectRoot,
   expectedBaseRef,
 }) {
-  const source = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const source = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   const destination = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
   const manifest = await readAndVerifyManifest(source, {
     expectedProjectRoot,

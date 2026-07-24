@@ -23,6 +23,7 @@
 - Stable live cache: `D:\Dev\IdeaProjects\.gab-cache\spring-stringutils-live`
 - Allowed cache root: `D:\Dev\IdeaProjects\.gab-cache`
 - Immutable snapshot: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots\spring-stringutils`
+- Allowed snapshot root: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots`
 - ACK repository: `D:\Dev\IdeaProjects\agent-context-kernel`
 - ACK entrypoint: `D:\Dev\IdeaProjects\agent-context-kernel\dist\main.js`
 - Goldeneye binary: `D:\Dev\IdeaProjects\goldeneye-tool\target\release\goldeneye.exe`
@@ -174,11 +175,12 @@ export async function createReadySnapshot({
   liveCache,
   snapshotRoot,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   projectRoot,
   baseRef,
 }) {
   const source = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
-  const destination = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const destination = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   await assertNoWriterArtifacts(source);
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -197,10 +199,11 @@ export async function restoreReadySnapshot({
   snapshotRoot,
   liveCache,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   expectedProjectRoot,
   expectedBaseRef,
 }) {
-  const source = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const source = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   const destination = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
   const manifest = await readAndVerifyManifest(source, {
     expectedProjectRoot,
@@ -349,7 +352,8 @@ Extend `core.test.mjs` with a config fixture containing:
     "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
     "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
-    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache"
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
   }
 }
 ```
@@ -381,6 +385,7 @@ Add `normalizeReadySnapshot(config, configPath)` to `core.mjs` and return:
   live_cache: path.resolve(ready.live_cache),
   allowed_worktree_root: path.resolve(ready.allowed_worktree_root),
   allowed_cache_root: path.resolve(ready.allowed_cache_root),
+  allowed_snapshot_root: path.resolve(ready.allowed_snapshot_root),
 }
 ```
 
@@ -657,7 +662,8 @@ Create configuration containing:
     "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
     "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
-    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache"
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
   },
   "task": {
     "id": "spring-stringutils-unicode-truncate",

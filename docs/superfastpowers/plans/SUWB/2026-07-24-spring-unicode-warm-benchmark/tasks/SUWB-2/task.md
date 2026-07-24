@@ -107,7 +107,8 @@ Extend `core.test.mjs` with a config fixture containing:
     "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
     "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
-    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache"
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
   }
 }
 ```
@@ -139,6 +140,7 @@ Add `normalizeReadySnapshot(config, configPath)` to `core.mjs` and return:
   live_cache: path.resolve(ready.live_cache),
   allowed_worktree_root: path.resolve(ready.allowed_worktree_root),
   allowed_cache_root: path.resolve(ready.allowed_cache_root),
+  allowed_snapshot_root: path.resolve(ready.allowed_snapshot_root),
 }
 ```
 
