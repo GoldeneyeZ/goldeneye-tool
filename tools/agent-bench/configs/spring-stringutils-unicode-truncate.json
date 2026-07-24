@@ -1,0 +1,53 @@
+{
+  "name": "spring-stringutils-unicode-truncate",
+  "repo": "D:\\Dev\\IdeaProjects\\spring-framework",
+  "base_ref": "daf955157871e4ac6f192e06b71d6cc595eb979b",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "repetitions": 3,
+  "cache_modes": ["warm"],
+  "java_home": "C:\\Users\\Zacha\\.jdks\\openjdk-17.0.2",
+  "gradle_user_home": "D:\\Dev\\Caches\\gradle-spring-framework-6.2",
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/spring-stringutils",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
+  },
+  "tasks": [
+    {
+      "id": "spring-stringutils-unicode-truncate",
+      "prompt_file": "../tasks/spring-stringutils-unicode-truncate.md",
+      "grader": {
+        "command": "pwsh",
+        "args": [
+          "-NoProfile",
+          "-File",
+          "../graders/spring-stringutils-unicode-truncate.ps1",
+          "-Worktree",
+          "{worktree}"
+        ]
+      },
+      "extensions": [".java"]
+    }
+  ],
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "cache_modes": ["warm"]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": ["none"]
+    }
+  ]
+}
