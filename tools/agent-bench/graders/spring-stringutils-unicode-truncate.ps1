@@ -10,6 +10,22 @@ $TestsRelativePath = "spring-core/src/test/java/org/springframework/util/StringU
 $HeldOutRelativePath = "spring-core/src/test/java/org/springframework/util/AgentBenchStringUtilsUnicodeTests.java"
 $ExitCode = 1
 
+function Get-CandidateDirtyFiles {
+	param([string]$Repository)
+	$tracked = @(& git -C $Repository diff --name-only --no-renames HEAD)
+	$untracked = @(& git -C $Repository ls-files --others --exclude-standard)
+	return @($tracked + $untracked | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Assert-AllowedCandidateFiles {
+	param([string]$Repository, [string[]]$AllowedFiles)
+	$actual = Get-CandidateDirtyFiles $Repository
+	$unexpected = Compare-Object -ReferenceObject $AllowedFiles -DifferenceObject $actual
+	if ($unexpected) {
+		throw "Protocol violation: candidate changes must be exactly $($AllowedFiles -join ', '); found $($actual -join ', ')"
+	}
+}
+
 try {
 	$Worktree = (Resolve-Path -LiteralPath $Worktree -ErrorAction Stop).Path
 	$SourcePath = Join-Path $Worktree $SourceRelativePath
@@ -22,15 +38,12 @@ try {
 		}
 	}
 
-	$ChangedFiles = @(& git -C $Worktree diff --name-only)
-	foreach ($required in @($SourceRelativePath, $TestsRelativePath)) {
-		if ($ChangedFiles -notcontains $required) {
-			throw "Protocol violation: expected candidate change to $required"
-		}
+	if (Test-Path -LiteralPath $HeldOutPath) {
+		throw "Held-out test collision: $HeldOutPath must be absent before grading"
 	}
+	$AllowedCandidateFiles = @($SourceRelativePath, $TestsRelativePath)
+	Assert-AllowedCandidateFiles $Worktree $AllowedCandidateFiles
 
-	$HadHeldOutFile = Test-Path -LiteralPath $HeldOutPath -PathType Leaf
-	$OriginalHeldOut = if ($HadHeldOutFile) { Get-Content -LiteralPath $HeldOutPath -Raw } else { $null }
 	try {
 		$HeldOutTest = @'
 package org.springframework.util;
@@ -76,12 +89,14 @@ class AgentBenchStringUtilsUnicodeTests {
 		$ExitCode = 0
 	}
 	finally {
-		if ($HadHeldOutFile) {
-			Set-Content -LiteralPath $HeldOutPath -Value $OriginalHeldOut -NoNewline -Encoding utf8
-		}
-		elseif (Test-Path -LiteralPath $HeldOutPath) {
+		if (Test-Path -LiteralPath $HeldOutPath) {
 			Remove-Item -LiteralPath $HeldOutPath -Force
 		}
+		$DiffCheckOutput = @(& git -C $Worktree diff --check HEAD 2>&1)
+		if ($LASTEXITCODE -ne 0) {
+			throw "Post-cleanup whitespace verification failed: $($DiffCheckOutput -join ' ')"
+		}
+		Assert-AllowedCandidateFiles $Worktree $AllowedCandidateFiles
 	}
 }
 catch {
