@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { scoreRunDurations, spawnWithTimer } from "./timing.mjs";
+import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./timing.mjs";
 
 test("spawn timer excludes pre-spawn maintenance and includes spawn callback work", () => {
   let now = 1_000;
@@ -29,4 +29,13 @@ test("scoreRunDurations keeps maintenance outside completion", () => {
       verified_e2e_ms: 120,
     },
   );
+});
+
+test("close-boundary duration excludes post-close artifact flushing", () => {
+  let now = 1_000;
+  const measured = spawnWithTimer(() => ({ pid: 42 }), () => now);
+  now += 25; // child exits
+  const durationAtClose = stopTimerAtClose(measured);
+  now += 400; // JSONL and stderr streams flush after child exit
+  assert.equal(durationAtClose, 25);
 });

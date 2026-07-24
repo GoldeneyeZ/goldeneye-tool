@@ -22,6 +22,7 @@ import {
   expandTokens,
   loadConfig,
   protocolViolationsForEngine,
+  resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
   shouldPrimeIndex,
@@ -36,7 +37,7 @@ import {
   restoreReadySnapshot,
   verifyReadySnapshot,
 } from "./agent-bench/snapshot.mjs";
-import { scoreRunDurations, spawnWithTimer } from "./agent-bench/timing.mjs";
+import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -329,7 +330,14 @@ async function executeRun(run, context) {
         expectedProjectRoot: worktree,
         expectedBaseRef: context.baseCommit,
       });
-      assertRepositoryAtBase(context.config.repo, context.baseCommit);
+      assertRepositoryAtBase(
+        resolveRepositoryGate({
+          sourceRepository: context.config.repo,
+          worktree,
+          usesReadySnapshot,
+        }),
+        context.baseCommit,
+      );
     }
 
     const setupStarted = performance.now();
@@ -692,14 +700,22 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     killProcessTree(child.pid);
   }, config.timeout_ms);
   const outcome = await new Promise((resolveOutcome) => {
-    child.on("error", (error) => resolveOutcome({ exitCode: null, error }));
-    child.on("close", (exitCode) => resolveOutcome({ exitCode, error: null }));
+    child.on("error", (error) => resolveOutcome({
+      durationMs: stopTimerAtClose(measured),
+      exitCode: null,
+      error,
+    }));
+    child.on("close", (exitCode) => resolveOutcome({
+      durationMs: stopTimerAtClose(measured),
+      exitCode,
+      error: null,
+    }));
   });
   clearTimeout(timer);
   lines.close();
   await Promise.all([closeStream(jsonlStream), closeStream(stderrStream)]);
   return {
-    duration_ms: measured.elapsedMs(),
+    duration_ms: outcome.durationMs,
     error: outcome.error ? errorMessage(outcome.error) : null,
     exit_code: outcome.exitCode,
     telemetry,

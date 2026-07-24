@@ -372,6 +372,10 @@ export function shouldPrimeIndex({ kind, usesReadySnapshot }) {
   return kind === "ack" && !usesReadySnapshot;
 }
 
+export function resolveRepositoryGate({ sourceRepository, worktree, usesReadySnapshot }) {
+  return usesReadySnapshot ? worktree : sourceRepository;
+}
+
 export function loadConfig(configPath) {
   const absolutePath = resolve(configPath);
   const base = dirname(absolutePath);

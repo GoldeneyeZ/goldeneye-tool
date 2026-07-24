@@ -12,6 +12,10 @@ export function spawnWithTimer(
   };
 }
 
+export function stopTimerAtClose(measured) {
+  return measured.elapsedMs();
+}
+
 export function scoreRunDurations({ maintenanceMs, wallMs, graderMs }) {
   return {
     maintenance_ms: maintenanceMs,

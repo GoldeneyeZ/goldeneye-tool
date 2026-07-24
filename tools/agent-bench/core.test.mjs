@@ -10,6 +10,7 @@ import {
   loadConfig,
   parseCodexJsonl,
   protocolViolationsForEngine,
+  resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
   shouldPrimeIndex,
@@ -292,6 +293,15 @@ test("ready snapshots use stable ACK paths and skip priming", () => {
     usesReadySnapshot: false,
   });
   assert.equal(shouldPrimeIndex({ kind: "vanilla", usesReadySnapshot: false }), false);
+
+  assert.equal(
+    resolveRepositoryGate({
+      sourceRepository: "D:\\Dev\\IdeaProjects\\spring-framework",
+      worktree: readySnapshot.worktree,
+      usesReadySnapshot: true,
+    }),
+    readySnapshot.worktree,
+  );
 });
 
 test("prepare-snapshot exits before spawning Codex", () => {
