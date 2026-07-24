@@ -14,7 +14,7 @@
     "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
     "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
-    "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
   },
   "tasks": [
     {

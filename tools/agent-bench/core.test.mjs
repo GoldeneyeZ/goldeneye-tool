@@ -230,7 +230,7 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
       live_cache: "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
       allowed_worktree_root: "D:\\Dev\\IdeaProjects\\.gab",
       allowed_cache_root: "D:\\Dev\\IdeaProjects\\.gab-cache",
-      allowed_snapshot_root: "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots",
+      allowed_snapshot_root: "../../target/agent-bench/snapshots",
     },
   };
   try {
@@ -239,13 +239,16 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
     assert.equal(normalized.ready_snapshot.root, resolve(directory, "../../target/agent-bench/snapshots/spring-stringutils"));
     assert.equal(normalized.ready_snapshot.worktree, resolve(config.ready_snapshot.worktree));
     assert.equal(normalized.ready_snapshot.live_cache, resolve(config.ready_snapshot.live_cache));
-    assert.equal(normalized.ready_snapshot.allowed_snapshot_root, resolve(config.ready_snapshot.allowed_snapshot_root));
+    assert.equal(
+      normalized.ready_snapshot.allowed_snapshot_root,
+      resolve(directory, config.ready_snapshot.allowed_snapshot_root),
+    );
 
     delete config.ready_snapshot.allowed_snapshot_root;
     writeFileSync(configPath, JSON.stringify(config));
     assert.throws(() => loadConfig(configPath), /ready_snapshot\.allowed_snapshot_root/);
 
-    config.ready_snapshot.allowed_snapshot_root = "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots";
+    config.ready_snapshot.allowed_snapshot_root = "../../target/agent-bench/snapshots";
     config.ready_snapshot.worktree = config.ready_snapshot.allowed_worktree_root;
     writeFileSync(configPath, JSON.stringify(config));
     assert.throws(() => loadConfig(configPath), /worktree must be a strict descendant/);

@@ -327,7 +327,7 @@ export function normalizeReadySnapshot(config, configPath) {
     live_cache: resolve(ready.live_cache),
     allowed_worktree_root: resolve(ready.allowed_worktree_root),
     allowed_cache_root: resolve(ready.allowed_cache_root),
-    allowed_snapshot_root: resolve(ready.allowed_snapshot_root),
+    allowed_snapshot_root: resolveFromConfig(configPath, ready.allowed_snapshot_root),
   };
   normalized.root = assertContainedPath(
     normalized.root,
