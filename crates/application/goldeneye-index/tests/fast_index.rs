@@ -222,6 +222,51 @@ fn initial_index_extracts_stable_multilanguage_graph() {
 }
 
 #[test]
+fn same_stem_different_extension_files_keep_distinct_file_identity() {
+    let temp = TempDir::new().expect("temp repo");
+    write(
+        temp.path(),
+        "src/shared.js",
+        "export const javascriptValue = 1;\n",
+    );
+    write(
+        temp.path(),
+        "src/shared.ts",
+        "export const typescriptValue: number = 2;\n",
+    );
+    let mut index = service(IndexOptions::default());
+    let result = index
+        .index_repository(temp.path())
+        .expect("project replacement");
+
+    assert_eq!(result.counts.files, 2);
+    let mut identities = Vec::new();
+    for path in ["src/shared.js", "src/shared.ts"] {
+        let file_node = nodes_for(&index, &result.project.id, path)
+            .into_iter()
+            .find(|node| node.label.as_str() == "File")
+            .expect("file node");
+        assert_eq!(
+            file_node
+                .file_path
+                .as_ref()
+                .map(ProjectRelativePath::as_str),
+            Some(path)
+        );
+        assert!(
+            file_node
+                .qualified_name
+                .as_str()
+                .starts_with("__file__.project.")
+        );
+        assert!(file_node.qualified_name.as_str().contains(".path."));
+        identities.push((file_node.id, file_node.qualified_name));
+    }
+    assert_ne!(identities[0].0, identities[1].0);
+    assert_ne!(identities[0].1, identities[1].1);
+}
+
+#[test]
 fn incremental_index_reconciles_changed_new_and_deleted_files() {
     let temp = TempDir::new().expect("temp repo");
     write(temp.path(), "src/change.rs", "fn old_name() {}\n");
@@ -568,8 +613,17 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         .expect("branch lookup")
         .expect("branch node");
     assert_eq!(branch.label.as_str(), "Branch");
+    let rust_file_qualified_name = nodes_for(&index, &result.project.id, "rust.rs")
+        .into_iter()
+        .find(|node| node.label.as_str() == "File")
+        .expect("Rust File node")
+        .qualified_name
+        .as_str()
+        .to_owned();
+    assert!(rust_file_qualified_name.starts_with("__file__.project."));
+    assert!(rust_file_qualified_name.contains(".path."));
     for qualified_name in [
-        format!("{prefix}.rust.__file__"),
+        rust_file_qualified_name,
         format!("{prefix}.rust.rust_leaf"),
         format!("{prefix}.python.py_leaf"),
         format!("{prefix}.javascript.js_leaf"),

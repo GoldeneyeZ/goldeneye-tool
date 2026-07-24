@@ -13,7 +13,7 @@ use calls::{
 };
 use classify::{Definition, Scope, ScopeKind, classify, gomod_requirement_name};
 use graph::{
-    graph_edge, graph_node, module_name, path_stem, project_node_id, qualified_segment,
+    file_qualified_name, graph_edge, graph_node, module_name, project_node_id, qualified_segment,
     source_span, stable_node_id,
 };
 

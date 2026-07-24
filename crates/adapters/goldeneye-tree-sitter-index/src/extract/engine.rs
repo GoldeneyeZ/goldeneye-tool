@@ -1,9 +1,9 @@
 use super::{
     BTreeMap, Definition, Extractor, GraphEdge, GraphNode, GraphProperties, IndexError, IndexMode,
     LanguageId, Node, NodeId, ProjectId, ProjectRelativePath, Scope, ScopeKind, SourceSpan,
-    SyntaxSnapshot, classify, embedded_es_imports, gomod_requirement_name, graph_edge, graph_node,
-    is_call, language_spec, last_identifier, module_name, node_text, path_stem, project_node_id,
-    receiver_type, source_span, stable_node_id,
+    SyntaxSnapshot, classify, embedded_es_imports, file_qualified_name, gomod_requirement_name,
+    graph_edge, graph_node, is_call, language_spec, last_identifier, module_name, node_text,
+    project_node_id, receiver_type, source_span, stable_node_id,
 };
 
 impl<'a> Extractor<'a> {
@@ -188,14 +188,13 @@ fn initial_graph(
     language: &LanguageId,
     root: Node<'_>,
 ) -> Result<InitialGraph, IndexError> {
-    let path_stem = path_stem(path);
     let module_name = module_name(path, language);
     let module_qualified_name = if module_name.is_empty() {
         project.as_str().to_owned()
     } else {
         format!("{}.{}", project.as_str(), module_name)
     };
-    let file_qualified_name = format!("{}.{}.__file__", project.as_str(), path_stem);
+    let file_qualified_name = file_qualified_name(project, path);
     let file_id = stable_node_id("File", &file_qualified_name)?;
     let root_span = source_span(root)?;
     let mut nodes = Vec::with_capacity(32);
@@ -324,4 +323,87 @@ fn named_module_graph(
             GraphProperties::new(),
         )?],
     ))
+}
+
+#[cfg(test)]
+mod replacement_tests {
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    use goldeneye_domain::{
+        ContentHash, FileId, FileRecord, Generation, LanguageId, ProjectId, ProjectRelativePath,
+    };
+    use goldeneye_ports::{IndexExtractionRequest as Candidate, IndexMode};
+    use goldeneye_syntax::CoreGrammarProvider;
+
+    use super::super::extract;
+
+    #[test]
+    fn same_stem_resource_file_nodes_are_replacement_safe() {
+        let project = ProjectId::new("spring.framework").expect("valid project");
+        let fixtures = [
+            (
+                "spring-beans/src/test/resources/org/springframework/beans/factory/annotation/AutowiredConfigurationTests-custom.properties",
+                "export const propertiesResource = true;\n",
+            ),
+            (
+                "spring-beans/src/test/resources/org/springframework/beans/factory/annotation/AutowiredConfigurationTests-custom.xml",
+                "export const xmlResource = true;\n",
+            ),
+        ];
+        let mut file_nodes = Vec::new();
+
+        for (raw_path, source) in fixtures {
+            let path = ProjectRelativePath::new(raw_path).expect("valid resource path");
+            let source = Arc::<[u8]>::from(source.as_bytes());
+            let byte_len = u64::try_from(source.len()).expect("fixture byte length");
+            let extracted = extract(
+                CoreGrammarProvider,
+                Candidate {
+                    record: FileRecord::new(
+                        FileId::new(project.clone(), path.clone()),
+                        ContentHash::of(source.as_ref()),
+                        Generation::new(0),
+                        0,
+                        byte_len,
+                    ),
+                    language: LanguageId::new("javascript").expect("valid language"),
+                    source,
+                },
+                IndexMode::Fast,
+            )
+            .expect("full resource extraction");
+            let file_node = extracted
+                .nodes
+                .into_iter()
+                .find(|node| node.label.as_str() == "File")
+                .expect("File node");
+            assert_eq!(
+                file_node
+                    .file_path
+                    .as_ref()
+                    .map(ProjectRelativePath::as_str),
+                Some(raw_path)
+            );
+            file_nodes.push(file_node);
+        }
+
+        assert_eq!(file_nodes.len(), 2);
+        assert_eq!(
+            file_nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            2
+        );
+        assert_eq!(
+            file_nodes
+                .iter()
+                .map(|node| node.qualified_name.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            2
+        );
+    }
 }
