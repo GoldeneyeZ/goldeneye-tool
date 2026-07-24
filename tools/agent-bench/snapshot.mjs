@@ -156,8 +156,15 @@ export async function readAndVerifyManifest(snapshotRoot, expected = {}) {
   return manifest;
 }
 
-export async function verifyReadySnapshot({ snapshotRoot, expected, expectedProjectRoot, expectedBaseRef }) {
-  const manifest = await readAndVerifyManifest(snapshotRoot, { expectedProjectRoot, expectedBaseRef });
+export async function verifyReadySnapshot({
+  snapshotRoot,
+  allowedSnapshotRoot,
+  expected,
+  expectedProjectRoot,
+  expectedBaseRef,
+}) {
+  const source = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
+  const manifest = await readAndVerifyManifest(source, { expectedProjectRoot, expectedBaseRef });
   if (expected && JSON.stringify(manifest) !== JSON.stringify(expected)) {
     throw new Error("snapshot manifest does not match expected manifest");
   }
@@ -168,11 +175,12 @@ export async function createReadySnapshot({
   liveCache,
   snapshotRoot,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   projectRoot,
   baseRef,
 }) {
   const source = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
-  const destination = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const destination = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   assertDisjointPaths(source, destination);
   await assertNoWriterArtifacts(source);
   await rm(destination, { recursive: true, force: true });
@@ -180,7 +188,11 @@ export async function createReadySnapshot({
   await copyTree(source, destination);
   const manifest = await buildManifest(destination, { projectRoot, baseRef });
   await writeFile(path.join(destination, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  await verifyReadySnapshot({ snapshotRoot: destination, expected: manifest });
+  await verifyReadySnapshot({
+    snapshotRoot: destination,
+    allowedSnapshotRoot,
+    expected: manifest,
+  });
   return manifest;
 }
 
@@ -188,10 +200,11 @@ export async function restoreReadySnapshot({
   snapshotRoot,
   liveCache,
   allowedCacheRoot,
+  allowedSnapshotRoot,
   expectedProjectRoot,
   expectedBaseRef,
 }) {
-  const source = assertContainedPath(snapshotRoot, allowedCacheRoot, "snapshot");
+  const source = assertContainedPath(snapshotRoot, allowedSnapshotRoot, "snapshot");
   const destination = assertContainedPath(liveCache, allowedCacheRoot, "live cache");
   assertDisjointPaths(source, destination);
   const manifest = await readAndVerifyManifest(source, { expectedProjectRoot, expectedBaseRef });

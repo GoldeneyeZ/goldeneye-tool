@@ -8,8 +8,9 @@ import * as snapshot from "./snapshot.mjs";
 async function makeFixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "agent-bench-snapshot-"));
   const allowedCacheRoot = path.join(root, "allowed-cache");
+  const allowedSnapshotRoot = path.join(root, "allowed-snapshots");
   const liveCache = path.join(allowedCacheRoot, "live-cache");
-  const snapshotRoot = path.join(allowedCacheRoot, "ready-snapshot");
+  const snapshotRoot = path.join(allowedSnapshotRoot, "ready-snapshot");
   await mkdir(path.join(liveCache, "ack-state"), { recursive: true });
   await writeFile(path.join(liveCache, "ack-state", "goldeneye.db"), "database-bytes");
   await writeFile(path.join(liveCache, "config.json"), "{\"cache\":true}\n");
@@ -17,6 +18,7 @@ async function makeFixture(t) {
   return {
     root,
     allowedCacheRoot,
+    allowedSnapshotRoot,
     liveCache,
     snapshotRoot,
     projectRoot: path.join(root, "stable-worktree"),
@@ -70,7 +72,11 @@ test("createReadySnapshot copies sorted bytes and writes a stable manifest", asy
       },
     ],
   });
-  await snapshot.verifyReadySnapshot({ snapshotRoot: fixture.snapshotRoot, expected: manifest });
+  await snapshot.verifyReadySnapshot({
+    snapshotRoot: fixture.snapshotRoot,
+    allowedSnapshotRoot: fixture.allowedSnapshotRoot,
+    expected: manifest,
+  });
   const saved = JSON.parse(await readFile(path.join(fixture.snapshotRoot, "snapshot-manifest.json"), "utf8"));
   assert.deepEqual(saved, manifest);
 });
@@ -83,6 +89,7 @@ test("restoreReadySnapshot makes independent live bytes and verifies manifest pa
     snapshotRoot: fixture.snapshotRoot,
     liveCache: fixture.liveCache,
     allowedCacheRoot: fixture.allowedCacheRoot,
+    allowedSnapshotRoot: fixture.allowedSnapshotRoot,
     expectedProjectRoot: fixture.projectRoot,
     expectedBaseRef: fixture.baseRef,
   });
@@ -121,16 +128,20 @@ test("createReadySnapshot rejects unsafe source entries and writer artifacts", a
   await assert.rejects(() => snapshot.createReadySnapshot(fixture), /unsafe filesystem entry/);
 });
 
-test("snapshot verification rejects changed snapshot bytes and outside paths before deletion", async (t) => {
+test("snapshot verification rejects changed bytes and wrong snapshot roots before mutation", async (t) => {
   const fixture = await makeFixture(t);
   const manifest = await snapshot.createReadySnapshot(fixture);
   await writeFile(path.join(fixture.snapshotRoot, "config.json"), "tampered");
   await assert.rejects(
-    () => snapshot.verifyReadySnapshot({ snapshotRoot: fixture.snapshotRoot, expected: manifest }),
+    () => snapshot.verifyReadySnapshot({
+      snapshotRoot: fixture.snapshotRoot,
+      allowedSnapshotRoot: fixture.allowedSnapshotRoot,
+      expected: manifest,
+    }),
     /changed file/,
   );
 
-  const outsideSnapshot = path.join(fixture.root, "outside-snapshot");
+  const outsideSnapshot = path.join(fixture.allowedCacheRoot, "outside-snapshot");
   await mkdir(outsideSnapshot);
   await writeFile(path.join(outsideSnapshot, "preserve.txt"), "must-survive");
   await assert.rejects(
@@ -138,4 +149,27 @@ test("snapshot verification rejects changed snapshot bytes and outside paths bef
     /strict descendant/,
   );
   assert.equal(await readFile(path.join(outsideSnapshot, "preserve.txt"), "utf8"), "must-survive");
+});
+
+test("restoreReadySnapshot rejects snapshot outside configured root before deleting live cache", async (t) => {
+  const fixture = await makeFixture(t);
+  const wrongSnapshotRoot = path.join(fixture.allowedCacheRoot, "wrong-snapshot");
+  await snapshot.createReadySnapshot({
+    ...fixture,
+    snapshotRoot: wrongSnapshotRoot,
+    allowedSnapshotRoot: fixture.allowedCacheRoot,
+  });
+  await writeFile(path.join(fixture.liveCache, "config.json"), "preserve-live-cache");
+  await assert.rejects(
+    () => snapshot.restoreReadySnapshot({
+      snapshotRoot: wrongSnapshotRoot,
+      liveCache: fixture.liveCache,
+      allowedCacheRoot: fixture.allowedCacheRoot,
+      allowedSnapshotRoot: fixture.allowedSnapshotRoot,
+      expectedProjectRoot: fixture.projectRoot,
+      expectedBaseRef: fixture.baseRef,
+    }),
+    /strict descendant/,
+  );
+  assert.equal(await readFile(path.join(fixture.liveCache, "config.json"), "utf8"), "preserve-live-cache");
 });
