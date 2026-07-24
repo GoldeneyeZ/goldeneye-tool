@@ -19,19 +19,19 @@
 - Spec review: unchecked
 - Code quality: unchecked
 - Integration review: unchecked
-- Next action: Complete SUWB-1 implementation.
+- Next action: Complete SUWB-2 implementation.
 
 ## Task 1: Build immutable snapshot primitives
 
 - Path: `tasks/SUWB-1/`
-- Status: implemented
-- Next action: Await plan-level spec review after remaining implementation tasks complete.
+- Status: implementing
+- Next action: Repair process-exit timing and scored-worktree verification.
 
 ## Task 2: Enforce executable timing boundary and snapshot-aware runner
 
 - Path: `tasks/SUWB-2/`
-- Status: pending
-- Next action: Wait for SUWB-1 implementation.
+- Status: implemented
+- Next action: Await plan-scoped reviews after all tasks are implemented.
 
 ## Task 3: Add Spring task, held-out grader, and benchmark configuration
 
