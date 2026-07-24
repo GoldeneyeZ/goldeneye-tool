@@ -321,12 +321,14 @@ test("prepare-snapshot exits before spawning Codex", () => {
   try {
     spawnSync("git", ["init", repo], { encoding: "utf8" });
     writeFileSync(join(repo, "README.md"), "ready\n");
+    writeFileSync(join(repo, "package-lock.json"), "{\"lockfileVersion\":3}\n");
     mkdirSync(join(repo, "dist"), { recursive: true });
     writeFileSync(
       fakeAck,
       `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "ready");\n`,
     );
     spawnSync("git", ["-C", repo, "add", "README.md"], { encoding: "utf8" });
+    spawnSync("git", ["-C", repo, "add", "package-lock.json"], { encoding: "utf8" });
     spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
     spawnSync(
       "git",

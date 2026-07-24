@@ -38,7 +38,12 @@ import {
   verifyReadySnapshot,
 } from "./agent-bench/snapshot.mjs";
 import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
-import { captureRepositoryProvenance, compareProvenance, sha256 } from "./agent-bench/provenance.mjs";
+import {
+  captureRepositoryProvenance,
+  compareProvenance,
+  selectDependencyLock,
+  sha256,
+} from "./agent-bench/provenance.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -391,7 +396,10 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
   const mainModule = (ackEngine.args ?? []).find((arg) => /(?:^|[\\/])dist[\\/]main\.js$/i.test(arg));
   if (!mainModule) throw new Error(`ACK engine ${ackEngine.id} must name dist/main.js in args`);
   const ackRoot = resolve(dirname(mainModule), "..");
-  const ack = captureRepositoryProvenance({ repo: ackRoot, selectedFiles: ["dist/main.js"] });
+  const ack = captureRepositoryProvenance({
+    repo: ackRoot,
+    selectedFiles: ["dist/main.js", selectDependencyLock(ackRoot)],
+  });
   const operationalFiles = [
     currentConfigPath,
     ...config.tasks.flatMap((task) => [
@@ -409,10 +417,7 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
   return {
     captured_at: new Date().toISOString(),
     candidate: {
-      goldeneye: {
-        repo_head: goldeneyeFull.repo_head,
-        selected_files: goldeneyeFull.selected_files,
-      },
+      goldeneye: goldeneyeFull,
       ack,
     },
     harness: {

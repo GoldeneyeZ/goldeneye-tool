@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const ZERO_SHA256 = "0".repeat(64);
@@ -33,6 +33,15 @@ export function captureRepositoryProvenance({ repo, selectedFiles = [] }) {
 export function compareProvenance(expected, observed) {
   const difference = firstDifference(expected, observed, "");
   return difference ?? { equal: true, field: null, expected: null, observed: null };
+}
+
+export function selectDependencyLock(repo) {
+  const root = path.resolve(repo);
+  for (const candidate of ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]) {
+    const absolute = path.join(root, candidate);
+    if (existsSync(absolute) && lstatSync(absolute).isFile()) return candidate;
+  }
+  throw new Error(`dependency lockfile missing in ${root}; expected package-lock.json, pnpm-lock.yaml, or yarn.lock`);
 }
 
 export function sha256(bytes) {

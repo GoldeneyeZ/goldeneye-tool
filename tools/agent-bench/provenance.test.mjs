@@ -4,7 +4,11 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { captureRepositoryProvenance, compareProvenance } from "./provenance.mjs";
+import {
+  captureRepositoryProvenance,
+  compareProvenance,
+  selectDependencyLock,
+} from "./provenance.mjs";
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -17,6 +21,7 @@ async function fixture(t) {
   await mkdir(path.join(repo, "target", "release"), { recursive: true });
   await writeFile(path.join(repo, "tracked.txt"), "base\n");
   await writeFile(path.join(repo, "dist", "main.js"), "console.log('base');\n");
+  await writeFile(path.join(repo, "package-lock.json"), "{\"lockfileVersion\":3}\n");
   await writeFile(path.join(repo, "target", "release", "goldeneye.exe"), "binary-v1");
   git(repo, ["init"]);
   git(repo, ["config", "user.email", "bench@example.test"]);
@@ -79,4 +84,35 @@ test("compareProvenance reports the first exact mismatched field", async (t) => 
     expected: baseline.repo_head,
     observed: changed.repo_head,
   });
+});
+
+test("Goldeneye candidate provenance rejects an unrelated tracked diff change", async (t) => {
+  const repo = await fixture(t);
+  const baseline = captureRepositoryProvenance({
+    repo,
+    selectedFiles: ["dist/main.js", "target/release/goldeneye.exe"],
+  });
+  await writeFile(path.join(repo, "tracked.txt"), "different-candidate-change\n");
+  const observed = captureRepositoryProvenance({
+    repo,
+    selectedFiles: ["dist/main.js", "target/release/goldeneye.exe"],
+  });
+  assert.equal(compareProvenance(baseline, observed).field, "tracked_diff_sha256");
+});
+
+test("ACK provenance selects deterministic dependency lock and rejects lock mutation", async (t) => {
+  const repo = await fixture(t);
+  assert.equal(selectDependencyLock(repo), "package-lock.json");
+  const selectedFiles = ["dist/main.js", selectDependencyLock(repo)];
+  const baseline = captureRepositoryProvenance({ repo, selectedFiles });
+  await writeFile(path.join(repo, "package-lock.json"), "{\"lockfileVersion\":4}\n");
+  const observed = captureRepositoryProvenance({ repo, selectedFiles });
+  const lockIndex = baseline.selected_files.findIndex((entry) => entry.path === "package-lock.json");
+  assert.equal(compareProvenance(baseline, observed).field, `selected_files[${lockIndex}].sha256`);
+});
+
+test("selectDependencyLock fails closed without a supported lockfile", async (t) => {
+  const repo = await fixture(t);
+  await rm(path.join(repo, "package-lock.json"));
+  assert.throws(() => selectDependencyLock(repo), /dependency lockfile/);
 });
