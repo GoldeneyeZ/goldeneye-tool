@@ -1375,6 +1375,11 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function tail(value, limit = 2_000) {
+  const text = String(value ?? "").trim();
+  return text.length > limit ? text.slice(-limit) : text;
+}
+
 function fail(message) {
   console.error(message);
   process.exit(1);

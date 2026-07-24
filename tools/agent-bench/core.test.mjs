@@ -361,6 +361,21 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(existsSync(codexMarker), false);
     assert.equal(existsSync(join(ready.root, "snapshot-manifest.json")), true);
     assert.equal(JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8")).snapshot.restore_verified, true);
+
+    writeFileSync(fakeAck, "process.stderr.write('intentional ACK failure'); process.exit(5);\n");
+    spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
+    spawnSync(
+      "git",
+      ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fail ack"],
+      { encoding: "utf8" },
+    );
+    const failure = spawnSync(
+      process.execPath,
+      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
+      { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
+    );
+    assert.notEqual(failure.status, 0);
+    assert.match(failure.stderr, /ACK init failed: intentional ACK failure/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
