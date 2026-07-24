@@ -22,6 +22,34 @@ fn write(root: &Path, path: &str, source: &str) {
     fs::write(path, source).expect("write fixture");
 }
 
+fn write_normalized_core_fixture(root: &Path) {
+    write(
+        root,
+        "rust.rs",
+        "struct Point;\nfn rust_leaf() {}\nfn rust_caller() { rust_leaf(); }\n",
+    );
+    write(
+        root,
+        "python.py",
+        "class Dog:\n    pass\ndef py_leaf():\n    pass\ndef py_caller():\n    py_leaf()\n",
+    );
+    write(
+        root,
+        "javascript.js",
+        "class Counter {}\nfunction js_leaf() {}\nfunction js_caller() { js_leaf(); }\n",
+    );
+    write(
+        root,
+        "typescript.ts",
+        "interface Runner {}\nclass Service {}\nfunction ts_leaf(): void {}\nfunction ts_caller(): void { ts_leaf(); }\n",
+    );
+    write(
+        root,
+        "go.go",
+        "package main\ntype Server struct {}\nfunc goLeaf() {}\nfunc goCaller() { goLeaf() }\n",
+    );
+}
+
 fn remove(root: &Path, path: &str) {
     fs::remove_file(root.join(path)).expect("remove fixture");
 }
@@ -48,6 +76,20 @@ fn nodes_for(
         .repository()
         .nodes_for_file(&file)
         .expect("nodes for fixture")
+}
+
+fn file_qualified_name_for(
+    service: &IndexService<Store>,
+    project: &goldeneye_domain::ProjectId,
+    path: &str,
+) -> String {
+    nodes_for(service, project, path)
+        .into_iter()
+        .find(|node| node.label.as_str() == "File")
+        .expect("File node")
+        .qualified_name
+        .as_str()
+        .to_owned()
 }
 
 fn graph_snapshot(
@@ -566,31 +608,7 @@ fn bounds_and_cancellation_abort_before_registration() {
 #[test]
 fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
     let temp = TempDir::new().expect("temp repo");
-    write(
-        temp.path(),
-        "rust.rs",
-        "struct Point;\nfn rust_leaf() {}\nfn rust_caller() { rust_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "python.py",
-        "class Dog:\n    pass\ndef py_leaf():\n    pass\ndef py_caller():\n    py_leaf()\n",
-    );
-    write(
-        temp.path(),
-        "javascript.js",
-        "class Counter {}\nfunction js_leaf() {}\nfunction js_caller() { js_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "typescript.ts",
-        "interface Runner {}\nclass Service {}\nfunction ts_leaf(): void {}\nfunction ts_caller(): void { ts_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "go.go",
-        "package main\ntype Server struct {}\nfunc goLeaf() {}\nfunc goCaller() { goLeaf() }\n",
-    );
+    write_normalized_core_fixture(temp.path());
     let mut index = service(IndexOptions::default());
     let result = index.index_repository(temp.path()).expect("index");
     let prefix = result.project.id.as_str();
@@ -613,13 +631,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         .expect("branch lookup")
         .expect("branch node");
     assert_eq!(branch.label.as_str(), "Branch");
-    let rust_file_qualified_name = nodes_for(&index, &result.project.id, "rust.rs")
-        .into_iter()
-        .find(|node| node.label.as_str() == "File")
-        .expect("Rust File node")
-        .qualified_name
-        .as_str()
-        .to_owned();
+    let rust_file_qualified_name = file_qualified_name_for(&index, &result.project.id, "rust.rs");
     assert!(rust_file_qualified_name.starts_with("__file__.project."));
     assert!(rust_file_qualified_name.contains(".path."));
     for qualified_name in [
