@@ -1,0 +1,23 @@
+import { performance } from "node:perf_hooks";
+
+export function spawnWithTimer(
+  spawnFn,
+  now = performance.now.bind(performance),
+) {
+  const startedAt = now();
+  const child = spawnFn();
+  return {
+    child,
+    elapsedMs: () => now() - startedAt,
+  };
+}
+
+export function scoreRunDurations({ maintenanceMs, wallMs, graderMs }) {
+  return {
+    maintenance_ms: maintenanceMs,
+    wall_ms: wallMs,
+    grader_ms: graderMs,
+    completion_ms: wallMs,
+    verified_e2e_ms: wallMs + graderMs,
+  };
+}
