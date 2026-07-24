@@ -1,6 +1,7 @@
-use goldeneye_bootstrap::BootstrapRuntime;
+use goldeneye_bootstrap::{BootstrapRuntime, quiesce_database};
 use goldeneye_mcp::server::Server;
 use goldeneye_mcp::transport::FrameReader;
+use goldeneye_services::ServiceConfig;
 use std::io::{BufReader, BufWriter, Read, Write};
 
 /// Runs one MCP session until the input reaches EOF.
@@ -13,8 +14,14 @@ pub fn run_session<R: Read, W: Write>(
     reader: R,
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let database_path = ServiceConfig::from_env()?.database_path().to_path_buf();
     let server = Server::from_env()?;
-    run_session_with_server(reader, writer, &server)
+    let session = run_session_with_server(reader, writer, &server);
+    drop(server);
+    let quiescence = quiesce_database(&database_path);
+    session?;
+    quiescence?;
+    Ok(())
 }
 
 /// Runs one MCP session against an injected production runtime until EOF.
