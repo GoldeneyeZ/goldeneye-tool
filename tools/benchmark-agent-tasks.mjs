@@ -33,8 +33,11 @@ import {
 } from "./agent-bench/core.mjs";
 import {
   assertNoWriterArtifacts,
+  buildManifest,
+  copyRegularTree,
   createReadySnapshot,
   restoreReadySnapshot,
+  verifyTreeAgainstManifest,
   verifyReadySnapshot,
 } from "./agent-bench/snapshot.mjs";
 import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
@@ -183,7 +186,7 @@ if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("
     );
     preparation.completed_at = new Date().toISOString();
   } catch (error) {
-    preparation ??= { schema_version: 1, gates: [], provenance: null, snapshot: null };
+    preparation ??= error.preparation ?? { schema_version: 1, gates: [], provenance: null, snapshot: null };
     preparation.eligible_for_scoring = false;
     preparation.error = errorMessage(error);
     preparation.completed_at = new Date().toISOString();
@@ -355,6 +358,30 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
         restore_verified: true,
       },
     };
+  } catch (error) {
+    recordGate(gates, "ack_initialize", {
+      expected: { exit_code: 0 },
+      observed: error.initializer ?? errorMessage(error),
+      passed: false,
+    });
+    const failureEvidence = await preservePreparationFailure({
+      baseCommit,
+      config,
+      error,
+      liveCache: readySnapshot.live_cache,
+      provenance,
+      worktree: readySnapshot.worktree,
+    });
+    error.preparation = {
+      schema_version: 1,
+      prepared_at: new Date().toISOString(),
+      preparation_ms: performance.now() - startedAt,
+      provenance,
+      gates,
+      snapshot: null,
+      failure_evidence: failureEvidence,
+    };
+    throw error;
   } finally {
     removeWorktreeIfRegistered(
       config.repo,
@@ -363,6 +390,72 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
     );
     rmIfInside(readySnapshot.live_cache, readySnapshot.allowed_cache_root);
   }
+}
+
+async function preservePreparationFailure({ baseCommit, config, error, liveCache, provenance, worktree }) {
+  const root = join(resolvePreparationArtifacts(config).root, "failure", timestamp());
+  mkdirSync(root, { recursive: true });
+  const resolvedConfig = writeFailureEvidenceFile(root, "resolved-config.json", `${JSON.stringify(config, null, 2)}\n`);
+  const provenanceArtifact = writeFailureEvidenceFile(root, "provenance.json", `${JSON.stringify(provenance, null, 2)}\n`);
+  const errorArtifact = writeFailureEvidenceFile(root, "error.txt", `${errorMessage(error)}\n`);
+  const initializer = preserveInitializerEvidence(root, error.initializer);
+  let liveCacheEvidence = null;
+  if (existsSync(liveCache)) {
+    const copiedCache = join(root, "live-cache");
+    mkdirSync(copiedCache, { recursive: true });
+    await copyRegularTree(liveCache, copiedCache);
+    const manifest = await buildManifest(copiedCache, { projectRoot: worktree, baseRef: baseCommit });
+    await verifyTreeAgainstManifest(copiedCache, manifest);
+    const manifestArtifact = writeFailureEvidenceFile(
+      root,
+      "live-cache-manifest.json",
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+    liveCacheEvidence = {
+      path: copiedCache,
+      copy_mode: "copyFile",
+      file_count: manifest.file_count,
+      byte_count: manifest.byte_count,
+      manifest: manifestArtifact,
+    };
+  }
+  return {
+    directory: root,
+    resolved_config: resolvedConfig,
+    provenance: provenanceArtifact,
+    error: errorArtifact,
+    initializer,
+    live_cache: liveCacheEvidence,
+  };
+}
+
+function preserveInitializerEvidence(root, initializer) {
+  if (!initializer) return null;
+  const stdout = writeFailureEvidenceFile(root, "ack-init.stdout.log", initializer.stdout ?? "");
+  const stderr = writeFailureEvidenceFile(root, "ack-init.stderr.log", initializer.stderr ?? "");
+  const metadata = writeFailureEvidenceFile(
+    root,
+    "ack-init.json",
+    `${JSON.stringify({
+      exit_code: initializer.exit_code,
+      duration_ms: initializer.duration_ms,
+      error: initializer.error,
+    }, null, 2)}\n`,
+  );
+  return {
+    exit_code: initializer.exit_code,
+    duration_ms: initializer.duration_ms,
+    stdout,
+    stderr,
+    metadata,
+  };
+}
+
+function writeFailureEvidenceFile(root, name, contents) {
+  const path = join(root, name);
+  const bytes = Buffer.isBuffer(contents) ? contents : Buffer.from(String(contents));
+  writeFileSync(path, bytes);
+  return { path, bytes: bytes.length, sha256: sha256(bytes) };
 }
 
 function resolvePreparationArtifacts(config) {
@@ -975,6 +1068,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
 }
 
 async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
+  const startedAt = performance.now();
   const child = spawn(engine.command, [...engine.args, "init", worktree], {
     cwd: worktree,
     env: processEnvironment(engine),
@@ -982,17 +1076,29 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = "";
-  child.stdout.on("data", (chunk) => { output += chunk; });
-  child.stderr.on("data", (chunk) => { output += chunk; });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
   const timer = setTimeout(() => killProcessTree(child.pid), timeoutMs);
   const outcome = await new Promise((resolveOutcome) => {
     child.on("error", (error) => resolveOutcome({ error, exitCode: null }));
     child.on("close", (exitCode) => resolveOutcome({ error: null, exitCode }));
   });
   clearTimeout(timer);
+  const initializer = {
+    exit_code: outcome.exitCode,
+    duration_ms: performance.now() - startedAt,
+    error: outcome.error ? errorMessage(outcome.error) : null,
+    stdout,
+    stderr,
+  };
   if (outcome.error || outcome.exitCode !== 0) {
-    throw new Error(`ACK init failed: ${outcome.error ? errorMessage(outcome.error) : tail(output)}`);
+    const error = new Error(
+      `ACK init failed: ${outcome.error ? errorMessage(outcome.error) : tail(`${stdout}${stderr}`)}`,
+    );
+    error.initializer = initializer;
+    throw error;
   }
   const descendants = processChildren(child.pid);
   if (descendants.length > 0) {

@@ -70,7 +70,7 @@ export async function assertNoWriterArtifacts(root) {
   }
 }
 
-async function copyTree(source, destination, { exclude = [] } = {}) {
+export async function copyRegularTree(source, destination, { exclude = [] } = {}) {
   const excluded = new Set(exclude);
   const entries = await collectRegularFiles(source);
   for (const { absolute, relative } of entries) {
@@ -185,7 +185,7 @@ export async function createReadySnapshot({
   await assertNoWriterArtifacts(source);
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
-  await copyTree(source, destination);
+  await copyRegularTree(source, destination);
   const manifest = await buildManifest(destination, { projectRoot, baseRef });
   await writeFile(path.join(destination, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   await verifyReadySnapshot({
@@ -210,7 +210,7 @@ export async function restoreReadySnapshot({
   const manifest = await readAndVerifyManifest(source, { expectedProjectRoot, expectedBaseRef });
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
-  await copyTree(source, destination, { exclude: [MANIFEST_FILE] });
+  await copyRegularTree(source, destination, { exclude: [MANIFEST_FILE] });
   await verifyTreeAgainstManifest(destination, manifest);
   return manifest;
 }

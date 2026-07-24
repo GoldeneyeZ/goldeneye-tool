@@ -362,7 +362,10 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(existsSync(join(ready.root, "snapshot-manifest.json")), true);
     assert.equal(JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8")).snapshot.restore_verified, true);
 
-    writeFileSync(fakeAck, "process.stderr.write('intentional ACK failure'); process.exit(5);\n");
+    writeFileSync(
+      fakeAck,
+      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "partial-config");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "partial-db");\nprocess.stdout.write('partial stdout');\nprocess.stderr.write('intentional ACK failure');\nprocess.exit(5);\n`,
+    );
     spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
     spawnSync(
       "git",
@@ -375,7 +378,26 @@ test("prepare-snapshot exits before spawning Codex", () => {
       { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
     );
     assert.notEqual(failure.status, 0);
-    assert.match(failure.stderr, /ACK init failed: intentional ACK failure/);
+    assert.match(failure.stderr, /intentional ACK failure/);
+    const preparation = JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8"));
+    assert.equal(preparation.eligible_for_scoring, false);
+    assert.ok(preparation.provenance);
+    assert.ok(preparation.failure_evidence);
+    assert.equal(preparation.failure_evidence.initializer.exit_code, 5);
+    for (const entry of [
+      preparation.failure_evidence.initializer.stdout,
+      preparation.failure_evidence.initializer.stderr,
+      preparation.failure_evidence.initializer.metadata,
+      preparation.failure_evidence.resolved_config,
+      preparation.failure_evidence.provenance,
+      preparation.failure_evidence.live_cache.manifest,
+    ]) {
+      assert.equal(existsSync(entry.path), true, entry.path);
+      assert.match(entry.sha256, /^[a-f0-9]{64}$/);
+    }
+    assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "ack-state", "projects.json")), true);
+    assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "goldeneye.db")), true);
+    assert.equal(existsSync(join(ready.root, "failure")), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
