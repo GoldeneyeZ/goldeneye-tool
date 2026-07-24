@@ -38,6 +38,7 @@ import {
   verifyReadySnapshot,
 } from "./agent-bench/snapshot.mjs";
 import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
+import { captureRepositoryProvenance, compareProvenance, sha256 } from "./agent-bench/provenance.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -61,6 +62,8 @@ Options:
   --skip-build              use the existing Goldeneye release binary
   --dry-run                 validate and print the matrix only
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
+  --verify-only             validate frozen candidate, source, and snapshot without Codex
+  --smoke                   run one unscored ACK candidate and held-out grader
   --keep-worktrees          keep agent worktrees
   --keep-caches             keep MCP caches
 `);
@@ -143,18 +146,47 @@ if (!flags.has("--skip-build") && config.engines.some((engine) => engine.id === 
   runChecked("cargo", ["build", "--release", "-p", "goldeneye"], workspace);
 }
 
-if (flags.has("--prepare-snapshot")) {
-  const preparation = await prepareReadySnapshot({
-    baseCommit,
-    config,
-    repoName,
-  });
-  const preparationPath = resolve(
-    config.preparation_output ?? join(dirname(config.output), "preparation.json"),
-  );
-  persistReport(preparationPath, preparation);
-  console.log(`Ready snapshot prepared: ${preparationPath}`);
-  process.exit(0);
+if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("--smoke")) {
+  const artifacts = resolvePreparationArtifacts(config);
+  let preparation = flags.has("--prepare-snapshot")
+    ? await prepareReadySnapshot({ baseCommit, config, repoName })
+    : readPreparation(artifacts.preparation);
+  try {
+    if (flags.has("--verify-only")) {
+      preparation.verification = await verifyPreparedSnapshot({
+        baseCommit,
+        config,
+        expectedCandidate: preparation.provenance?.candidate ?? null,
+      });
+    }
+    if (flags.has("--smoke")) {
+      preparation.smoke = await runSmoke({
+        artifacts,
+        baseCommit,
+        config,
+        expectedCandidate: preparation.provenance?.candidate ?? null,
+        repoName,
+      });
+    }
+    preparation.eligible_for_scoring = Boolean(
+      preparation.snapshot?.restore_verified &&
+      preparation.smoke?.success &&
+      preparation.smoke?.snapshot_unchanged &&
+      preparation.smoke?.candidate_unchanged &&
+      preparation.smoke?.source_repository_clean,
+    );
+    preparation.completed_at = new Date().toISOString();
+  } catch (error) {
+    preparation.eligible_for_scoring = false;
+    preparation.error = errorMessage(error);
+    preparation.completed_at = new Date().toISOString();
+    persistReport(artifacts.preparation, preparation);
+    throw error;
+  }
+  if (preparation.provenance) persistReport(artifacts.provenance, preparation.provenance);
+  persistReport(artifacts.preparation, preparation);
+  console.log(`Preparation gates: ${preparation.eligible_for_scoring ? "ELIGIBLE" : "NOT ELIGIBLE"} ${artifacts.preparation}`);
+  process.exit(preparation.eligible_for_scoring || !flags.has("--smoke") ? 0 : 1);
 }
 
 mkdirSync(runRoot, { recursive: true });
@@ -216,7 +248,19 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
   if (!ackEngine) throw new Error("--prepare-snapshot requires an ACK engine");
 
   const startedAt = performance.now();
+  const provenance = captureBenchmarkProvenance({ config, configPath });
+  const gates = [];
+  recordGate(gates, "candidate_preparation_start", {
+    expected: provenance.candidate,
+    observed: provenance.candidate,
+    passed: true,
+  });
   assertRepositoryAtBase(config.repo, baseCommit);
+  recordGate(gates, "source_repository_at_base_before_prepare", {
+    expected: baseCommit,
+    observed: baseCommit,
+    passed: true,
+  });
   removeWorktreeIfRegistered(
     config.repo,
     readySnapshot.worktree,
@@ -256,17 +300,52 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       expectedProjectRoot: readySnapshot.worktree,
       expectedBaseRef: baseCommit,
     });
+    await restoreReadySnapshot({
+      snapshotRoot: readySnapshot.root,
+      liveCache: readySnapshot.live_cache,
+      allowedCacheRoot: readySnapshot.allowed_cache_root,
+      allowedSnapshotRoot: readySnapshot.allowed_snapshot_root,
+      expectedProjectRoot: readySnapshot.worktree,
+      expectedBaseRef: baseCommit,
+    });
+    await verifyReadySnapshot({
+      snapshotRoot: readySnapshot.root,
+      allowedSnapshotRoot: readySnapshot.allowed_snapshot_root,
+      expected: manifest,
+      expectedProjectRoot: readySnapshot.worktree,
+      expectedBaseRef: baseCommit,
+    });
+    recordGate(gates, "snapshot_create_restore_verify", {
+      expected: manifest,
+      observed: manifest,
+      passed: true,
+    });
+    assertRepositoryAtBase(config.repo, baseCommit);
+    const after = captureBenchmarkProvenance({ config, configPath });
+    assertCandidateUnchanged(provenance.candidate, after.candidate, "post-preparation");
+    recordGate(gates, "candidate_post_preparation", {
+      expected: provenance.candidate,
+      observed: after.candidate,
+      passed: true,
+    });
+    recordGate(gates, "source_repository_at_base_after_prepare", {
+      expected: baseCommit,
+      observed: baseCommit,
+      passed: true,
+    });
     return {
+      schema_version: 1,
       prepared_at: new Date().toISOString(),
       preparation_ms: performance.now() - startedAt,
-      provenance: null,
+      provenance,
+      gates,
       snapshot: {
         manifest_sha256: createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
         file_count: manifest.file_count,
         byte_count: manifest.byte_count,
         project_root: manifest.project_root,
         base_ref: manifest.base_ref,
-        restore_verified: false,
+        restore_verified: true,
       },
     };
   } finally {
@@ -277,6 +356,171 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
     );
     rmIfInside(readySnapshot.live_cache, readySnapshot.allowed_cache_root);
   }
+}
+
+function resolvePreparationArtifacts(config) {
+  const root = resolve(
+    config.artifact_root ?? (config.name
+      ? join(workspace, "target", "agent-bench", config.name)
+      : dirname(config.output)),
+  );
+  return {
+    root,
+    preparation: resolve(config.preparation_output ?? join(root, "preparation.json")),
+    provenance: resolve(config.provenance_output ?? join(root, "provenance.json")),
+  };
+}
+
+function readPreparation(path) {
+  if (!existsSync(path)) throw new Error(`Preparation artifact not found: ${path}`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
+  const goldeneyeFull = captureRepositoryProvenance({
+    repo: workspace,
+    selectedFiles: [
+      "crates/application/goldeneye-query/src/engine/search.rs",
+      "target/release/goldeneye.exe",
+    ],
+  });
+  const ackEngine = config.engines.find((engine) => engine.kind === "ack");
+  if (!ackEngine) throw new Error("Candidate provenance requires an ACK engine");
+  const mainModule = (ackEngine.args ?? []).find((arg) => /(?:^|[\\/])dist[\\/]main\.js$/i.test(arg));
+  if (!mainModule) throw new Error(`ACK engine ${ackEngine.id} must name dist/main.js in args`);
+  const ackRoot = resolve(dirname(mainModule), "..");
+  const ack = captureRepositoryProvenance({ repo: ackRoot, selectedFiles: ["dist/main.js"] });
+  const operationalFiles = [
+    currentConfigPath,
+    ...config.tasks.flatMap((task) => [
+      task.prompt_file,
+      ...(task.grader?.args ?? []).filter((arg) => /\.(?:mjs|cjs|js|ps1)$/i.test(arg)),
+    ]),
+  ].map((file) => resolve(file));
+  const harnessFiles = [
+    "tools/benchmark-agent-tasks.mjs",
+    "tools/agent-bench/core.mjs",
+    "tools/agent-bench/snapshot.mjs",
+    "tools/agent-bench/timing.mjs",
+    "tools/agent-bench/provenance.mjs",
+  ];
+  return {
+    captured_at: new Date().toISOString(),
+    candidate: {
+      goldeneye: {
+        repo_head: goldeneyeFull.repo_head,
+        selected_files: goldeneyeFull.selected_files,
+      },
+      ack,
+    },
+    harness: {
+      repository: captureRepositoryProvenance({ repo: workspace, selectedFiles: harnessFiles }),
+      goldeneye_worktree: goldeneyeFull,
+      operational_files: operationalFiles
+        .sort()
+        .map((file) => ({ path: file, bytes: statSync(file).size, sha256: sha256(readFileSync(file)) })),
+    },
+  };
+}
+
+function assertCandidateUnchanged(expected, observed, phase) {
+  const comparison = compareProvenance(expected, observed);
+  if (!comparison.equal) {
+    throw new Error(
+      `candidate provenance mismatch ${phase}: ${comparison.field}; expected=${JSON.stringify(comparison.expected)} observed=${JSON.stringify(comparison.observed)}`,
+    );
+  }
+  return comparison;
+}
+
+function recordGate(gates, name, { expected, observed, passed, duration_ms = 0 }) {
+  gates.push({
+    name,
+    passed,
+    expected,
+    observed,
+    duration_ms,
+    observed_at: new Date().toISOString(),
+  });
+}
+
+async function verifyPreparedSnapshot({ baseCommit, config, expectedCandidate }) {
+  const startedAt = performance.now();
+  if (!config.ready_snapshot) throw new Error("--verify-only requires ready_snapshot configuration");
+  assertRepositoryAtBase(config.repo, baseCommit);
+  const observed = captureBenchmarkProvenance({ config, configPath });
+  if (expectedCandidate) assertCandidateUnchanged(expectedCandidate, observed.candidate, "verify-only");
+  const manifest = await verifyReadySnapshot({
+    snapshotRoot: config.ready_snapshot.root,
+    allowedSnapshotRoot: config.ready_snapshot.allowed_snapshot_root,
+    expectedProjectRoot: config.ready_snapshot.worktree,
+    expectedBaseRef: baseCommit,
+  });
+  return {
+    verified_at: new Date().toISOString(),
+    duration_ms: performance.now() - startedAt,
+    source_repository_clean: true,
+    candidate_unchanged: true,
+    snapshot: {
+      manifest_sha256: sha256(JSON.stringify(manifest)),
+      file_count: manifest.file_count,
+      byte_count: manifest.byte_count,
+      project_root: manifest.project_root,
+      base_ref: manifest.base_ref,
+    },
+  };
+}
+
+async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repoName }) {
+  const readySnapshot = config.ready_snapshot;
+  if (!readySnapshot) throw new Error("--smoke requires ready_snapshot configuration");
+  const task = config.tasks.at(0);
+  const engine = config.engines.find((entry) => entry.kind === "ack");
+  if (!task || !engine) throw new Error("--smoke requires one task and an ACK engine");
+
+  const preSmoke = captureBenchmarkProvenance({ config, configPath });
+  if (expectedCandidate) assertCandidateUnchanged(expectedCandidate, preSmoke.candidate, "pre-smoke");
+  const verified = await verifyPreparedSnapshot({ baseCommit, config, expectedCandidate: preSmoke.candidate });
+  const smokeRoot = resolve(artifacts.root, "smoke", timestamp());
+  const result = await executeRun(
+    {
+      id: `smoke-${task.id}-${engine.id}`,
+      task,
+      engine,
+      cacheMode: "warm",
+      repetition: 0,
+    },
+    {
+      baseCommit,
+      cacheRoot: readySnapshot.allowed_cache_root,
+      config,
+      repoName,
+      runRoot: smokeRoot,
+      worktreeRoot: readySnapshot.allowed_worktree_root,
+    },
+  );
+  const manifest = await verifyReadySnapshot({
+    snapshotRoot: readySnapshot.root,
+    allowedSnapshotRoot: readySnapshot.allowed_snapshot_root,
+    expectedProjectRoot: readySnapshot.worktree,
+    expectedBaseRef: baseCommit,
+  });
+  assertRepositoryAtBase(config.repo, baseCommit);
+  const postSmoke = captureBenchmarkProvenance({ config, configPath });
+  assertCandidateUnchanged(preSmoke.candidate, postSmoke.candidate, "post-smoke");
+  return {
+    smoke_artifact_dir: smokeRoot,
+    unscored: true,
+    result,
+    success: result.success,
+    source_repository_clean: true,
+    candidate_unchanged: true,
+    snapshot_unchanged: true,
+    snapshot_manifest_sha256: sha256(JSON.stringify(manifest)),
+    pre_smoke_verification: verified,
+    pre_smoke_candidate: preSmoke.candidate,
+    post_smoke_candidate: postSmoke.candidate,
+  };
 }
 
 async function executeRun(run, context) {

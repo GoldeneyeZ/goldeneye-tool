@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -307,7 +307,7 @@ test("ready snapshots use stable ACK paths and skip priming", () => {
 test("prepare-snapshot exits before spawning Codex", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-bench-prepare-"));
   const repo = join(directory, "source");
-  const fakeAck = join(directory, "fake-ack.mjs");
+  const fakeAck = join(repo, "dist", "main.js");
   const configPath = join(directory, "config.json");
   const codexMarker = join(directory, "codex-spawned");
   const ready = {
@@ -321,15 +321,17 @@ test("prepare-snapshot exits before spawning Codex", () => {
   try {
     spawnSync("git", ["init", repo], { encoding: "utf8" });
     writeFileSync(join(repo, "README.md"), "ready\n");
+    mkdirSync(join(repo, "dist"), { recursive: true });
+    writeFileSync(
+      fakeAck,
+      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "ready");\n`,
+    );
     spawnSync("git", ["-C", repo, "add", "README.md"], { encoding: "utf8" });
+    spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
     spawnSync(
       "git",
       ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "init"],
       { encoding: "utf8" },
-    );
-    writeFileSync(
-      fakeAck,
-      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "ready");\n`,
     );
     writeFileSync(
       configPath,
@@ -356,7 +358,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(codexMarker), false);
     assert.equal(existsSync(join(ready.root, "snapshot-manifest.json")), true);
-    assert.equal(JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8")).snapshot.restore_verified, false);
+    assert.equal(JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8")).snapshot.restore_verified, true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
