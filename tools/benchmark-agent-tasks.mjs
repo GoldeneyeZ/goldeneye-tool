@@ -148,10 +148,11 @@ if (!flags.has("--skip-build") && config.engines.some((engine) => engine.id === 
 
 if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("--smoke")) {
   const artifacts = resolvePreparationArtifacts(config);
-  let preparation = flags.has("--prepare-snapshot")
-    ? await prepareReadySnapshot({ baseCommit, config, repoName })
-    : readPreparation(artifacts.preparation);
+  let preparation = null;
   try {
+    preparation = flags.has("--prepare-snapshot")
+      ? await prepareReadySnapshot({ baseCommit, config, repoName })
+      : readPreparation(artifacts.preparation);
     if (flags.has("--verify-only")) {
       preparation.verification = await verifyPreparedSnapshot({
         baseCommit,
@@ -177,6 +178,7 @@ if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("
     );
     preparation.completed_at = new Date().toISOString();
   } catch (error) {
+    preparation ??= { schema_version: 1, gates: [], provenance: null, snapshot: null };
     preparation.eligible_for_scoring = false;
     preparation.error = errorMessage(error);
     preparation.completed_at = new Date().toISOString();
