@@ -13,6 +13,9 @@ Preserve:
 - existing UTF-16 code-unit threshold semantics in all other cases;
 - `CharSequence` support.
 
+Do not reassign `threshold`: the existing precondition captures it in a lambda.
+Use a separate local endpoint for any surrogate-boundary adjustment.
+
 Add focused coverage to
 `spring-core/src/test/java/org/springframework/util/StringUtilsTests.java`.
 
