@@ -232,6 +232,49 @@ test("summarizeRuns never rewards failed runs with fast timings", () => {
   assert.equal(summary.successful_total_tokens_p50, 60);
 });
 
+test("summarizeRuns reports sample SD and CV", () => {
+  const summary = summarizeRuns([
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 100,
+      input_tokens: 800,
+      cached_input_tokens: 600,
+      output_tokens: 20,
+      total_tokens: 820,
+    },
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 200,
+      input_tokens: 1000,
+      cached_input_tokens: 700,
+      output_tokens: 30,
+      total_tokens: 1030,
+    },
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 300,
+      input_tokens: 1200,
+      cached_input_tokens: 800,
+      output_tokens: 40,
+      total_tokens: 1240,
+    },
+  ])[0];
+  assert.equal(summary.successful_wall_ms_mean, 200);
+  assert.equal(summary.successful_wall_ms_sample_sd, 100);
+  assert.equal(summary.successful_wall_ms_cv, 0.5);
+  assert.equal(summary.successful_uncached_input_tokens_p50, 300);
+  assert.equal(summary.successful_uncached_plus_output_tokens_p50, 330);
+});
+
 test("tomlInlineTable quotes Windows paths and environment keys", () => {
   assert.equal(
     tomlInlineTable({ CBM_CACHE_DIR: "D:\\cache path" }),

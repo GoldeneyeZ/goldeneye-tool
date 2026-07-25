@@ -181,7 +181,11 @@ if (flags.has("--audit-report")) {
   const report = readJson(config.output, "benchmark report");
   const markdown = readFileSync(markdownOutput, "utf8");
   const audit = auditBenchmarkReport(report, {
-    allowedDirtyPaths: config.allowed_dirty_paths ?? [],
+    expectedCandidateRuns: config.audit?.expected_candidate_runs ?? 3,
+    expectedVanillaRuns: config.audit?.expected_vanilla_runs ?? 1,
+    dirtyPathPolicy: compileDirtyPathPolicy(
+      config.allowed_dirty_policy ?? { exact: config.allowed_dirty_paths ?? [] },
+    ),
     artifactExists: (directory, name) => existsSync(join(directory, name)),
     candidateEngine,
     markdown,

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileDirtyPathPolicy } from "./path-policy.mjs";
+
 import {
-  LIMITATIONS,
   auditBenchmarkReport,
   mergeReportRuns,
   renderMarkdownReport,
@@ -31,6 +32,28 @@ function scoredRun(id, engine, repetition) {
   };
 }
 
+function fixtureReport({ candidateRuns = 3, vanillaRuns = 1 }) {
+  return {
+    runs: [
+      ...Array.from(
+        { length: candidateRuns },
+        (_, index) => scoredRun(`ack-${index + 1}`, "goldeneye-ack", index + 1),
+      ),
+      ...Array.from(
+        { length: vanillaRuns },
+        (_, index) => scoredRun(`vanilla-${index + 1}`, "vanilla", index + 1),
+      ),
+    ],
+  };
+}
+
+function expectedLimitations({ candidateCount, vanillaCount, randomized }) {
+  return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
+    `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
+    "the sample is too small for inferential significance. Provider prefix caching is " +
+    "reported separately from ACK snapshot caching.";
+}
+
 test("mergeReportRuns appends split lanes and rejects duplicate run IDs", () => {
   const merged = mergeReportRuns(
     [scoredRun("vanilla-1", "vanilla", 1)],
@@ -52,7 +75,11 @@ test("renderMarkdownReport includes descriptive comparison and required limitati
     vanillaEngine: "vanilla",
   });
   assert.match(markdown, /cached descriptive comparison/i);
-  assert.match(markdown, new RegExp(LIMITATIONS.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(markdown, new RegExp(expectedLimitations({
+    candidateCount: 1,
+    vanillaCount: 1,
+    randomized: false,
+  }).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("auditBenchmarkReport enforces four traceable scored runs and timing invariants", () => {
@@ -68,7 +95,7 @@ test("auditBenchmarkReport enforces four traceable scored runs and timing invari
     vanillaEngine: "vanilla",
   });
   const audit = auditBenchmarkReport(report, {
-    allowedDirtyPaths: ["Main.java", "MainTests.java"],
+    dirtyPathPolicy: compileDirtyPathPolicy({ exact: ["Main.java", "MainTests.java"] }),
     artifactExists: () => true,
     candidateEngine: "goldeneye-ack",
     markdown,
@@ -80,13 +107,36 @@ test("auditBenchmarkReport enforces four traceable scored runs and timing invari
   assert.throws(
     () =>
       auditBenchmarkReport({ runs: runs.slice(1) }, {
-        allowedDirtyPaths: ["Main.java", "MainTests.java"],
+        dirtyPathPolicy: compileDirtyPathPolicy({ exact: ["Main.java", "MainTests.java"] }),
         artifactExists: () => true,
         candidateEngine: "goldeneye-ack",
         markdown,
         readArtifact: () => " M Main.java\n M MainTests.java\n",
         vanillaEngine: "vanilla",
       }),
-    /expected 4 scored runs/,
+    /expected 1 vanilla run/,
   );
+});
+
+test("audits a randomized three by three report", () => {
+  const report = fixtureReport({
+    candidateRuns: 3,
+    vanillaRuns: 3,
+  });
+  const audit = auditBenchmarkReport(report, {
+    expectedCandidateRuns: 3,
+    expectedVanillaRuns: 3,
+    dirtyPathPolicy: compileDirtyPathPolicy({ prefixes: ["spring-context/"] }),
+    artifactExists: () => true,
+    candidateEngine: "goldeneye-ack",
+    markdown: renderMarkdownReport(report, {
+      candidateEngine: "goldeneye-ack",
+      vanillaEngine: "vanilla",
+    }),
+    readArtifact: () => " M spring-context/src/main/java/A.java\n",
+    vanillaEngine: "vanilla",
+  });
+  assert.equal(audit.passed, true);
+  assert.equal(audit.run_count, 6);
+  assert.equal(audit.vanilla_count, 3);
 });

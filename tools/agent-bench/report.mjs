@@ -1,8 +1,4 @@
-export const LIMITATIONS = `This benchmark contains three serial Goldeneye+ACK candidate repetitions and one
-vanilla comparison run. The vanilla result is descriptive reuse evidence, not a
-paired or randomized control. Reported differences do not establish causality
-or statistical significance. Query latency alone is not interpreted as agent
-effectiveness.`;
+import { compileDirtyPathPolicy, evaluateDirtyPaths } from "./path-policy.mjs";
 
 const REQUIRED_ARTIFACTS = [
   "codex.jsonl",
@@ -21,10 +17,18 @@ export function mergeReportRuns(existing, additions) {
   return [...existing, ...additions];
 }
 
+export function renderLimitations({ candidateCount, vanillaCount, randomized }) {
+  return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
+    `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
+    "the sample is too small for inferential significance. Provider prefix caching is " +
+    "reported separately from ACK snapshot caching.";
+}
+
 export function renderMarkdownReport(report, { candidateEngine, vanillaEngine }) {
   const runs = report.runs ?? [];
   const candidate = runs.filter((run) => run.engine === candidateEngine);
   const vanilla = runs.filter((run) => run.engine === vanillaEngine);
+  const randomized = isRandomized(report);
   const lines = [
     "# Spring StringUtils Unicode Truncation Benchmark",
     "",
@@ -46,15 +50,19 @@ export function renderMarkdownReport(report, { candidateEngine, vanillaEngine })
     metricSummary("wall_ms", candidate),
     metricSummary("total_tokens", candidate),
     metricSummary("ack_calls", candidate),
-    "Raw candidate values remain in `report.json`; medians and ranges are descriptive only (`n=3`).",
+    `Raw candidate values remain in \`report.json\`; medians and ranges are descriptive only (n=${candidate.length}).`,
     "",
     "## Vanilla comparison",
     "",
-    `Vanilla: ${vanilla.length} cached descriptive comparison run. Provenance and artifact paths remain in \`report.json\`.`,
+    `Vanilla: ${vanilla.length} cached descriptive comparison ${runNoun(vanilla.length)}. Provenance and artifact paths remain in \`report.json\`.`,
     "",
     "## Limitations",
     "",
-    LIMITATIONS,
+    renderLimitations({
+      candidateCount: candidate.length,
+      vanillaCount: vanilla.length,
+      randomized,
+    }),
     "",
   );
   return lines.join("\n");
@@ -66,18 +74,25 @@ export function auditBenchmarkReport(
     allowedDirtyPaths,
     artifactExists,
     candidateEngine,
+    dirtyPathPolicy,
+    expectedCandidateRuns = 3,
+    expectedVanillaRuns = 1,
     markdown,
     readArtifact,
     vanillaEngine,
   },
 ) {
   const runs = report.runs ?? [];
-  requireAudit(runs.length === 4, `expected 4 scored runs, got ${runs.length}`);
   const candidate = runs.filter((run) => run.engine === candidateEngine);
   const vanilla = runs.filter((run) => run.engine === vanillaEngine);
-  requireAudit(candidate.length === 3, `expected 3 candidate runs, got ${candidate.length}`);
-  requireAudit(vanilla.length === 1, `expected 1 vanilla run, got ${vanilla.length}`);
+  requireAudit(candidate.length === expectedCandidateRuns,
+    `expected ${expectedCandidateRuns} candidate runs, got ${candidate.length}`);
+  requireAudit(vanilla.length === expectedVanillaRuns,
+    `expected ${expectedVanillaRuns} vanilla runs, got ${vanilla.length}`);
   requireAudit(new Set(runs.map((run) => run.id)).size === runs.length, "run IDs are not unique");
+  const effectiveDirtyPathPolicy = dirtyPathPolicy ?? compileDirtyPathPolicy({
+    exact: allowedDirtyPaths ?? [],
+  });
 
   for (const run of runs) {
     requireAudit(run.artifact_dir, `run ${run.id} has no artifact directory`);
@@ -107,16 +122,18 @@ export function auditBenchmarkReport(
         .split(/\r?\n/)
         .filter(Boolean)
         .map((line) => line.slice(3).trim());
-      requireAudit(
-        dirtyPaths.every((path) => allowedDirtyPaths.includes(path)),
-        `run ${run.id} changed a path outside the allowlist`,
-      );
+      const dirtyPathEvaluation = evaluateDirtyPaths(dirtyPaths, effectiveDirtyPathPolicy);
+      requireAudit(dirtyPathEvaluation.passed, `run ${run.id} changed a path outside the allowlist`);
     }
   }
 
   const hashes = new Set(candidate.map((run) => run.snapshot?.manifest_sha256));
   requireAudit(hashes.size === 1 && !hashes.has(undefined), "candidate snapshot hash differs");
-  requireAudit(markdown.includes(LIMITATIONS), "report limitations text is missing");
+  requireAudit(markdown.includes(renderLimitations({
+    candidateCount: candidate.length,
+    vanillaCount: vanilla.length,
+    randomized: isRandomized(report),
+  })), "report limitations text is missing");
   return {
     passed: true,
     run_count: runs.length,
@@ -124,6 +141,14 @@ export function auditBenchmarkReport(
     vanilla_count: vanilla.length,
     snapshot_manifest_sha256: [...hashes][0],
   };
+}
+
+function isRandomized(report) {
+  return (report.settings?.randomized_order?.length ?? 0) > 0;
+}
+
+function runNoun(count) {
+  return count === 1 ? "run" : "runs";
 }
 
 function metricSummary(name, runs) {
