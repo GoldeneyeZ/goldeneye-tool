@@ -18,7 +18,7 @@ Last updated: 2026-07-25T15:33:03.448Z
 - Spec review: unchecked
 - Code quality: unchecked
 - Integration review: unchecked
-- Next action: Implement SSRB-5.
+- Next action: Implement SSRB-6.
 
 ## Task 1: Add reusable dirty-path policies
 
@@ -53,8 +53,8 @@ Last updated: 2026-07-25T15:33:03.448Z
 ## Task 6: Freeze benchmark provenance
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-6/`
-- Status: pending
-- Next action: Start implementation.
+- Status: implemented
+- Next action: Await external Codex availability for the mandatory clean smoke; preparation remains not eligible for scored work until that smoke passes.
 
 ## Task 7: Calibrate vanilla to the one-million-token gate
 
