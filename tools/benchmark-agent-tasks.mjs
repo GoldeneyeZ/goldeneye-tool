@@ -670,6 +670,7 @@ async function executeRun(run, context) {
     mkdirSync(dirname(worktree), { recursive: true });
     runChecked("git", ["-C", context.config.repo, "worktree", "add", "--detach", worktree, context.baseCommit]);
     worktreeAdded = true;
+    await waitForRepositoryAtBase(worktree, context.baseCommit);
     linkWorkspaceDependencies(context.config.repo, worktree);
 
     if (usesReadySnapshot) {
@@ -1342,6 +1343,23 @@ function assertRepositoryAtBase(repo, baseCommit) {
   if (head !== baseCommit) {
     throw new Error(`source repository commit mismatch: expected ${baseCommit}, got ${head}`);
   }
+}
+
+async function waitForRepositoryAtBase(repo, baseCommit, timeoutMs = 120_000) {
+  const deadline = performance.now() + timeoutMs;
+  let lastError = null;
+  do {
+    try {
+      assertRepositoryAtBase(repo, baseCommit);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  } while (performance.now() < deadline);
+  throw new Error(
+    `worktree did not become ready within ${timeoutMs}ms: ${errorMessage(lastError)}`,
+  );
 }
 
 function runChecked(command, args, cwd) {
