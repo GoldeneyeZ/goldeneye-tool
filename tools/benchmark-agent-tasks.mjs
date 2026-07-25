@@ -64,6 +64,7 @@ import {
   mergeReportRuns,
   renderMarkdownReport,
 } from "./agent-bench/report.mjs";
+import { evaluateCalibrationRun } from "./agent-bench/qualification.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -89,6 +90,8 @@ Options:
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
   --verify-only             validate frozen candidate, source, and snapshot without Codex
   --smoke                   run one unscored ACK candidate and held-out grader
+  --calibration             run one non-scored vanilla calibration
+  --calibration-id <id>     immutable artifact attempt identifier
   --audit-report            audit the four-run report against raw artifacts
   --keep-worktrees          keep agent worktrees
   --keep-caches             keep MCP caches
@@ -118,6 +121,16 @@ if (config.cache_modes.some((mode) => !["cold", "warm"].includes(mode))) {
 }
 config.tasks = select(config.tasks, flags.get("--task"), "task");
 const runEngines = selectRunEngines(config, flags.get("--engine"));
+if (flags.has("--calibration")) {
+  if (runEngines.length !== 1 || runEngines[0].kind !== "vanilla") {
+    fail("--calibration requires --engine <vanilla-id>");
+  }
+  if (config.repetitions !== 1) fail("--calibration requires --repetitions 1");
+  if (!flags.get("--calibration-id")) fail("--calibration-id is required");
+}
+const calibrationId = flags.has("--calibration")
+  ? sanitizeId(flags.get("--calibration-id"))
+  : null;
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
@@ -254,6 +267,43 @@ if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("
   persistReport(artifacts.preparation, preparation);
   console.log(`Preparation gates: ${preparation.eligible_for_scoring ? "ELIGIBLE" : "NOT ELIGIBLE"} ${artifacts.preparation}`);
   process.exit(preparation.eligible_for_scoring || !flags.has("--smoke") ? 0 : 1);
+}
+
+if (flags.has("--calibration")) {
+  if (matrix.length !== 1) fail("--calibration requires exactly one selected vanilla task");
+  if (!config.qualification) fail("--calibration requires qualification configuration");
+  const calibrationRoot = join(runRoot, "calibration", calibrationId);
+  const expectedCandidate = captureBenchmarkProvenance({ config, configPath }).candidate;
+  const result = await executeRun(matrix[0], {
+    baseCommit,
+    cacheRoot,
+    config,
+    repoName,
+    runRoot: join(calibrationRoot, "run"),
+    worktreeRoot,
+  });
+  result.discovery = analyzeDiscoveryTrace(join(result.artifact_dir, "codex.jsonl"));
+  result.hashes = runHashes({
+    candidate: expectedCandidate,
+    configPath,
+    run: matrix[0],
+    runDir: result.artifact_dir,
+    snapshot: result.snapshot,
+  });
+  const qualification = evaluateCalibrationRun(result, config.qualification);
+  persistReport(join(calibrationRoot, "calibration.json"), {
+    schema_version: 1,
+    kind: "vanilla-calibration",
+    calibration_id: calibrationId,
+    task_id: result.task_id,
+    candidate: expectedCandidate,
+    task_hash: result.hashes.task_sha256,
+    grader_hash: result.hashes.grader_sha256,
+    run: result,
+    qualification,
+  });
+  console.log(`Calibration ${qualification.qualified ? "QUALIFIED" : "NOT QUALIFIED"}: ${calibrationRoot}`);
+  process.exit(qualification.qualified ? 0 : 1);
 }
 
 mkdirSync(runRoot, { recursive: true });

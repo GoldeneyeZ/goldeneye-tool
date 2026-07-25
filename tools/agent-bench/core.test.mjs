@@ -79,6 +79,39 @@ test("selectRunEngines preserves the ACK provenance engine when selecting vanill
   assert.equal(config.engines.find((engine) => engine.kind === "ack"), ack);
 });
 
+test("calibration mode validates its vanilla-only single-run contract before repository access", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-bench-calibration-"));
+  const configPath = join(directory, "config.json");
+  writeFileSync(configPath, JSON.stringify({
+    repo: join(directory, "missing-repository"),
+    output: join(directory, "report.json"),
+    repetitions: 2,
+    tasks: [{ id: "task", prompt_file: "task.md", grader: { command: "grader.mjs" } }],
+    engines: [
+      { id: "ack", kind: "ack", command: "ack", backend_command: "goldeneye" },
+      { id: "vanilla", kind: "vanilla" },
+    ],
+  }));
+  try {
+    const run = (args) => spawnSync(
+      process.execPath,
+      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--calibration", ...args],
+      { cwd: resolve(), encoding: "utf8" },
+    );
+    assert.match(run(["--calibration-id", "attempt-1"]).stderr, /requires --engine <vanilla-id>/);
+    assert.match(
+      run(["--engine", "vanilla", "--calibration-id", "attempt-1"]).stderr,
+      /requires --repetitions 1/,
+    );
+    assert.match(
+      run(["--engine", "vanilla", "--repetitions", "1"]).stderr,
+      /--calibration-id is required/,
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("parseCodexJsonl extracts cumulative usage, tool calls, bytes, and violations", () => {
   const lines = [
     JSON.stringify({ type: "thread.started", thread_id: "abc" }),
