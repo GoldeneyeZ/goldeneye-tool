@@ -44,7 +44,8 @@
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "env": {
-        "GOLDENEYE_GRAMMAR_PACK": "full"
+        "GOLDENEYE_GRAMMAR_PACK": "full",
+        "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java/org/springframework/util/StringUtils.java;spring-core/src/test/java/org/springframework/util/StringUtilsTests.java"
       },
       "cache_modes": ["warm"]
     },

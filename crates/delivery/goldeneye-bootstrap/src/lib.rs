@@ -3,13 +3,18 @@
 //! Production composition for Goldeneye services and background indexing.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_discovery::FileSystemDiscovery;
+use goldeneye_domain::LanguageId;
 use goldeneye_git::GitCommandRepository;
+use goldeneye_ports::{
+    LanguageClassifier, PortError, RepositoryDiscovery, RepositoryDiscoveryOptions,
+    RepositoryDiscoveryReport, SourceDiscovery,
+};
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceConfig, ServiceDependencies,
     ServiceError, Services,
@@ -41,8 +46,57 @@ fn configured_grammar_pack(value: Option<&str>) -> GrammarPack {
     }
 }
 
+fn configured_include_paths() -> Vec<PathBuf> {
+    env::var("GOLDENEYE_INCLUDE_PATHS")
+        .ok()
+        .map(|value| {
+            value
+                .split(';')
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn path_is_included(path: &Path, includes: &[PathBuf]) -> bool {
+    includes
+        .iter()
+        .any(|include| path.components().eq(include.components()))
+}
+
+struct FilteredSourceDiscovery {
+    includes: Vec<PathBuf>,
+}
+
+impl LanguageClassifier for FilteredSourceDiscovery {
+    fn classify(&self, path: &Path) -> Option<LanguageId> {
+        FileSystemDiscovery.classify(path)
+    }
+}
+
+impl RepositoryDiscovery for FilteredSourceDiscovery {
+    fn discover(
+        &self,
+        root: &Path,
+        options: &RepositoryDiscoveryOptions,
+    ) -> Result<RepositoryDiscoveryReport, PortError> {
+        let mut report = FileSystemDiscovery.discover(root, options)?;
+        report
+            .files
+            .retain(|file| path_is_included(&file.relative_path, &self.includes));
+        Ok(report)
+    }
+}
+
 fn service_dependencies_for_pack(pack: GrammarPack) -> ServiceDependencies {
-    let discovery = Arc::new(FileSystemDiscovery);
+    let includes = configured_include_paths();
+    let discovery: Arc<dyn SourceDiscovery> = if includes.is_empty() {
+        Arc::new(FileSystemDiscovery)
+    } else {
+        Arc::new(FilteredSourceDiscovery { includes })
+    };
     match pack {
         GrammarPack::Core => ServiceDependencies::new(
             Arc::new(FileArtifactPersistence),
@@ -199,7 +253,11 @@ impl Indexer for ServiceIndexer {
 
 #[cfg(test)]
 mod tests {
-    use super::{GrammarPack, configured_grammar_pack, service_dependencies_for_pack};
+    use std::path::Path;
+
+    use super::{
+        GrammarPack, configured_grammar_pack, path_is_included, service_dependencies_for_pack,
+    };
 
     #[test]
     fn full_grammar_pack_is_selected_explicitly() {
@@ -207,6 +265,23 @@ mod tests {
         assert_eq!(configured_grammar_pack(Some("FULL")), GrammarPack::Full);
         assert_eq!(configured_grammar_pack(None), GrammarPack::Core);
         assert_eq!(configured_grammar_pack(Some("core")), GrammarPack::Core);
+    }
+
+    #[test]
+    fn configured_include_paths_match_exact_relative_files() {
+        let includes = [
+            Path::new("spring-core/src/main/java/example/StringUtils.java").to_path_buf(),
+            Path::new("spring-core/src/test/java/example/StringUtilsTests.java").to_path_buf(),
+        ];
+
+        assert!(path_is_included(
+            Path::new("spring-core/src/main/java/example/StringUtils.java"),
+            &includes
+        ));
+        assert!(!path_is_included(
+            Path::new("spring-core/src/main/java/example/Other.java"),
+            &includes
+        ));
     }
 
     #[cfg(feature = "full-grammar-pack")]

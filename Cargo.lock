@@ -338,7 +338,9 @@ version = "0.1.0"
 dependencies = [
  "goldeneye-artifact",
  "goldeneye-discovery",
+ "goldeneye-domain",
  "goldeneye-git",
+ "goldeneye-ports",
  "goldeneye-services",
  "goldeneye-store",
  "goldeneye-syntax",
