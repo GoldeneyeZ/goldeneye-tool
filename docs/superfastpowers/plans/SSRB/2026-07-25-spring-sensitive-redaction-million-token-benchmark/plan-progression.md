@@ -14,11 +14,11 @@ Last updated: 2026-07-25T15:33:03.448Z
 
 ## Goal Phases
 
-- Implementation: pending
+- Implementation: active
 - Spec review: unchecked
 - Code quality: unchecked
 - Integration review: unchecked
-- Next action: Implement next pending task.
+- Next action: Implement SSRB-5.
 
 ## Task 1: Add reusable dirty-path policies
 
@@ -47,8 +47,8 @@ Last updated: 2026-07-25T15:33:03.448Z
 ## Task 5: Add Level-2 configuration and six-module snapshot
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-5/`
-- Status: pending
-- Next action: Start implementation.
+- Status: implemented
+- Next action: Root runs the mandatory smoke gate before scored benchmark work.
 
 ## Task 6: Freeze benchmark provenance
 
