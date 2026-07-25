@@ -41,7 +41,12 @@ import {
   verifyReadySnapshot,
   waitForNoWriterArtifacts,
 } from "./agent-bench/snapshot.mjs";
-import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
+import {
+  closeWritableStream,
+  scoreRunDurations,
+  spawnWithTimer,
+  stopTimerAtClose,
+} from "./agent-bench/timing.mjs";
 import {
   captureRepositoryProvenance,
   compareProvenance,
@@ -1058,7 +1063,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   });
   clearTimeout(timer);
   lines.close();
-  await Promise.all([closeStream(jsonlStream), closeStream(stderrStream)]);
+  await Promise.all([closeWritableStream(jsonlStream), closeWritableStream(stderrStream)]);
   return {
     duration_ms: outcome.durationMs,
     error: outcome.error ? errorMessage(outcome.error) : null,
@@ -1353,11 +1358,6 @@ function killProcessTree(pid) {
       }
     }
   }
-}
-
-function closeStream(stream) {
-  if (stream.closed) return Promise.resolve();
-  return new Promise((resolveClose) => stream.end(resolveClose));
 }
 
 function waitForExit(child, timeoutMs) {

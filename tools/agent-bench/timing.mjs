@@ -1,4 +1,12 @@
 import { performance } from "node:perf_hooks";
+import { finished } from "node:stream/promises";
+
+export async function closeWritableStream(stream) {
+  if (stream.closed || stream.writableFinished) return;
+  const completion = finished(stream);
+  if (!stream.writableEnded) stream.end();
+  await completion;
+}
 
 export function spawnWithTimer(
   spawnFn,
