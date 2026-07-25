@@ -14,6 +14,7 @@ import {
   resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
+  selectRunEngines,
   shouldPrimeIndex,
   summarizeRuns,
   tomlInlineTable,
@@ -66,6 +67,16 @@ test("buildRunMatrix runs vanilla once without cold/warm duplication", () => {
   const vanilla = runs.filter((run) => run.engine.id === "vanilla");
   assert.equal(vanilla.length, 2);
   assert.deepEqual(new Set(vanilla.map((run) => run.cacheMode)), new Set(["none"]));
+});
+
+test("selectRunEngines preserves the ACK provenance engine when selecting vanilla", () => {
+  const ack = { id: "goldeneye-ack", kind: "ack" };
+  const vanilla = { id: "vanilla", kind: "vanilla" };
+  const config = { engines: [ack, vanilla] };
+
+  assert.deepEqual(selectRunEngines(config, "vanilla"), [vanilla]);
+  assert.deepEqual(config.engines, [ack, vanilla]);
+  assert.equal(config.engines.find((engine) => engine.kind === "ack"), ack);
 });
 
 test("parseCodexJsonl extracts cumulative usage, tool calls, bytes, and violations", () => {

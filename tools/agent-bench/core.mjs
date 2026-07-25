@@ -56,6 +56,14 @@ export function buildRunMatrix({ tasks, engines, cacheModes, repetitions, seed }
   return runs;
 }
 
+export function selectRunEngines(config, engineId) {
+  const engines = [...config.engines];
+  if (!engineId) return engines;
+  const selected = engines.filter((engine) => engine.id === engineId);
+  if (selected.length === 0) throw new Error(`Unknown engine: ${engineId}`);
+  return selected;
+}
+
 function walk(value, visit, path = []) {
   if (Array.isArray(value)) {
     value.forEach((item, index) => walk(item, visit, [...path, index]));

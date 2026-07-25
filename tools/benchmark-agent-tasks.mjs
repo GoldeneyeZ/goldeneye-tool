@@ -26,6 +26,7 @@ import {
   resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
+  selectRunEngines,
   shouldPrimeIndex,
   summarizeRuns,
   tomlInlineTable,
@@ -112,7 +113,7 @@ if (config.cache_modes.some((mode) => !["cold", "warm"].includes(mode))) {
   fail("--cache-modes accepts only cold,warm");
 }
 config.tasks = select(config.tasks, flags.get("--task"), "task");
-config.engines = select(config.engines, flags.get("--engine"), "engine");
+const runEngines = selectRunEngines(config, flags.get("--engine"));
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
@@ -127,7 +128,7 @@ const worktreeRoot = resolve(
 const cacheRoot = resolve(config.cache_root ?? join(dirname(config.repo), ".gab-cache", shortRunId));
 const matrix = buildRunMatrix({
   tasks: config.tasks,
-  engines: config.engines,
+  engines: runEngines,
   cacheModes: config.cache_modes,
   repetitions: config.repetitions,
   seed: config.seed,
@@ -193,7 +194,7 @@ if (flags.has("--audit-report")) {
   process.exit(0);
 }
 
-if (!flags.has("--skip-build") && config.engines.some((engine) => engine.id === "goldeneye")) {
+if (!flags.has("--skip-build") && runEngines.some((engine) => engine.id === "goldeneye")) {
   console.log("Building Goldeneye release binary...");
   const fullGrammarPack = join(workspace, "target", "goldeneye-grammars");
   if (!process.env.GOLDENEYE_GRAMMAR_PACK_DIR && existsSync(fullGrammarPack)) {
