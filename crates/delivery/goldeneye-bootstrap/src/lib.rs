@@ -2,6 +2,7 @@
 
 //! Production composition for Goldeneye services and background indexing.
 
+use std::env;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +15,8 @@ use goldeneye_services::{
     ServiceError, Services,
 };
 use goldeneye_store::{SqliteRepositoryFactory, Store, StoreError};
+#[cfg(feature = "full-grammar-pack")]
+use goldeneye_syntax::FullGrammarProvider;
 use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, WatcherConfig};
@@ -21,15 +24,50 @@ use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, Watche
 /// Builds the production adapter set used by Goldeneye delivery crates.
 #[must_use]
 pub fn service_dependencies() -> ServiceDependencies {
+    let pack = env::var("GOLDENEYE_GRAMMAR_PACK").ok();
+    service_dependencies_for_pack(configured_grammar_pack(pack.as_deref()))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GrammarPack {
+    Core,
+    Full,
+}
+
+fn configured_grammar_pack(value: Option<&str>) -> GrammarPack {
+    match value {
+        Some(value) if value.eq_ignore_ascii_case("full") => GrammarPack::Full,
+        _ => GrammarPack::Core,
+    }
+}
+
+fn service_dependencies_for_pack(pack: GrammarPack) -> ServiceDependencies {
     let discovery = Arc::new(FileSystemDiscovery);
-    ServiceDependencies::new(
-        Arc::new(FileArtifactPersistence),
-        Arc::new(GitCommandRepository),
-        discovery,
-        Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
-    )
+    match pack {
+        GrammarPack::Core => ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            discovery,
+            Arc::new(SqliteRepositoryFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+        #[cfg(not(feature = "full-grammar-pack"))]
+        GrammarPack::Full => {
+            panic!(
+                "GOLDENEYE_GRAMMAR_PACK=full requires building with the full-grammar-pack feature"
+            )
+        }
+        #[cfg(feature = "full-grammar-pack")]
+        GrammarPack::Full => ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            discovery,
+            Arc::new(SqliteRepositoryFactory),
+            Arc::new(TreeSitterIndexExtractor::new(FullGrammarProvider)),
+            Arc::new(SyntaxEngine::new(FullGrammarProvider)),
+        ),
+    }
 }
 
 /// Reopens and closes the durable store after all service readers have stopped.
@@ -156,5 +194,33 @@ impl Indexer for ServiceIndexer {
             .delete_project(&project)
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GrammarPack, configured_grammar_pack, service_dependencies_for_pack};
+
+    #[test]
+    fn full_grammar_pack_is_selected_explicitly() {
+        assert_eq!(configured_grammar_pack(Some("full")), GrammarPack::Full);
+        assert_eq!(configured_grammar_pack(Some("FULL")), GrammarPack::Full);
+        assert_eq!(configured_grammar_pack(None), GrammarPack::Core);
+        assert_eq!(configured_grammar_pack(Some("core")), GrammarPack::Core);
+    }
+
+    #[cfg(feature = "full-grammar-pack")]
+    #[test]
+    fn compiled_full_grammar_pack_constructs_dependencies() {
+        let _dependencies = service_dependencies_for_pack(GrammarPack::Full);
+    }
+
+    #[cfg(not(feature = "full-grammar-pack"))]
+    #[test]
+    #[should_panic(
+        expected = "GOLDENEYE_GRAMMAR_PACK=full requires building with the full-grammar-pack feature"
+    )]
+    fn unavailable_full_grammar_pack_fails_loudly() {
+        service_dependencies_for_pack(GrammarPack::Full);
     }
 }
