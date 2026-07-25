@@ -2,7 +2,8 @@
 param(
 	[string]$Grader = (Join-Path $PSScriptRoot "spring-sensitive-value-redaction.ps1"),
 	[ValidateSet(1, 2)]
-	[int]$Level = 2
+	[int]$Level = 2,
+	[string]$TaskPrompt
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,6 +138,14 @@ try {
 				"Fixture must use Validator.forInstanceOf(...) instead of treating Validator as functional: $($fixture.FullName)"
 			Assert-True ($content -notmatch "new MutablePropertyValues\([^)]*,") `
 				"Fixture must use a supported MutablePropertyValues constructor: $($fixture.FullName)"
+		}
+	}
+
+	It "documents context accessors used by held-out customizations" {
+		if ($TaskPrompt) {
+			$content = Get-Content -LiteralPath $TaskPrompt -Raw
+			Assert-True ($content -match "getObjectName\(\)") "Task prompt must document getObjectName()."
+			Assert-True ($content -match "getPropertyPath\(\)") "Task prompt must document getPropertyPath()."
 		}
 	}
 

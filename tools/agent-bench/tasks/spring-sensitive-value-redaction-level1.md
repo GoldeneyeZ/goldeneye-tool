@@ -13,7 +13,9 @@ Implement opt-in sensitive-value redaction across Spring's binding pipeline.
   from immutable context; a redactor receives that context and the rejected
   value and returns the representation retained in public errors.
   Context must expose the root target type, object name when available,
-  canonical property path, and whether the failure is a binding failure.
+  canonical property path, and whether the failure is a binding failure
+  through Spring-style accessors including `getRootTargetType()`,
+  `getObjectName()`, `getPropertyPath()`, and `isBindingFailure()`.
 - `DataBinder` must allow detector and redactor configuration with
   `setSensitiveValueDetector(...)` and `setSensitiveValueRedactor(...)`.
 - `ConfigurableWebBindingInitializer` must expose the same configuration and
