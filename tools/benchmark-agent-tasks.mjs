@@ -54,6 +54,11 @@ import {
   selectDependencyLock,
   sha256,
 } from "./agent-bench/provenance.mjs";
+import {
+  auditBenchmarkReport,
+  mergeReportRuns,
+  renderMarkdownReport,
+} from "./agent-bench/report.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -79,6 +84,7 @@ Options:
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
   --verify-only             validate frozen candidate, source, and snapshot without Codex
   --smoke                   run one unscored ACK candidate and held-out grader
+  --audit-report            audit the four-run report against raw artifacts
   --keep-worktrees          keep agent worktrees
   --keep-caches             keep MCP caches
 `);
@@ -89,6 +95,7 @@ const configFlag = flags.get("--config");
 if (!configFlag) fail("--config is required");
 
 const { config, path: configPath } = loadConfig(configFlag);
+const benchmarkEngines = [...config.engines];
 config.repo = resolve(flags.get("--repo") ?? config.repo);
 config.base_ref = flags.get("--base-ref") ?? config.base_ref ?? "HEAD";
 config.model = flags.get("--model") ?? config.model;
@@ -109,11 +116,10 @@ config.engines = select(config.engines, flags.get("--engine"), "engine");
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
-const runId = `${timestamp()}-${baseCommit.slice(0, 10)}`;
 const shortRunId = `${baseCommit.slice(0, 8)}-${Date.now().toString(36)}`;
 const runRoot = resolve(
   config.run_root ??
-    join(workspace, "target", "agent-bench", "runs", runId),
+    dirname(config.output),
 );
 const worktreeRoot = resolve(
   config.worktree_root ?? join(dirname(config.repo), ".gab", shortRunId),
@@ -149,6 +155,41 @@ if (flags.has("--dry-run")) {
       2,
     ),
   );
+  process.exit(0);
+}
+
+const candidateEngine = benchmarkEngines.find((engine) => engine.kind === "ack")?.id;
+const vanillaEngine = benchmarkEngines.find((engine) => engine.kind === "vanilla")?.id;
+const markdownOutput = config.output.toLowerCase().endsWith(".json")
+  ? `${config.output.slice(0, -5)}.md`
+  : `${config.output}.md`;
+
+if (flags.has("--audit-report")) {
+  if (!candidateEngine || !vanillaEngine) fail("--audit-report requires ACK and vanilla engines");
+  const preparation = readPreparation(resolvePreparationArtifacts(config).preparation);
+  if (!preparation.eligible_for_scoring) fail("--audit-report requires eligible preparation");
+  const verification = await verifyPreparedSnapshot({
+    baseCommit,
+    config,
+    expectedCandidate: preparation.provenance?.candidate ?? null,
+  });
+  const report = readJson(config.output, "benchmark report");
+  const markdown = readFileSync(markdownOutput, "utf8");
+  const audit = auditBenchmarkReport(report, {
+    allowedDirtyPaths: config.allowed_dirty_paths ?? [],
+    artifactExists: (directory, name) => existsSync(join(directory, name)),
+    candidateEngine,
+    markdown,
+    readArtifact: (directory, name) => readFileSync(join(directory, name), "utf8"),
+    vanillaEngine,
+  });
+  report.audit = {
+    ...audit,
+    audited_at: new Date().toISOString(),
+    verification,
+  };
+  persistReport(config.output, report);
+  console.log(`Audit PASS: ${config.output}`);
   process.exit(0);
 }
 
@@ -207,7 +248,18 @@ if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("
 }
 
 mkdirSync(runRoot, { recursive: true });
-const report = {
+const preparation = readPreparation(resolvePreparationArtifacts(config).preparation);
+if (!preparation.eligible_for_scoring) {
+  fail("Scored runs require eligible snapshot preparation and smoke evidence");
+}
+const existingReport = flags.get("--engine") && existsSync(config.output)
+  ? readJson(config.output, "benchmark report")
+  : null;
+if (existingReport && existingReport.base_commit !== baseCommit) {
+  fail(`Existing report base commit differs: ${existingReport.base_commit}`);
+}
+const report = existingReport ?? {
+  schema_version: 1,
   generated_at: new Date().toISOString(),
   config: configPath,
   repository: config.repo,
@@ -224,7 +276,7 @@ const report = {
     timeout_ms: config.timeout_ms,
     codex_full_access: config.codex_full_access === true,
     randomized_order: matrix.map((run) => run.id),
-    engines: config.engines.map((engine) => ({
+    engines: benchmarkEngines.map((engine) => ({
       id: engine.id,
       kind: engine.kind,
       command: engine.command ?? null,
@@ -234,9 +286,20 @@ const report = {
   runs: [],
   summary: [],
 };
+report.settings.randomized_order = mergeUnique(
+  report.settings.randomized_order ?? [],
+  matrix.map((run) => run.id),
+);
+report.run_roots = mergeUnique(report.run_roots ?? [], [runRoot]);
+delete report.completed_at;
 
 for (const [position, run] of matrix.entries()) {
   console.log(`[${position + 1}/${matrix.length}] ${run.id}`);
+  const preRunVerification = await verifyPreparedSnapshot({
+    baseCommit,
+    config,
+    expectedCandidate: preparation.provenance?.candidate ?? null,
+  });
   const result = await executeRun(run, {
     baseCommit,
     cacheRoot,
@@ -245,9 +308,18 @@ for (const [position, run] of matrix.entries()) {
     runRoot,
     worktreeRoot,
   });
-  report.runs.push(result);
+  result.pre_run_verification = preRunVerification;
+  result.discovery = analyzeDiscoveryTrace(join(result.artifact_dir, "codex.jsonl"));
+  result.hashes = runHashes({
+    candidate: preparation.provenance?.candidate ?? null,
+    configPath,
+    run,
+    runDir: result.artifact_dir,
+    snapshot: preRunVerification.snapshot,
+  });
+  report.runs = mergeReportRuns(report.runs, [result]);
   report.summary = summarizeRuns(report.runs);
-  persistReport(config.output, report);
+  persistBenchmarkReport(config.output, markdownOutput, report, { candidateEngine, vanillaEngine });
   console.log(
     `  ${result.success ? "PASS" : "FAIL"} wall=${formatMs(result.wall_ms)} tokens=${result.total_tokens} grader=${result.grader_exit_code}`,
   );
@@ -255,7 +327,7 @@ for (const [position, run] of matrix.entries()) {
 
 report.completed_at = new Date().toISOString();
 report.summary = summarizeRuns(report.runs);
-persistReport(config.output, report);
+persistBenchmarkReport(config.output, markdownOutput, report, { candidateEngine, vanillaEngine });
 console.log(`Agent benchmark artifact: ${config.output}`);
 
 async function prepareReadySnapshot({ baseCommit, config, repoName }) {
@@ -631,7 +703,7 @@ async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repo
 }
 
 async function executeRun(run, context) {
-  const runDir = join(context.runRoot, run.id);
+  const runDir = join(context.runRoot, run.engine.id, run.id);
   const laneKey = createHash("sha256").update(run.id).digest("hex").slice(0, 12);
   const layout = resolveRunLayout({
     kind: run.engine.kind,
@@ -1459,6 +1531,84 @@ function failedAgentResult(error) {
 function persistReport(path, report) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+function persistBenchmarkReport(jsonPath, markdownPath, report, engines) {
+  persistReport(jsonPath, report);
+  writeFileSync(markdownPath, renderMarkdownReport(report, engines));
+}
+
+function readJson(path, label) {
+  if (!existsSync(path)) throw new Error(`Missing ${label}: ${path}`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function mergeUnique(existing, additions) {
+  return [...new Set([...existing, ...additions])];
+}
+
+function runHashes({ candidate, configPath: resolvedConfigPath, run, runDir, snapshot }) {
+  const graderPath = run.task.grader.args.find(
+    (value) => typeof value === "string" && existsSync(value) && statSync(value).isFile(),
+  );
+  return {
+    prompt_sha256: hashFile(join(runDir, "prompt.txt")),
+    config_sha256: hashFile(resolvedConfigPath),
+    task_sha256: hashFile(run.task.prompt_file),
+    grader_sha256: graderPath ? hashFile(graderPath) : null,
+    candidate_provenance_sha256: candidate ? hashJson(candidate) : null,
+    snapshot_manifest_sha256: snapshot?.manifest_sha256 ?? null,
+  };
+}
+
+function analyzeDiscoveryTrace(path) {
+  const commands = [];
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const item = event.item;
+    if (
+      event.type !== "item.completed" ||
+      item?.type !== "command_execution" ||
+      !/(?:^|[\s'"])ack\s+/i.test(item.command ?? "")
+    ) {
+      continue;
+    }
+    const action = item.command.match(/\back\s+(status|search|symbol|inspect|get|callers|callees|arch)\b/i)?.[1]
+      ?.toLowerCase() ?? "other";
+    const output = String(item.aggregated_output ?? "");
+    commands.push({
+      order: commands.length + 1,
+      action,
+      command: item.command,
+      exit_code: item.exit_code,
+      payload_bytes: Buffer.byteLength(output),
+      payload_cardinality: output.split(/\r?\n/).filter(Boolean).length,
+    });
+  }
+  return {
+    first_selection: commands.find((command) => command.action !== "status") ?? commands[0] ?? null,
+    ordering: commands.map(({ order, action, exit_code }) => ({ order, action, exit_code })),
+    failed_commands: commands.filter((command) => command.exit_code !== 0),
+    discovery_turns: commands.length,
+    result_payload_bytes: commands.reduce((sum, command) => sum + command.payload_bytes, 0),
+    result_payload_cardinality: commands.reduce(
+      (sum, command) => sum + command.payload_cardinality,
+      0,
+    ),
+  };
+}
+
+function hashFile(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function hashJson(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function parseFlags(args) {
