@@ -34,6 +34,10 @@ import {
   accumulateCodexLine,
 } from "./agent-bench/core.mjs";
 import {
+  compileDirtyPathPolicy,
+  evaluateDirtyPaths,
+} from "./agent-bench/path-policy.mjs";
+import {
   assertNoWriterArtifacts,
   buildManifest,
   copyRegularTree,
@@ -834,6 +838,22 @@ async function executeRun(run, context) {
     telemetry.protocol_violations,
     run.engine.kind,
   );
+  const dirtyFileNames = status
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+  const dirtyPolicy = compileDirtyPathPolicy(
+    context.config.allowed_dirty_policy ?? {
+      exact: context.config.allowed_dirty_paths ?? [],
+    },
+  );
+  const dirtyPathPolicy = evaluateDirtyPaths(dirtyFileNames, dirtyPolicy);
+  if (!dirtyPathPolicy.passed) {
+    protocolViolations.push({
+      kind: "dirty-path-policy",
+      ...dirtyPathPolicy,
+    });
+  }
   const graderPassed = graderResult.exit_code === 0;
   const graderMs = graderResult.duration_ms;
   const durations = Number.isFinite(agentResult.duration_ms) && Number.isFinite(graderMs)
@@ -894,6 +914,7 @@ async function executeRun(run, context) {
     },
     ...engineMetrics,
     protocol_violations: protocolViolations,
+    dirty_path_policy: dirtyPathPolicy,
     patch_bytes: Buffer.byteLength(diff),
     patch_files: patchStats.files,
     patch_insertions: patchStats.insertions,
