@@ -19,9 +19,6 @@ Use a separate local endpoint for any surrogate-boundary adjustment.
 Add focused coverage to
 `spring-core/src/test/java/org/springframework/util/StringUtilsTests.java`.
 
-Use ACK for all source discovery. Do not use `rg`, `grep`, `Get-Content`, or
-other direct source-read shell commands.
-
 Do not run Gradle. The held-out grader runs the focused Spring Core test after
 your response. You may run quick source and diff checks only.
 
