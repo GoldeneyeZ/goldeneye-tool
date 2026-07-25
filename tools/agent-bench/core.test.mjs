@@ -366,6 +366,26 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
   }
 });
 
+test("Level-2 Spring config declares the million-token qualification and audit policy", () => {
+  const config = JSON.parse(readFileSync(resolve(
+    "tools",
+    "agent-bench",
+    "configs",
+    "spring-sensitive-value-redaction-level2.json",
+  ), "utf8"));
+
+  assert.deepEqual(config.qualification, {
+    min_input_tokens: 800_000,
+    max_input_tokens: 1_200_000,
+    min_uncached_input_tokens: 100_000,
+  });
+  assert.deepEqual(config.audit, {
+    expected_candidate_runs: 3,
+    expected_vanilla_runs: 3,
+  });
+  assert.equal(config.allowed_dirty_policy.max_paths, 40);
+});
+
 test("ready snapshots use stable ACK paths and skip priming", () => {
   const readySnapshot = {
     root: "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots\\spring-stringutils",
