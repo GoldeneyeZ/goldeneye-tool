@@ -2,8 +2,6 @@ package org.springframework.web.bind.support;
 
 import org.junit.jupiter.api.Test;
 
-import org.springframework.core.annotation.Sensitive;
-import org.springframework.validation.DataBinder;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.WebDataBinder;
 
@@ -12,10 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SensitiveWebBindingInitializerAgentBenchTests {
 
 	@Test
-	void propagatesCustomRedactorToEveryWebDataBinder() {
+	void propagatesCustomDetectorAndRedactorToEveryWebDataBinder() {
 		Credentials target = new Credentials();
 		target.setPassword("s3cr3t");
 		ConfigurableWebBindingInitializer initializer = new ConfigurableWebBindingInitializer();
+		initializer.setSensitiveValueDetector(context -> context.getPropertyPath().equals("password"));
 		initializer.setSensitiveValueRedactor((context, rejectedValue) ->
 				"<hidden:" + context.getObjectName() + "." + context.getPropertyPath() + ">");
 		WebDataBinder binder = new WebDataBinder(target, "credentials");
@@ -30,7 +29,6 @@ class SensitiveWebBindingInitializerAgentBenchTests {
 
 	static class Credentials {
 
-		@Sensitive
 		private String password;
 
 		public String getPassword() {

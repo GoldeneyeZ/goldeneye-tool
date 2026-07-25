@@ -61,7 +61,7 @@ function Initialize-Worktree {
 	& git -C $Worktree config user.email "agent-bench@example.test"
 	& git -C $Worktree config user.name "Agent Bench"
 	$wrapper = Join-Path $Worktree "gradlew.bat"
-	New-File $wrapper "@echo off`r`necho %* >> `"%GRADLE_ARGUMENT_LOG%`"`r`nexit /b %GRADLE_EXIT_CODE%`r`n"
+	New-File $wrapper "@echo off`r`necho %* >> `"%GRADLE_ARGUMENT_LOG%`"`r`nif not `"%GRADLE_CREATED_DIRTY_PATH%`"==`"`" echo generated > `"%GRADLE_CREATED_DIRTY_PATH%`"`r`nexit /b %GRADLE_EXIT_CODE%`r`n"
 	& git -C $Worktree add -- gradlew.bat
 	& git -C $Worktree commit --quiet -m "baseline"
 	foreach ($relativePath in $ValidCandidatePaths) {
@@ -72,7 +72,8 @@ function Initialize-Worktree {
 function Invoke-GraderFixture {
 	param(
 		[int]$GradleExitCode,
-		[string]$ExtraDirtyPath
+		[string]$ExtraDirtyPath,
+		[string]$GradleCreatedDirtyPath
 	)
 
 	if (-not (Test-Path -LiteralPath $Grader -PathType Leaf)) {
@@ -83,6 +84,7 @@ function Invoke-GraderFixture {
 	}
 	$env:GRADLE_EXIT_CODE = $GradleExitCode
 	$env:GRADLE_ARGUMENT_LOG = $GradleLog
+	$env:GRADLE_CREATED_DIRTY_PATH = $GradleCreatedDirtyPath
 	$output = & $PowerShell -NoProfile -File $Grader -Worktree $Worktree 2>&1
 	$arguments = if (Test-Path -LiteralPath $GradleLog) {
 		Get-Content -LiteralPath $GradleLog
@@ -138,6 +140,14 @@ try {
 		$result = Invoke-GraderFixture -GradleExitCode 1
 		Assert-True ($result.ExitCode -ne 0) "Expected grader to fail when Gradle fails."
 		Assert-Equal @($result.RemainingAgentBenchFiles).Count 0 "Expected no held-out fixture files after Gradle failure."
+	}
+
+	It "fails after Gradle when cleanup detects an out-of-policy file" {
+		$result = Invoke-GraderFixture -GradleExitCode 0 -GradleCreatedDirtyPath "settings.gradle"
+		Assert-True (Test-Path -LiteralPath (Join-Path $Worktree "settings.gradle")) "Expected fake Gradle to create the out-of-policy file."
+		Assert-True ($result.ExitCode -ne 0) "Expected post-cleanup policy failure to fail the grader."
+		Assert-True ($result.Output -match "Protocol violation") "Expected protocol-violation output."
+		Assert-Equal @($result.RemainingAgentBenchFiles).Count 0 "Expected no held-out fixture files after cleanup-policy failure."
 	}
 }
 finally {

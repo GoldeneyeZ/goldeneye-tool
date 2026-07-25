@@ -1,12 +1,18 @@
 package org.springframework.validation;
 
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.MutablePropertyValues;
 import org.springframework.beans.PropertyAccessException;
+import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.Sensitive;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,6 +81,48 @@ class SensitiveDataBinderAgentBenchTests {
 	}
 
 	@Test
+	void redactsConstructorBoundRecordComponent() {
+		String submittedPassword = "s3cr3t";
+		DataBinder binder = new DataBinder(null, "credentials");
+		binder.setTargetType(ResolvableType.forClass(ConstructorCredentials.class));
+		binder.construct(new DataBinder.ValueResolver() {
+			@Override
+			public Object resolveValue(String name, Class<?> type) {
+				return (name.equals("username") ? "spring" : submittedPassword);
+			}
+
+			@Override
+			public Set<String> getNames() {
+				return Set.of("username", "password");
+			}
+		});
+
+		FieldError error = binder.getBindingResult().getFieldError("password");
+		assertThat(error).isNotNull();
+		assertThat(error.getRejectedValue()).isEqualTo("[REDACTED]");
+		assertThat(submittedPassword).isEqualTo("s3cr3t");
+	}
+
+	@Test
+	void detectsSensitiveAccessorsAndComposedAnnotationsDuringBinding() {
+		AccessorCredentials accessorTarget = new AccessorCredentials();
+		accessorTarget.setPassword("s3cr3t");
+		DataBinder accessorBinder = new DataBinder(accessorTarget, "credentials");
+		accessorBinder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		accessorBinder.validate();
+		assertThat(accessorBinder.getBindingResult().getFieldError("password").getRejectedValue())
+				.isEqualTo("[REDACTED]");
+
+		ComposedCredentials composedTarget = new ComposedCredentials();
+		composedTarget.setPassword("s3cr3t");
+		DataBinder composedBinder = new DataBinder(composedTarget, "credentials");
+		composedBinder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		composedBinder.validate();
+		assertThat(composedBinder.getBindingResult().getFieldError("password").getRejectedValue())
+				.isEqualTo("[REDACTED]");
+	}
+
+	@Test
 	void supportsCustomDetectorForUnmarkedProperty() {
 		PlainCredentials target = new PlainCredentials();
 		target.setPassword("s3cr3t");
@@ -100,6 +148,9 @@ class SensitiveDataBinderAgentBenchTests {
 	}
 
 	record Credentials(String username, @Sensitive String password) {
+	}
+
+	record ConstructorCredentials(String username, @Sensitive Integer password) {
 	}
 
 	static class PlainCredentials {
@@ -135,6 +186,34 @@ class SensitiveDataBinderAgentBenchTests {
 		String password;
 	}
 
+	static class AccessorCredentials {
+
+		private String password;
+
+		@Sensitive
+		public String getPassword() {
+			return this.password;
+		}
+
+		public void setPassword(String password) {
+			this.password = password;
+		}
+	}
+
+	static class ComposedCredentials {
+
+		@ComposedSensitive
+		private String password;
+
+		public String getPassword() {
+			return this.password;
+		}
+
+		public void setPassword(String password) {
+			this.password = password;
+		}
+	}
+
 	static class Profile {
 
 		final List<Account> accounts = new ArrayList<>();
@@ -156,5 +235,11 @@ class SensitiveDataBinderAgentBenchTests {
 		public String getPassword() {
 			return this.password;
 		}
+	}
+
+	@Target({ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER, ElementType.RECORD_COMPONENT})
+	@Retention(RetentionPolicy.RUNTIME)
+	@Sensitive
+	@interface ComposedSensitive {
 	}
 }
