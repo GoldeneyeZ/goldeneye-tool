@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   buildRunMatrix,
+  codexSandboxArgs,
   emptyTelemetry,
   expandTokens,
   loadConfig,
@@ -993,11 +994,10 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     "--color",
     "never",
   ];
-  if (config.codex_full_access === true) {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else {
-    args.push("-s", "workspace-write", "--add-dir", worktree, "-c", 'approval_policy="never"');
-  }
+  args.push(...codexSandboxArgs({
+    fullAccess: config.codex_full_access === true,
+    worktree,
+  }));
   args.push("-C", worktree);
   if (engine.kind !== "vanilla" && engine.kind !== "ack") {
     const serverName = engine.mcpServerName;

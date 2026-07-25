@@ -284,6 +284,13 @@ export function tomlInlineTable(object) {
     .join(", ")} }`;
 }
 
+export function codexSandboxArgs({ fullAccess, worktree }) {
+  if (fullAccess) {
+    return ["-s", "danger-full-access", "-c", 'approval_policy="never"'];
+  }
+  return ["-s", "workspace-write", "--add-dir", worktree, "-c", 'approval_policy="never"'];
+}
+
 export function expandTokens(value, tokens) {
   if (Array.isArray(value)) return value.map((item) => expandTokens(item, tokens));
   if (value && typeof value === "object") {

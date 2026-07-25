@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   buildRunMatrix,
+  codexSandboxArgs,
   isDirectSourceReadCommand,
   loadConfig,
   parseCodexJsonl,
@@ -17,6 +18,15 @@ import {
   summarizeRuns,
   tomlInlineTable,
 } from "./core.mjs";
+
+test("codexSandboxArgs grants full access without bypass process-tree mode", () => {
+  assert.deepEqual(codexSandboxArgs({ fullAccess: true, worktree: "D:\\repo" }), [
+    "-s",
+    "danger-full-access",
+    "-c",
+    'approval_policy="never"',
+  ]);
+});
 
 test("sanitizeId creates stable filesystem-safe identifiers", () => {
   assert.equal(sanitizeId("Terax / Fuzzy Diacritics"), "terax-fuzzy-diacritics");
