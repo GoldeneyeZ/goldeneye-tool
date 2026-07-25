@@ -367,8 +367,12 @@ test("prepare-snapshot exits before spawning Codex", () => {
         ready_snapshot: ready,
       }),
     );
-    mkdirSync(ready.worktree, { recursive: true });
-    writeFileSync(join(ready.worktree, "orphaned-run.txt"), "stale\n");
+    mkdirSync(ready.allowed_worktree_root, { recursive: true });
+    spawnSync("git", ["-C", repo, "worktree", "add", "--detach", ready.worktree, "HEAD"], {
+      encoding: "utf8",
+    });
+    spawnSync("git", ["-C", repo, "worktree", "lock", ready.worktree], { encoding: "utf8" });
+    rmSync(ready.worktree, { recursive: true, force: true });
     const result = spawnSync(
       process.execPath,
       [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],

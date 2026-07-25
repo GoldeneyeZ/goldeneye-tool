@@ -1260,6 +1260,10 @@ function removeWorktreeIfRegistered(repo, worktree, allowedRoot) {
   if (!isInside(resolvedWorktree, resolvedAllowedRoot)) {
     throw new Error(`Refusing worktree cleanup outside ${resolvedAllowedRoot}: ${resolvedWorktree}`);
   }
+  spawnSync("git", ["-C", resolvedRepo, "worktree", "unlock", resolvedWorktree], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
   spawnSync("git", ["-C", resolvedRepo, "worktree", "remove", "--force", resolvedWorktree], {
     encoding: "utf8",
     windowsHide: true,
