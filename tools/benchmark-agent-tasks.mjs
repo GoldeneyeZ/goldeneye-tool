@@ -1265,6 +1265,9 @@ function removeWorktreeIfRegistered(repo, worktree, allowedRoot) {
     windowsHide: true,
   });
   spawnSync("git", ["-C", resolvedRepo, "worktree", "prune"], { encoding: "utf8", windowsHide: true });
+  if (existsSync(resolvedWorktree)) {
+    rmIfInside(resolvedWorktree, resolvedAllowedRoot);
+  }
 }
 
 function linkWorkspaceDependencies(repo, worktree) {

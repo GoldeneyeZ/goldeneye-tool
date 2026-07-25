@@ -367,6 +367,8 @@ test("prepare-snapshot exits before spawning Codex", () => {
         ready_snapshot: ready,
       }),
     );
+    mkdirSync(ready.worktree, { recursive: true });
+    writeFileSync(join(ready.worktree, "orphaned-run.txt"), "stale\n");
     const result = spawnSync(
       process.execPath,
       [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
