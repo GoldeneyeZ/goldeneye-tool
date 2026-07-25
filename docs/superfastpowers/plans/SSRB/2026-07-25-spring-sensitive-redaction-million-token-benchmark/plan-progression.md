@@ -41,8 +41,8 @@ Last updated: 2026-07-25T15:33:03.448Z
 ## Task 4: Add Level-2 Spring task and held-out grader
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-4/`
-- Status: pending
-- Next action: Start implementation.
+- Status: implemented
+- Next action: Await plan-scoped reviews after all tasks are implemented.
 
 ## Task 5: Add Level-2 configuration and six-module snapshot
 

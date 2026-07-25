@@ -2,7 +2,7 @@
 
 **Plan:** `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark.md`
 **Task:** `SSRB-4`
-**Commit SHA:** Pending until task completion. If review fixes add commits, update to the latest task commit and note the reviewed range below.
+**Commit SHA:** `e816210` (`bench: cover Spring redaction edge cases`).
 
 ## Starting Context
 
@@ -16,4 +16,14 @@ The files above are starting points only. Inspect any additional files needed to
 
 ## Completion Updates
 
-The implementer updates this section before review with the final task commit SHA, reviewed commit range if relevant, files created, files modified, additional relevant files, and verification commands/results.
+- Final task commit: `e816210` (`bench: cover Spring redaction edge cases`).
+- Reviewed range: `c6d3974..e816210` (specification and code-quality reviews approved).
+- Files created: the Level-2 agent task, grader, grader contract test, and six
+  held-out module fixtures listed in `task.md`.
+- Files modified: this task context and the SSRB-4 fields in plan progression.
+- Verification: observed contract RED due to the absent grader; then
+  `pwsh -NoProfile -File tools/agent-bench/graders/spring-sensitive-value-redaction.test.ps1`
+  passed all 4 cases. `node --test tools/agent-bench/*.test.mjs` passed 44/44.
+  `git diff --cached --check` passed before the task commit. Fixture APIs and
+  web test infrastructure were checked against the pinned Spring target with
+  ACK; its worktree remained clean.
