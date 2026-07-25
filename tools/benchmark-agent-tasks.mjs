@@ -333,7 +333,7 @@ console.log(`Agent benchmark artifact: ${config.output}`);
 async function prepareReadySnapshot({ baseCommit, config, repoName }) {
   const readySnapshot = config.ready_snapshot;
   if (!readySnapshot) throw new Error("--prepare-snapshot requires ready_snapshot configuration");
-  const ackEngine = config.engines.find((engine) => engine.kind === "ack");
+  const ackEngine = benchmarkEngines.find((engine) => engine.kind === "ack");
   if (!ackEngine) throw new Error("--prepare-snapshot requires an ACK engine");
 
   const startedAt = performance.now();
