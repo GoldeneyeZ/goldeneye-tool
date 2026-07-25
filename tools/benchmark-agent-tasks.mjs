@@ -1361,7 +1361,12 @@ function rmIfInside(target, parent) {
   if (!isInside(absoluteTarget, absoluteParent)) {
     throw new Error(`Refusing recursive delete outside ${absoluteParent}: ${absoluteTarget}`);
   }
-  rmSync(absoluteTarget, { force: true, recursive: true });
+  rmSync(absoluteTarget, {
+    force: true,
+    maxRetries: process.platform === "win32" ? 20 : 0,
+    recursive: true,
+    retryDelay: 250,
+  });
 }
 
 function isInside(child, parent) {
