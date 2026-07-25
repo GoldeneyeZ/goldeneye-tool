@@ -1,0 +1,84 @@
+{
+  "name": "spring-sensitive-value-redaction-level0",
+  "output": "../../../target/agent-bench/spring-sensitive-value-redaction-level0/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\spring-framework",
+  "base_ref": "daf955157871e4ac6f192e06b71d6cc595eb979b",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": ["warm"],
+  "java_home": "C:\\Users\\Zacha\\.jdks\\openjdk-17.0.2",
+  "gradle_user_home": "D:\\Dev\\Caches\\gradle-spring-framework-6.2",
+  "qualification": {
+    "min_input_tokens": 800000,
+    "max_input_tokens": 1200000,
+    "min_uncached_input_tokens": 100000
+  },
+  "audit": {
+    "expected_candidate_runs": 3,
+    "expected_vanilla_runs": 3
+  },
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/spring-sensitive-value-redaction-level0",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\ssrb5-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\ssrb5-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "spring-sensitive-value-redaction-level0",
+      "prompt_file": "../tasks/spring-sensitive-value-redaction-level0.md",
+      "source_language": "Java",
+      "source_extensions": [".java"],
+      "grader": {
+        "command": "pwsh",
+        "args": [
+          "-NoProfile",
+          "-File",
+          "../graders/spring-sensitive-value-redaction-level0.ps1",
+          "-Worktree",
+          "{worktree}"
+        ]
+      },
+      "extensions": [".java"]
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "spring-core/src/",
+      "spring-beans/src/",
+      "spring-context/src/"
+    ],
+    "required_prefixes": [
+      "spring-core/src/main/java/",
+      "spring-context/src/main/java/"
+    ],
+    "min_paths": 3,
+    "max_paths": 16
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full",
+        "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java;spring-core/src/test/java;spring-beans/src/main/java;spring-beans/src/test/java;spring-context/src/main/java;spring-context/src/test/java"
+      },
+      "cache_modes": ["warm"]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": ["none"]
+    }
+  ]
+}
