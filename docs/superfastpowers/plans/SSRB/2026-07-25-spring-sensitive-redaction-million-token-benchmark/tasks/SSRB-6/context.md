@@ -2,7 +2,7 @@
 
 **Plan:** `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark.md`
 **Task:** `SSRB-6`
-**Commit SHA:** Pending until task completion. If review fixes add commits, update to the latest task commit and note the reviewed range below.
+**Commit SHA:** `b32ec4d46232c44162ee8ca2dd3ee536f1697d21`
 
 ## Starting Context
 
@@ -20,8 +20,11 @@ The implementer updates this section before review with the final task commit SH
 
 ### 2026-07-25 implementation evidence
 
-- Candidate source commit: `81507215e426dac1baec7b30124b8b4ebc4be283` (reviewed harness-fix range: `ab1bd2b..8150721`).
+- Candidate source commit: `b32ec4d46232c44162ee8ca2dd3ee536f1697d21` (reviewed harness-fix range: `ab1bd2b..b32ec4d`).
 - Generated, intentionally uncommitted artifacts: `target/agent-bench/spring-sensitive-value-redaction-level2/preparation.json` and `provenance.json`.
 - The full Node harness, held-out Spring grader, whitespace check, current `goldeneye` package tests, release build, snapshot creation/restore, and `--verify-only` passed. The task's literal `cargo test -p goldeneye-ack` command is obsolete because that Cargo package does not exist; `cargo test -p goldeneye` passed instead.
 - The Spring configuration sets `GOLDENEYE_GRAMMAR_PACK=full`, so the frozen candidate was built with `--features full-grammar-pack` and the local grammar-pack directory. The basic release build is insufficient for that configured runtime.
+- Audit found that configured include directories were previously treated as exact file names, producing an invalid 393,341-byte snapshot with only 2 nodes and 1 edge. Commit `b32ec4d` adds component-aware tree-prefix matching with a regression test.
+- The rebuilt featured candidate is 244,390,400 bytes with SHA-256 `62fa214bf146ef99dfb3ae9236299934ee0c25190fc921ad1928ff8581d885de`.
+- The corrected snapshot manifest SHA-256 is `fbf2c2ddabf84df33abfc12dcc530d8413dd3c1ed8d42a0a0025999652c8e942`: 459,083,901 bytes across `goldeneye.db` and `ack-state/projects.json`, containing 4,693 files, 212,047 nodes, and 256,956 edges. Restore and `--verify-only` passed against Spring `daf955157871e4ac6f192e06b71d6cc595eb979b`.
 - Frozen candidate and snapshot verification passed. Scoring eligibility is deliberately `false`: it additionally requires a clean `--smoke` result, and the external Codex quota was exhausted before the agent turn. No smoke result was fabricated.
