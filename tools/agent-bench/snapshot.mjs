@@ -43,7 +43,13 @@ export async function collectRegularFiles(root) {
     for (const name of entries) {
       const absolute = path.join(directory, name);
       const relative = relativeDirectory ? `${relativeDirectory}/${name}` : name;
-      const stats = await lstat(absolute);
+      let stats;
+      try {
+        stats = await lstat(absolute);
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
       if (stats.isSymbolicLink()) {
         throw unsafeEntryError(absolute);
       }
