@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-	[string]$Grader = (Join-Path $PSScriptRoot "spring-sensitive-value-redaction.ps1")
+	[string]$Grader = (Join-Path $PSScriptRoot "spring-sensitive-value-redaction.ps1"),
+	[ValidateSet(1, 2)]
+	[int]$Level = 2
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +26,21 @@ $ValidCandidatePaths = @(
 	"spring-context/src/test/java/org/springframework/validation/SensitiveSupportTests.java",
 	"spring-webmvc/src/test/java/org/springframework/web/servlet/SensitiveMvcSupportTests.java"
 )
+if ($Level -eq 1) {
+	$FixtureTargets = @($FixtureTargets | Where-Object {
+		$_ -notmatch "SensitiveMethodValidation|spring-webmvc|spring-webflux"
+	})
+	$ValidCandidatePaths = @(
+		"spring-core/src/main/java/org/springframework/core/annotation/Sensitive.java",
+		"spring-core/src/test/java/org/springframework/core/annotation/SensitiveTests.java",
+		"spring-beans/src/main/java/org/springframework/beans/SensitiveBeanSupport.java",
+		"spring-context/src/main/java/org/springframework/validation/SensitiveSupport.java",
+		"spring-context/src/main/java/org/springframework/validation/SensitiveValueContext.java",
+		"spring-context/src/test/java/org/springframework/validation/SensitiveSupportTests.java",
+		"spring-web/src/main/java/org/springframework/web/bind/SensitiveWebSupport.java",
+		"spring-web/src/test/java/org/springframework/web/bind/SensitiveWebSupportTests.java"
+	)
+}
 
 function Assert-True {
 	param([object]$Condition, [string]$Message)
@@ -127,9 +144,17 @@ try {
 		$result = Invoke-GraderFixture -GradleExitCode 0
 		Assert-Equal $result.ExitCode 0 "Expected grader to pass."
 		Assert-Equal @($result.RemainingAgentBenchFiles).Count 0 "Expected no held-out fixture files after PASS."
+		Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-core:test" }) "Expected spring-core Gradle task."
 		Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-context:test" }) "Expected spring-context Gradle task."
-		Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-webmvc:test" }) "Expected spring-webmvc Gradle task."
-		Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-webflux:test" }) "Expected spring-webflux Gradle task."
+		Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-web:test" }) "Expected spring-web Gradle task."
+		if ($Level -eq 1) {
+			Assert-True (-not ($result.GradleArguments | Where-Object { $_ -match ":spring-webmvc:test|:spring-webflux:test|SensitiveMethodValidationAgentBenchTests" })) `
+				"Level 1 must exclude method-validation, MVC, and WebFlux fixtures."
+		}
+		else {
+			Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-webmvc:test" }) "Expected spring-webmvc Gradle task."
+			Assert-True ($result.GradleArguments | Where-Object { $_ -match ":spring-webflux:test" }) "Expected spring-webflux Gradle task."
+		}
 	}
 
 	It "fails before Gradle when a candidate path is outside policy" {
