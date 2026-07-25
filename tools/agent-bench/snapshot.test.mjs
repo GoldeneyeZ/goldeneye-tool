@@ -28,10 +28,39 @@ async function makeFixture(t) {
 
 test("snapshot API exposes creation, verification, restore, and containment", () => {
   assert.equal(typeof snapshot.assertContainedPath, "function");
+  assert.equal(typeof snapshot.waitForNoWriterArtifacts, "function");
   assert.equal(typeof snapshot.createReadySnapshot, "function");
   assert.equal(typeof snapshot.verifyReadySnapshot, "function");
   assert.equal(typeof snapshot.restoreReadySnapshot, "function");
   assert.equal(typeof snapshot.verifyTreeAgainstManifest, "function");
+});
+
+test("waitForNoWriterArtifacts tolerates transient SQLite sidecars", async (t) => {
+  const fixture = await makeFixture(t);
+  const sidecar = path.join(fixture.liveCache, "goldeneye.db-shm");
+  await writeFile(sidecar, "closing");
+  const removal = new Promise((resolve) => {
+    setTimeout(() => resolve(rm(sidecar)), 25);
+  });
+
+  await snapshot.waitForNoWriterArtifacts(fixture.liveCache, {
+    timeoutMs: 500,
+    pollMs: 10,
+  });
+  await removal;
+});
+
+test("waitForNoWriterArtifacts rejects persistent writer artifacts", async (t) => {
+  const fixture = await makeFixture(t);
+  await writeFile(path.join(fixture.liveCache, "goldeneye.db-wal"), "active");
+
+  await assert.rejects(
+    () => snapshot.waitForNoWriterArtifacts(fixture.liveCache, {
+      timeoutMs: 20,
+      pollMs: 5,
+    }),
+    /not quiescent/,
+  );
 });
 
 test("assertContainedPath accepts only strict descendants", async (t) => {

@@ -39,6 +39,7 @@ import {
   restoreReadySnapshot,
   verifyTreeAgainstManifest,
   verifyReadySnapshot,
+  waitForNoWriterArtifacts,
 } from "./agent-bench/snapshot.mjs";
 import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
 import {
@@ -294,7 +295,7 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       readySnapshot.worktree,
       config.preindex_timeout_ms ?? 600_000,
     );
-    await assertNoWriterArtifacts(readySnapshot.live_cache);
+    await waitForNoWriterArtifacts(readySnapshot.live_cache);
     const manifest = await createReadySnapshot({
       liveCache: readySnapshot.live_cache,
       snapshotRoot: readySnapshot.root,

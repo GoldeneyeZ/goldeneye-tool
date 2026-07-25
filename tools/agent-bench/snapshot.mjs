@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 const MANIFEST_FILE = "snapshot-manifest.json";
 const WRITER_ARTIFACT = /(?:^|[\\/])(?:goldeneye\.db-(?:wal|shm)|.*\.(?:lock|lck))$/i;
@@ -68,6 +69,27 @@ export async function assertNoWriterArtifacts(root) {
   if (hit) {
     throw new Error(`snapshot source is not quiescent: ${hit.absolute}`);
   }
+}
+
+export async function waitForNoWriterArtifacts(
+  root,
+  { timeoutMs = 5_000, pollMs = 50 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() <= deadline) {
+    try {
+      await assertNoWriterArtifacts(root);
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith("snapshot source is not quiescent:")) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await delay(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+  }
+  throw lastError;
 }
 
 export async function copyRegularTree(source, destination, { exclude = [] } = {}) {
