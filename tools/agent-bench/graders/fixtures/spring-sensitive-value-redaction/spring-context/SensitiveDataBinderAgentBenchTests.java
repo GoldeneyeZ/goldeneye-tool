@@ -23,7 +23,8 @@ class SensitiveDataBinderAgentBenchTests {
 	void redactsValidatorRejectedRecordComponentWithoutMutatingTarget() {
 		Credentials target = new Credentials("spring", "s3cr3t");
 		DataBinder binder = new DataBinder(target, "credentials");
-		binder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		binder.addValidators(Validator.forInstanceOf(Credentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		binder.validate();
 
 		FieldError error = binder.getBindingResult().getFieldError("password");
@@ -38,7 +39,8 @@ class SensitiveDataBinderAgentBenchTests {
 		PlainCredentials target = new PlainCredentials();
 		target.setPassword("visible");
 		DataBinder binder = new DataBinder(target, "credentials");
-		binder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		binder.addValidators(Validator.forInstanceOf(PlainCredentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		binder.validate();
 
 		assertThat(binder.getBindingResult().getFieldError("password").getRejectedValue()).isEqualTo("visible");
@@ -48,7 +50,7 @@ class SensitiveDataBinderAgentBenchTests {
 	void redactsSubmittedSecretForTypeMismatchAndPreservesErrorMetadata() {
 		NumericCredentials target = new NumericCredentials();
 		DataBinder binder = new DataBinder(target, "credentials");
-		binder.bind(new MutablePropertyValues("password", "s3cr3t"));
+		binder.bind(new MutablePropertyValues().add("password", "s3cr3t"));
 
 		FieldError error = binder.getBindingResult().getFieldError("password");
 		assertThat(error).isNotNull();
@@ -65,7 +67,8 @@ class SensitiveDataBinderAgentBenchTests {
 		DirectCredentials directTarget = new DirectCredentials();
 		DataBinder directBinder = new DataBinder(directTarget, "credentials");
 		directBinder.initDirectFieldAccess();
-		directBinder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		directBinder.addValidators(Validator.forInstanceOf(DirectCredentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		directBinder.validate();
 		assertThat(directBinder.getBindingResult().getFieldError("password").getRejectedValue())
 				.isEqualTo("[REDACTED]");
@@ -73,7 +76,8 @@ class SensitiveDataBinderAgentBenchTests {
 		Profile profile = new Profile();
 		profile.accounts.add(new Account("s3cr3t"));
 		DataBinder nestedBinder = new DataBinder(profile, "profile");
-		nestedBinder.addValidators((object, errors) -> errors.rejectValue("accounts[0].password", "weak"));
+		nestedBinder.addValidators(Validator.forInstanceOf(Profile.class,
+				(object, errors) -> errors.rejectValue("accounts[0].password", "weak")));
 		nestedBinder.validate();
 		assertThat(nestedBinder.getBindingResult().getFieldError("accounts[0].password").getRejectedValue())
 				.isEqualTo("[REDACTED]");
@@ -108,7 +112,8 @@ class SensitiveDataBinderAgentBenchTests {
 		AccessorCredentials accessorTarget = new AccessorCredentials();
 		accessorTarget.setPassword("s3cr3t");
 		DataBinder accessorBinder = new DataBinder(accessorTarget, "credentials");
-		accessorBinder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		accessorBinder.addValidators(Validator.forInstanceOf(AccessorCredentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		accessorBinder.validate();
 		assertThat(accessorBinder.getBindingResult().getFieldError("password").getRejectedValue())
 				.isEqualTo("[REDACTED]");
@@ -116,7 +121,8 @@ class SensitiveDataBinderAgentBenchTests {
 		ComposedCredentials composedTarget = new ComposedCredentials();
 		composedTarget.setPassword("s3cr3t");
 		DataBinder composedBinder = new DataBinder(composedTarget, "credentials");
-		composedBinder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		composedBinder.addValidators(Validator.forInstanceOf(ComposedCredentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		composedBinder.validate();
 		assertThat(composedBinder.getBindingResult().getFieldError("password").getRejectedValue())
 				.isEqualTo("[REDACTED]");
@@ -128,7 +134,8 @@ class SensitiveDataBinderAgentBenchTests {
 		target.setPassword("s3cr3t");
 		DataBinder binder = new DataBinder(target, "credentials");
 		binder.setSensitiveValueDetector(context -> context.getPropertyPath().equals("password"));
-		binder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		binder.addValidators(Validator.forInstanceOf(PlainCredentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		binder.validate();
 
 		assertThat(binder.getBindingResult().getFieldError("password").getRejectedValue()).isEqualTo("[REDACTED]");
@@ -140,7 +147,8 @@ class SensitiveDataBinderAgentBenchTests {
 		DataBinder binder = new DataBinder(target, "credentials");
 		binder.setSensitiveValueRedactor((context, rejectedValue) ->
 				"<hidden:" + context.getObjectName() + "." + context.getPropertyPath() + ">");
-		binder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		binder.addValidators(Validator.forInstanceOf(Credentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		binder.validate();
 
 		assertThat(binder.getBindingResult().getFieldError("password").getRejectedValue())

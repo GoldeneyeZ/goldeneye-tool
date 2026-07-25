@@ -32,6 +32,8 @@
     {
       "id": "spring-sensitive-value-redaction-level2",
       "prompt_file": "../tasks/spring-sensitive-value-redaction-level2.md",
+      "source_language": "Java",
+      "source_extensions": [".java"],
       "grader": {
         "command": "pwsh",
         "args": [

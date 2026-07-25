@@ -3,6 +3,7 @@ package org.springframework.web.bind.support;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.validation.FieldError;
+import org.springframework.validation.Validator;
 import org.springframework.web.bind.WebDataBinder;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,7 +20,8 @@ class SensitiveWebBindingInitializerAgentBenchTests {
 				"<hidden:" + context.getObjectName() + "." + context.getPropertyPath() + ">");
 		WebDataBinder binder = new WebDataBinder(target, "credentials");
 		initializer.initBinder(binder);
-		binder.addValidators((object, errors) -> errors.rejectValue("password", "weak"));
+		binder.addValidators(Validator.forInstanceOf(Credentials.class,
+				(object, errors) -> errors.rejectValue("password", "weak")));
 		binder.validate();
 
 		FieldError error = binder.getBindingResult().getFieldError("password");

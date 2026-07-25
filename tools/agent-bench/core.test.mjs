@@ -384,6 +384,8 @@ test("Level-2 Spring config declares the million-token qualification and audit p
     expected_vanilla_runs: 3,
   });
   assert.equal(config.allowed_dirty_policy.max_paths, 40);
+  assert.equal(config.tasks[0].source_language, "Java");
+  assert.deepEqual(config.tasks[0].source_extensions, [".java"]);
 });
 
 test("ready snapshots use stable ACK paths and skip priming", () => {

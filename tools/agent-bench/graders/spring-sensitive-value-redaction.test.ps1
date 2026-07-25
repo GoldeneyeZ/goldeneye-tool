@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $PowerShell = (Get-Command pwsh -ErrorAction Stop).Source
+$FixtureRoot = Join-Path $PSScriptRoot "fixtures/spring-sensitive-value-redaction"
 $FixtureTargets = @(
 	"spring-core/src/test/java/org/springframework/core/annotation/SensitiveAnnotationAgentBenchTests.java",
 	"spring-context/src/test/java/org/springframework/validation/SensitiveDataBinderAgentBenchTests.java",
@@ -109,6 +110,18 @@ function Invoke-GraderFixture {
 
 try {
 	Initialize-Worktree
+
+	It "keeps held-out fixtures on module-local test APIs" {
+		foreach ($fixture in Get-ChildItem -LiteralPath $FixtureRoot -Recurse -Filter "*.java") {
+			$content = Get-Content -LiteralPath $fixture.FullName -Raw
+			Assert-True ($content -notmatch "org\.springframework\.test\.web") `
+				"Fixture must not depend on the unavailable spring-test module: $($fixture.FullName)"
+			Assert-True ($content -notmatch "addValidators\(\(") `
+				"Fixture must use Validator.forInstanceOf(...) instead of treating Validator as functional: $($fixture.FullName)"
+			Assert-True ($content -notmatch "new MutablePropertyValues\([^)]*,") `
+				"Fixture must use a supported MutablePropertyValues constructor: $($fixture.FullName)"
+		}
+	}
 
 	It "copies every held-out fixture and removes it after PASS" {
 		$result = Invoke-GraderFixture -GradleExitCode 0
