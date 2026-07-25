@@ -29,8 +29,8 @@ Last updated: 2026-07-25T15:33:03.448Z
 ## Task 2: Generalize report audit and variability statistics
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-2/`
-- Status: pending
-- Next action: Start implementation.
+- Status: implemented
+- Next action: Await plan-scoped reviews after all tasks are implemented.
 
 ## Task 3: Add non-scored calibration and token gates
 

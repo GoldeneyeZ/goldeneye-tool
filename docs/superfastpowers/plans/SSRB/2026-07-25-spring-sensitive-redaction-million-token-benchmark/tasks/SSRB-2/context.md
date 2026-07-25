@@ -2,7 +2,7 @@
 
 **Plan:** `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark.md`
 **Task:** `SSRB-2`
-**Commit SHA:** Pending until task completion. If review fixes add commits, update to the latest task commit and note the reviewed range below.
+**Commit SHA:** `868d114` (`bench: generalize scored report audit`).
 
 ## Starting Context
 
@@ -16,4 +16,21 @@ The files above are starting points only. Inspect any additional files needed to
 
 ## Completion Updates
 
-The implementer updates this section before review with the final task commit SHA, reviewed commit range if relevant, files created, files modified, additional relevant files, and verification commands/results.
+Task commit: `868d114`.
+
+Files created: none.
+
+Files modified:
+
+- `tools/agent-bench/core.mjs`
+- `tools/agent-bench/core.test.mjs`
+- `tools/agent-bench/report.mjs`
+- `tools/agent-bench/report.test.mjs`
+- `tools/benchmark-agent-tasks.mjs`
+
+Verification:
+
+- RED: `node --test tools/agent-bench/core.test.mjs tools/agent-bench/report.test.mjs` failed for missing sample-summary fields, dynamic limitations, and 3×3 audit support.
+- GREEN: `node --test tools/agent-bench/core.test.mjs tools/agent-bench/report.test.mjs` — 18 passed.
+- Full harness: `node --test tools/agent-bench/*.test.mjs` — 40 passed.
+- Syntax/diff: `node --check` on modified production modules and `git diff --check` passed.
