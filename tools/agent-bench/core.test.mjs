@@ -25,6 +25,8 @@ test("codexSandboxArgs grants full access without bypass process-tree mode", () 
     "danger-full-access",
     "-c",
     'approval_policy="never"',
+    "-c",
+    "features.code_mode_host=false",
   ]);
 });
 

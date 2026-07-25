@@ -286,9 +286,25 @@ export function tomlInlineTable(object) {
 
 export function codexSandboxArgs({ fullAccess, worktree }) {
   if (fullAccess) {
-    return ["-s", "danger-full-access", "-c", 'approval_policy="never"'];
+    return [
+      "-s",
+      "danger-full-access",
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      "features.code_mode_host=false",
+    ];
   }
-  return ["-s", "workspace-write", "--add-dir", worktree, "-c", 'approval_policy="never"'];
+  return [
+    "-s",
+    "workspace-write",
+    "--add-dir",
+    worktree,
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "features.code_mode_host=false",
+  ];
 }
 
 export function expandTokens(value, tokens) {
