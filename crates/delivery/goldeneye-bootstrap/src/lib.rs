@@ -61,9 +61,7 @@ fn configured_include_paths() -> Vec<PathBuf> {
 }
 
 fn path_is_included(path: &Path, includes: &[PathBuf]) -> bool {
-    includes
-        .iter()
-        .any(|include| path.components().eq(include.components()))
+    includes.iter().any(|include| path.starts_with(include))
 }
 
 struct FilteredSourceDiscovery {
@@ -268,10 +266,10 @@ mod tests {
     }
 
     #[test]
-    fn configured_include_paths_match_exact_relative_files() {
+    fn configured_include_paths_match_relative_files_and_trees() {
         let includes = [
             Path::new("spring-core/src/main/java/example/StringUtils.java").to_path_buf(),
-            Path::new("spring-core/src/test/java/example/StringUtilsTests.java").to_path_buf(),
+            Path::new("spring-core/src/test/java").to_path_buf(),
         ];
 
         assert!(path_is_included(
@@ -280,6 +278,14 @@ mod tests {
         ));
         assert!(!path_is_included(
             Path::new("spring-core/src/main/java/example/Other.java"),
+            &includes
+        ));
+        assert!(path_is_included(
+            Path::new("spring-core/src/test/java/example/StringUtilsTests.java"),
+            &includes
+        ));
+        assert!(!path_is_included(
+            Path::new("spring-core/src/testFixtures/java/example/StringUtilsTests.java"),
             &includes
         ));
     }
