@@ -2,7 +2,9 @@
 
 **Plan:** `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark.md`
 **Task:** `SSRB-8`
-**Commit SHA:** Pending until task completion. If review fixes add commits, update to the latest task commit and note the reviewed range below.
+**Commit SHA:** Final frozen benchmark candidate
+`ba5876e693e580947481a166cba8910f7e81a9df`; documentation wrap-up is the
+subsequent report commit.
 
 ## Starting Context
 
@@ -16,4 +18,13 @@ The files above are starting points only. Inspect any additional files needed to
 
 ## Completion Updates
 
-The implementer updates this section before review with the final task commit SHA, reviewed commit range if relevant, files created, files modified, additional relevant files, and verification commands/results.
+- Clean ACK smoke and clean vanilla calibration both passed the same held-out
+  grader on the final frozen task and snapshot.
+- Final pair: ACK 984,009 input / 7.16 min; vanilla 993,518 input / 5.29 min.
+- User explicitly waived the randomized 3×3 matrix after accepting the final
+  clean `n = 1` result.
+- Sample SD and CV remain undefined; no statistical-significance claim.
+- Raw `target/agent-bench/**` artifacts remain local and intentionally
+  uncommitted.
+- Published report:
+  `docs/benchmarks/2026-07-26-spring-sensitive-value-redaction-benchmark.md`.

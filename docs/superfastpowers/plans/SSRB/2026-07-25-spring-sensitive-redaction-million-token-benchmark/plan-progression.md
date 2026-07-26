@@ -1,6 +1,6 @@
 # Plan Progression
 
-Last updated: 2026-07-25T15:33:03.448Z
+Last updated: 2026-07-26
 
 ## Execution Policy
 
@@ -14,11 +14,12 @@ Last updated: 2026-07-25T15:33:03.448Z
 
 ## Goal Phases
 
-- Implementation: active
+- Implementation: complete
 - Spec review: unchecked
 - Code quality: unchecked
 - Integration review: unchecked
-- Next action: Implement SSRB-6.
+- Next action: Optional plan-scoped reviews. Benchmark execution closed by
+  user decision after the accepted clean `n = 1` paired result.
 
 ## Task 1: Add reusable dirty-path policies
 
@@ -48,22 +49,25 @@ Last updated: 2026-07-25T15:33:03.448Z
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-5/`
 - Status: implemented
-- Next action: Root runs the mandatory smoke gate before scored benchmark work.
+- Next action: Complete; mandatory smoke passed.
 
 ## Task 6: Freeze benchmark provenance
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-6/`
 - Status: implemented
-- Next action: Await external Codex availability for the mandatory clean smoke; preparation remains not eligible for scored work until that smoke passes.
+- Next action: Complete; immutable snapshots and clean-agent smoke gates
+  verified.
 
 ## Task 7: Calibrate vanilla to the one-million-token gate
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-7/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete with accepted uncached-input exception
+- Next action: None. Final vanilla input was 993,518; held-out grader passed;
+  user accepted 62,702 uncached input.
 
 ## Task 8: Execute and audit the randomized clean 3×3 benchmark
 
 - Path: `docs/superfastpowers/plans/SSRB/2026-07-25-spring-sensitive-redaction-million-token-benchmark/tasks/SSRB-8/`
-- Status: pending
-- Next action: Start implementation.
+- Status: closed by user decision after clean paired `n = 1` run
+- Next action: None. Randomized 3×3 execution was waived; retained report:
+  `docs/benchmarks/2026-07-26-spring-sensitive-value-redaction-benchmark.md`.
