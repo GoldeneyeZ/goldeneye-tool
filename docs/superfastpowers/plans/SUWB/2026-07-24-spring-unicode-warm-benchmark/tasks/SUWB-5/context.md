@@ -2,7 +2,7 @@
 
 **Plan:** `docs/superfastpowers/plans/SUWB/2026-07-24-spring-unicode-warm-benchmark.md`
 **Task:** `SUWB-5`
-**Commit SHA:** Pending until task completion. If review fixes add commits, update to the latest task commit and note the reviewed range below.
+**Commit SHA:** `8dec5b1` (scored candidate and lane-specific prompt freeze).
 
 ## Starting Context
 
@@ -17,10 +17,10 @@ The files above are starting points only. Inspect any additional files needed to
 
 ## Completion Updates
 
-- Final task commit SHA: pending
-- Reviewed commit range: pending
-- Files created: pending
-- Files modified: pending
-- Additional relevant files: pending
-- Verification commands/results: pending
-- Notes: pending
+- Final task commit SHA: `8dec5b1`
+- Reviewed commit range: `34170ef..8dec5b1`
+- Files created: `tools/agent-bench/report.mjs`, `tools/agent-bench/report.test.mjs`, four scored run artifact sets, `target/agent-bench/spring-stringutils-unicode-truncate/report.json`, `target/agent-bench/spring-stringutils-unicode-truncate/report.md`
+- Files modified: `tools/benchmark-agent-tasks.mjs`, `tools/agent-bench/core.mjs`, `tools/agent-bench/core.test.mjs`, benchmark config and task prompt
+- Additional relevant files: `target/agent-bench/spring-stringutils-unicode-truncate/invalid-attempts/vanilla-global-ack-20260725T0318/`
+- Verification commands/results: pre-run verification passed; vanilla 1/1 passed; Goldeneye+ACK 3/3 passed serially; every run had grader exit 0, two allowed dirty paths, and zero protocol violations; post-run verification passed; `--audit-report` passed with four traceable runs, one vanilla, three candidates, identical candidate snapshot hash, timing identities, unchanged fingerprints, complete raw artifacts, and required limitations text.
+- Notes: Candidate wall times were 45,743 ms, 54,922 ms, and 74,580 ms (median 54,922 ms). Vanilla wall time was 48,963 ms and is descriptive reuse evidence only. One invalid vanilla attempt that called global ACK was stopped before reporting and preserved under `invalid-attempts`; the task-level ACK instruction was removed so lane-specific protocol instructions control discovery.

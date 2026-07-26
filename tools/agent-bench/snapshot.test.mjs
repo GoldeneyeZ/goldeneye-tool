@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, readFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import * as snapshot from "./snapshot.mjs";
 
@@ -28,10 +29,44 @@ async function makeFixture(t) {
 
 test("snapshot API exposes creation, verification, restore, and containment", () => {
   assert.equal(typeof snapshot.assertContainedPath, "function");
+  assert.equal(typeof snapshot.checkpointSqliteDatabase, "function");
   assert.equal(typeof snapshot.createReadySnapshot, "function");
   assert.equal(typeof snapshot.verifyReadySnapshot, "function");
   assert.equal(typeof snapshot.restoreReadySnapshot, "function");
   assert.equal(typeof snapshot.verifyTreeAgainstManifest, "function");
+});
+
+test("checkpointSqliteDatabase closes a persistent WAL through SQLite", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-bench-sqlite-"));
+  const databasePath = path.join(root, "goldeneye.db");
+  const savedWal = path.join(root, "saved-wal");
+  const savedShm = path.join(root, "saved-shm");
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA wal_autocheckpoint = 0;
+    CREATE TABLE evidence(value TEXT NOT NULL);
+    INSERT INTO evidence VALUES ('preserved');
+  `);
+  await copyFile(`${databasePath}-wal`, savedWal);
+  await copyFile(`${databasePath}-shm`, savedShm);
+  database.close();
+  await copyFile(savedWal, `${databasePath}-wal`);
+  await copyFile(savedShm, `${databasePath}-shm`);
+  await rm(savedWal);
+  await rm(savedShm);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(() => snapshot.assertNoWriterArtifacts(root), /not quiescent/);
+  const checkpoint = snapshot.checkpointSqliteDatabase(databasePath);
+  assert.equal(checkpoint.busy, 0);
+  assert.equal(checkpoint.closed, true);
+  assert.equal(checkpoint.sidecars_absent, true);
+  await snapshot.assertNoWriterArtifacts(root);
+
+  const verified = new DatabaseSync(databasePath, { readOnly: true });
+  assert.equal(verified.prepare("SELECT value FROM evidence").get().value, "preserved");
+  verified.close();
 });
 
 test("assertContainedPath accepts only strict descendants", async (t) => {

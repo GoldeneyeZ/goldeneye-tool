@@ -51,6 +51,6 @@ fn architecture_is_a_deterministic_module_type_entrypoint_and_edge_summary() {
             .iter()
             .map(|entry| (entry.name.as_str(), entry.count))
             .collect::<Vec<_>>(),
-        vec![("CALLS", 4), ("DEFINES", 6)]
+        vec![("DEFINES", 6), ("CALLS", 4)]
     );
 }

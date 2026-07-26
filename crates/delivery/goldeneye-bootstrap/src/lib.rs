@@ -13,8 +13,8 @@ use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceConfig, ServiceDependencies,
     ServiceError, Services,
 };
-use goldeneye_store::SqliteRepositoryFactory;
-use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
+use goldeneye_store::{SqliteRepositoryFactory, Store, StoreError};
+use goldeneye_syntax::{CoreFirstGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, WatcherConfig};
 
@@ -27,9 +27,22 @@ pub fn service_dependencies() -> ServiceDependencies {
         Arc::new(GitCommandRepository),
         discovery,
         Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        Arc::new(TreeSitterIndexExtractor::new(CoreFirstGrammarProvider)),
+        Arc::new(SyntaxEngine::new(CoreFirstGrammarProvider)),
     )
+}
+
+/// Reopens and closes the durable store after all service readers have stopped.
+///
+/// This checkpoints `SQLite` WAL contents and removes writer sidecars so callers can safely copy
+/// the database as an immutable snapshot.
+///
+/// # Errors
+///
+/// Returns a store error when the database cannot be opened or checkpointed.
+pub fn quiesce_database(path: &Path) -> Result<(), StoreError> {
+    drop(Store::open(path)?);
+    Ok(())
 }
 
 /// Owns one shared application service graph and its single background watcher runtime.

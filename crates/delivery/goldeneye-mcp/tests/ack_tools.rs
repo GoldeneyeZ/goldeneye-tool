@@ -144,12 +144,14 @@ fn assert_query_trace_snippet_architecture(server: &Server, project: &str, quali
         "get_architecture",
         json!({"project": project, "aspects": ["languages", "packages", "entry_points"]}),
     );
-    assert!(
-        assert_success(&architecture)["total_nodes"]
-            .as_u64()
-            .expect("node count")
-            > 0
-    );
+    let architecture = assert_success(&architecture);
+    assert!(architecture["total_nodes"].as_u64().expect("node count") > 0);
+    assert!(architecture["languages"].is_array());
+    assert!(architecture["packages"].is_array());
+    assert!(architecture["entry_points"].is_array());
+    assert!(architecture.get("types").is_none());
+    assert!(architecture.get("edge_types").is_none());
+    assert!(architecture["result_counts"]["packages"]["total"].is_u64());
 }
 
 #[test]

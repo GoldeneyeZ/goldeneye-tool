@@ -165,6 +165,14 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
         &database,
         temp.path(),
     ));
+    assert!(
+        !database.with_file_name("graph.db-wal").exists(),
+        "stdio shutdown left a WAL file"
+    );
+    assert!(
+        !database.with_file_name("graph.db-shm").exists(),
+        "stdio shutdown left a shared-memory file"
+    );
     let project = first[0]["result"]["structuredContent"]["project"]
         .as_str()
         .expect("project")

@@ -22,6 +22,33 @@ fn write(root: &Path, path: &str, source: &str) {
     fs::write(path, source).expect("write fixture");
 }
 
+fn write_normalized_core_fixture(root: &Path) {
+    for (path, source) in [
+        (
+            "rust.rs",
+            "struct Point;\nfn rust_leaf() {}\nfn rust_caller() { rust_leaf(); }\n",
+        ),
+        (
+            "python.py",
+            "class Dog:\n    pass\ndef py_leaf():\n    pass\ndef py_caller():\n    py_leaf()\n",
+        ),
+        (
+            "javascript.js",
+            "class Counter {}\nfunction js_leaf() {}\nfunction js_caller() { js_leaf(); }\n",
+        ),
+        (
+            "typescript.ts",
+            "interface Runner {}\nclass Service {}\nfunction ts_leaf(): void {}\nfunction ts_caller(): void { ts_leaf(); }\n",
+        ),
+        (
+            "go.go",
+            "package main\ntype Server struct {}\nfunc goLeaf() {}\nfunc goCaller() { goLeaf() }\n",
+        ),
+    ] {
+        write(root, path, source);
+    }
+}
+
 fn remove(root: &Path, path: &str) {
     fs::remove_file(root.join(path)).expect("remove fixture");
 }
@@ -188,10 +215,10 @@ fn initial_index_extracts_stable_multilanguage_graph() {
         "Method",
         "Field",
         "Variable",
-        "Import",
     ] {
         assert!(labels.contains(expected), "missing {expected}: {labels:?}");
     }
+    assert!(!labels.contains("Import"));
     assert!(nodes.iter().any(
         |(_, _, qualified_name, path)| qualified_name.contains("café")
             && path.as_deref() == Some("pkg/café.py")
@@ -219,6 +246,76 @@ fn initial_index_extracts_stable_multilanguage_graph() {
         graph_snapshot(&serial, &serial_result.project.id),
         graph_snapshot(&index, &first.project.id)
     );
+}
+
+#[test]
+fn callable_locals_stay_in_source_while_fields_and_module_variables_stay_in_graph() {
+    let temp = TempDir::new().expect("temp repo");
+    write(
+        temp.path(),
+        "model.ts",
+        "class Model { field = 1; run(): number { const local = 2; return this.field + local; } }\nconst moduleValue = 3;\n",
+    );
+    let mut index = service(IndexOptions::default());
+    let result = index.index_repository(temp.path()).expect("index");
+    let nodes = nodes_for(&index, &result.project.id, "model.ts");
+
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.as_str() == "Field" && node.name == "field")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.as_str() == "Variable" && node.name == "moduleValue")
+    );
+    assert!(!nodes.iter().any(|node| node.name == "local"));
+}
+
+#[test]
+fn same_stem_different_extension_files_keep_distinct_file_identity() {
+    let temp = TempDir::new().expect("temp repo");
+    write(
+        temp.path(),
+        "src/shared.js",
+        "export const javascriptValue = 1;\n",
+    );
+    write(
+        temp.path(),
+        "src/shared.ts",
+        "export const typescriptValue: number = 2;\n",
+    );
+    let mut index = service(IndexOptions::default());
+    let result = index
+        .index_repository(temp.path())
+        .expect("project replacement");
+
+    assert_eq!(result.counts.files, 2);
+    let mut identities = Vec::new();
+    for path in ["src/shared.js", "src/shared.ts"] {
+        let file_node = nodes_for(&index, &result.project.id, path)
+            .into_iter()
+            .find(|node| node.label.as_str() == "File")
+            .expect("file node");
+        assert_eq!(
+            file_node
+                .file_path
+                .as_ref()
+                .map(ProjectRelativePath::as_str),
+            Some(path)
+        );
+        assert!(
+            file_node
+                .qualified_name
+                .as_str()
+                .starts_with("__file__.project.")
+        );
+        assert!(file_node.qualified_name.as_str().contains(".path."));
+        identities.push((file_node.id, file_node.qualified_name));
+    }
+    assert_ne!(identities[0].0, identities[1].0);
+    assert_ne!(identities[0].1, identities[1].1);
 }
 
 #[test]
@@ -521,31 +618,7 @@ fn bounds_and_cancellation_abort_before_registration() {
 #[test]
 fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
     let temp = TempDir::new().expect("temp repo");
-    write(
-        temp.path(),
-        "rust.rs",
-        "struct Point;\nfn rust_leaf() {}\nfn rust_caller() { rust_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "python.py",
-        "class Dog:\n    pass\ndef py_leaf():\n    pass\ndef py_caller():\n    py_leaf()\n",
-    );
-    write(
-        temp.path(),
-        "javascript.js",
-        "class Counter {}\nfunction js_leaf() {}\nfunction js_caller() { js_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "typescript.ts",
-        "interface Runner {}\nclass Service {}\nfunction ts_leaf(): void {}\nfunction ts_caller(): void { ts_leaf(); }\n",
-    );
-    write(
-        temp.path(),
-        "go.go",
-        "package main\ntype Server struct {}\nfunc goLeaf() {}\nfunc goCaller() { goLeaf() }\n",
-    );
+    write_normalized_core_fixture(temp.path());
     let mut index = service(IndexOptions::default());
     let result = index.index_repository(temp.path()).expect("index");
     let prefix = result.project.id.as_str();
@@ -568,8 +641,17 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         .expect("branch lookup")
         .expect("branch node");
     assert_eq!(branch.label.as_str(), "Branch");
+    let rust_file_qualified_name = nodes_for(&index, &result.project.id, "rust.rs")
+        .into_iter()
+        .find(|node| node.label.as_str() == "File")
+        .expect("Rust File node")
+        .qualified_name
+        .as_str()
+        .to_owned();
+    assert!(rust_file_qualified_name.starts_with("__file__.project."));
+    assert!(rust_file_qualified_name.contains(".path."));
     for qualified_name in [
-        format!("{prefix}.rust.__file__"),
+        rust_file_qualified_name,
         format!("{prefix}.rust.rust_leaf"),
         format!("{prefix}.python.py_leaf"),
         format!("{prefix}.javascript.js_leaf"),

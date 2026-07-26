@@ -15,11 +15,11 @@
 
 ## Goal Phases
 
-- Implementation: active
-- Spec review: unchecked
-- Code quality: unchecked
-- Integration review: unchecked
-- Next action: Complete SUWB-4 implementation.
+- Implementation: complete
+- Spec review: checked
+- Code quality: checked
+- Integration review: checked
+- Next action: Complete. Preserve scored artifacts and immutable snapshot.
 
 ## Task 1: Build immutable snapshot primitives
 
@@ -42,11 +42,11 @@
 ## Task 4: Freeze provenance, prepare snapshot, and pass smoke gates
 
 - Path: `tasks/SUWB-4/`
-- Status: pending
-- Next action: Wait for SUWB-3 implementation.
+- Status: implemented
+- Next action: Complete; preparation and smoke gates are eligible.
 
 ## Task 5: Run one vanilla comparison and three scored candidate repetitions
 
 - Path: `tasks/SUWB-5/`
-- Status: pending
-- Next action: Wait for SUWB-4 implementation.
+- Status: implemented
+- Next action: Complete; four scored runs and report audit passed.

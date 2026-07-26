@@ -16,6 +16,16 @@
     "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
     "allowed_snapshot_root": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots"
   },
+  "recovery_evidence": {
+    "ack_candidate_recovery": {
+      "path": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\spring-stringutils-unicode-truncate\\recovery\\ack-candidate-recovery.json",
+      "sha256": "b1560bcaf7d9b2da1644d935b0011345121e48a6d77bfa32b18a58100d736766"
+    },
+    "goldeneye_rebuild_refreeze": {
+      "path": "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\spring-stringutils-unicode-truncate\\recovery\\goldeneye-rebuild-refreeze.json",
+      "sha256": "3e390a503a8aac8dd06012ba89d34b2dd6925c3c0cabb247feac808e8878e543"
+    }
+  },
   "tasks": [
     {
       "id": "spring-stringutils-unicode-truncate",

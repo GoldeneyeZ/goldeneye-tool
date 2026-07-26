@@ -14,12 +14,19 @@ impl Extractor<'_> {
         scope: &Scope,
     ) -> Result<Option<Scope>, IndexError> {
         if definition.label == "Import" {
+            // Resolution and enrichment consume compact import facts directly.
             self.record_imports(node, &definition.name);
+            return Ok(None);
         }
         if matches!(definition.label, "Variable" | "Field") {
             self.record_type_binding(node, &definition.name, scope);
         }
-        let qualified_name = self.next_definition_qualified_name(node, &definition, scope);
+        if definition.label == "Variable" && scope.kind == ScopeKind::Callable {
+            // Preserve qualified-name sequencing for nested callable definitions.
+            self.next_definition_qualified_name(&definition, scope);
+            return Ok(None);
+        }
+        let qualified_name = self.next_definition_qualified_name(&definition, scope);
         let id = self.emit_definition_node(node, &definition, scope, &qualified_name)?;
         if matches!(definition.label, "Function" | "Method") {
             return Ok(Some(self.callable_scope(definition, id, qualified_name)));
@@ -36,23 +43,9 @@ impl Extractor<'_> {
         Ok(None)
     }
 
-    fn next_definition_qualified_name(
-        &mut self,
-        node: Node<'_>,
-        definition: &Definition,
-        scope: &Scope,
-    ) -> String {
+    fn next_definition_qualified_name(&mut self, definition: &Definition, scope: &Scope) -> String {
         let segment = qualified_segment(&definition.name);
-        let base = if definition.label == "Import" {
-            format!(
-                "{}.__imports__.{}#{}",
-                scope.qualified_name,
-                segment,
-                node.start_byte()
-            )
-        } else {
-            format!("{}.{}", scope.qualified_name, segment)
-        };
+        let base = format!("{}.{}", scope.qualified_name, segment);
         let count = self.qualified_name_counts.entry(base.clone()).or_default();
         *count += 1;
         if *count == 1 {
@@ -188,8 +181,6 @@ impl Extractor<'_> {
 fn definition_relation(label: &str, scope_kind: ScopeKind) -> &'static str {
     if matches!(label, "Field" | "Variable") && scope_kind != ScopeKind::Module {
         "CONTAINS"
-    } else if label == "Import" {
-        "IMPORTS"
     } else {
         "DEFINES"
     }

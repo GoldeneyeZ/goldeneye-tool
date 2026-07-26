@@ -44,7 +44,7 @@ fn delete_project_tool(project_only: &Value) -> ToolDefinition {
         "delete_project",
         "Delete project",
         "Delete one persisted project and all project-scoped graph data.",
-        object_schema(project_only, &["project"]),
+        project_only.clone(),
     )
 }
 

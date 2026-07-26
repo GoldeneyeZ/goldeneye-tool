@@ -34,6 +34,7 @@ import {
 import {
   assertNoWriterArtifacts,
   buildManifest,
+  checkpointSqliteDatabase,
   copyRegularTree,
   createReadySnapshot,
   restoreReadySnapshot,
@@ -260,6 +261,11 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
   const startedAt = performance.now();
   const provenance = captureBenchmarkProvenance({ config, configPath });
   const gates = [];
+  const recoveryEvidence = config.recovery_evidence ?? null;
+  let activeGate = "worktree_prepare";
+  let initializer = null;
+  let sqliteCheckpoint = null;
+  let worktreeLease = null;
   recordGate(gates, "candidate_preparation_start", {
     expected: provenance.candidate,
     observed: provenance.candidate,
@@ -271,14 +277,18 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
     observed: baseCommit,
     passed: true,
   });
-  removeWorktreeIfRegistered(
-    config.repo,
-    readySnapshot.worktree,
-    readySnapshot.allowed_worktree_root,
-  );
-  mkdirSync(dirname(readySnapshot.worktree), { recursive: true });
-  runChecked("git", ["-C", config.repo, "worktree", "add", "--detach", readySnapshot.worktree, baseCommit]);
   try {
+    worktreeLease = ensurePreparationWorktree(
+      config.repo,
+      readySnapshot.worktree,
+      readySnapshot.allowed_worktree_root,
+      baseCommit,
+    );
+    recordGate(gates, "worktree_prepare", {
+      expected: { base_commit: baseCommit },
+      observed: worktreeLease,
+      passed: true,
+    });
     linkWorkspaceDependencies(config.repo, readySnapshot.worktree);
     rmIfInside(readySnapshot.live_cache, readySnapshot.allowed_cache_root);
     mkdirSync(readySnapshot.live_cache, { recursive: true });
@@ -289,12 +299,26 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       repoName,
       dirname(config.repo),
     );
-    await initializeAckForSnapshot(
+    activeGate = "ack_initialize";
+    initializer = await initializeAckForSnapshot(
       engine,
       readySnapshot.worktree,
       config.preindex_timeout_ms ?? 600_000,
     );
+    recordGate(gates, "ack_initialize", {
+      expected: { exit_code: 0, backend_exit_verified: true },
+      observed: initializer,
+      passed: true,
+    });
+    activeGate = "sqlite_checkpoint";
+    sqliteCheckpoint = checkpointSqliteDatabase(engine.goldeneyeDb);
+    recordGate(gates, "sqlite_checkpoint", {
+      expected: { busy: 0, closed: true, sidecars_absent: true },
+      observed: sqliteCheckpoint,
+      passed: true,
+    });
     await assertNoWriterArtifacts(readySnapshot.live_cache);
+    activeGate = "snapshot_create_restore_verify";
     const manifest = await createReadySnapshot({
       liveCache: readySnapshot.live_cache,
       snapshotRoot: readySnapshot.root,
@@ -330,6 +354,12 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       observed: manifest,
       passed: true,
     });
+    assertRepositoryAtBase(readySnapshot.worktree, baseCommit);
+    recordGate(gates, "worktree_at_base_after_prepare", {
+      expected: baseCommit,
+      observed: baseCommit,
+      passed: true,
+    });
     assertRepositoryAtBase(config.repo, baseCommit);
     const after = captureBenchmarkProvenance({ config, configPath });
     assertCandidateUnchanged(provenance.candidate, after.candidate, "post-preparation");
@@ -348,7 +378,13 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       prepared_at: new Date().toISOString(),
       preparation_ms: performance.now() - startedAt,
       provenance,
+      recovery_evidence: recoveryEvidence,
       gates,
+      lifecycle: {
+        initializer,
+        sqlite_checkpoint: sqliteCheckpoint,
+        worktree: worktreeLease,
+      },
       snapshot: {
         manifest_sha256: createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
         file_count: manifest.file_count,
@@ -359,8 +395,10 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       },
     };
   } catch (error) {
-    recordGate(gates, "ack_initialize", {
-      expected: { exit_code: 0 },
+    recordGate(gates, activeGate, {
+      expected: activeGate === "ack_initialize"
+        ? { exit_code: 0, backend_exit_verified: true }
+        : { passed: true },
       observed: error.initializer ?? errorMessage(error),
       passed: false,
     });
@@ -377,17 +415,20 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       prepared_at: new Date().toISOString(),
       preparation_ms: performance.now() - startedAt,
       provenance,
+      recovery_evidence: recoveryEvidence,
       gates,
       snapshot: null,
       failure_evidence: failureEvidence,
     };
     throw error;
   } finally {
-    removeWorktreeIfRegistered(
-      config.repo,
-      readySnapshot.worktree,
-      readySnapshot.allowed_worktree_root,
-    );
+    if (worktreeLease?.created) {
+      removeWorktreeIfRegistered(
+        config.repo,
+        readySnapshot.worktree,
+        readySnapshot.allowed_worktree_root,
+      );
+    }
     rmIfInside(readySnapshot.live_cache, readySnapshot.allowed_cache_root);
   }
 }
@@ -1078,6 +1119,22 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
   });
   let stdout = "";
   let stderr = "";
+  const trackedDescendants = new Set();
+  let sampleDelayMs = 100;
+  let sampleTimer = null;
+  let sampling = true;
+  const sampleDescendants = () => {
+    for (const pid of processDescendants(child.pid)) trackedDescendants.add(pid);
+  };
+  const scheduleSample = () => {
+    sampleTimer = setTimeout(() => {
+      sampleDescendants();
+      sampleDelayMs = Math.min(sampleDelayMs * 2, 5_000);
+      if (sampling) scheduleSample();
+    }, sampleDelayMs);
+  };
+  sampleDescendants();
+  scheduleSample();
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   const timer = setTimeout(() => killProcessTree(child.pid), timeoutMs);
@@ -1086,13 +1143,36 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
     child.on("close", (exitCode) => resolveOutcome({ error: null, exitCode }));
   });
   clearTimeout(timer);
+  sampling = false;
+  clearTimeout(sampleTimer);
   const initializer = {
     exit_code: outcome.exitCode,
     duration_ms: performance.now() - startedAt,
     error: outcome.error ? errorMessage(outcome.error) : null,
     stdout,
     stderr,
+    tracked_backend_pids: [...trackedDescendants].map(Number).sort((left, right) => left - right),
+    backend_exit_verified: false,
+    backend_exit_forced: false,
   };
+  const backendExited = await waitForProcessIdsExit(
+    initializer.tracked_backend_pids,
+    Math.min(timeoutMs, 10_000),
+  );
+  if (!backendExited) {
+    const running = initializer.tracked_backend_pids.filter(processIsRunning);
+    for (const pid of running) killProcessTree(pid);
+    initializer.backend_exit_forced = true;
+    initializer.backend_exit_verified = await waitForProcessIdsExit(running, 2_000);
+    const error = new Error(
+      initializer.backend_exit_verified
+        ? `ACK initializer required forced backend shutdown: ${running.join(", ")}`
+        : `ACK initializer left backend processes running: ${running.join(", ")}`,
+    );
+    error.initializer = initializer;
+    throw error;
+  }
+  initializer.backend_exit_verified = true;
   if (outcome.error || outcome.exitCode !== 0) {
     const error = new Error(
       `ACK init failed: ${outcome.error ? errorMessage(outcome.error) : tail(`${stdout}${stderr}`)}`,
@@ -1100,10 +1180,7 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
     error.initializer = initializer;
     throw error;
   }
-  const descendants = processChildren(child.pid);
-  if (descendants.length > 0) {
-    throw new Error(`ACK initializer left child processes running: ${descendants.join(", ")}`);
-  }
+  return initializer;
 }
 
 async function primeIndex(engine, worktree, timeoutMs) {
@@ -1261,6 +1338,47 @@ function removeWorktreeIfRegistered(repo, worktree, allowedRoot) {
   spawnSync("git", ["-C", resolvedRepo, "worktree", "prune"], { encoding: "utf8", windowsHide: true });
 }
 
+function ensurePreparationWorktree(repo, worktree, allowedRoot, baseCommit) {
+  const resolvedWorktree = resolve(worktree);
+  const resolvedAllowedRoot = resolve(allowedRoot);
+  if (!isInside(resolvedWorktree, resolvedAllowedRoot)) {
+    throw new Error(`Refusing worktree preparation outside ${resolvedAllowedRoot}: ${resolvedWorktree}`);
+  }
+  const registered = git(repo, ["worktree", "list", "--porcelain"])
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => resolve(line.slice("worktree ".length)));
+  const isRegistered = registered.some((candidate) => pathsEqual(candidate, resolvedWorktree));
+  if (isRegistered) {
+    assertRepositoryAtBase(resolvedWorktree, baseCommit);
+    return {
+      path: resolvedWorktree,
+      base_commit: baseCommit,
+      created: false,
+      reused: true,
+    };
+  }
+  if (existsSync(resolvedWorktree)) {
+    throw new Error(`Refusing to replace unregistered worktree path: ${resolvedWorktree}`);
+  }
+  mkdirSync(dirname(resolvedWorktree), { recursive: true });
+  runChecked("git", ["-C", repo, "worktree", "add", "--detach", resolvedWorktree, baseCommit]);
+  return {
+    path: resolvedWorktree,
+    base_commit: baseCommit,
+    created: true,
+    reused: false,
+  };
+}
+
+function pathsEqual(left, right) {
+  const resolvedLeft = resolve(left);
+  const resolvedRight = resolve(right);
+  return process.platform === "win32"
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
+}
+
 function linkWorkspaceDependencies(repo, worktree) {
   const source = join(repo, "node_modules");
   const target = join(worktree, "node_modules");
@@ -1391,6 +1509,46 @@ function processChildren(parentPid) {
     .split(/\r?\n/)
     .map((value) => value.trim())
     .filter((value) => /^\d+$/.test(value));
+}
+
+function processDescendants(parentPid) {
+  const descendants = new Set();
+  const pending = processChildren(parentPid);
+  while (pending.length > 0) {
+    const pid = pending.shift();
+    if (descendants.has(pid)) continue;
+    descendants.add(pid);
+    pending.push(...processChildren(pid));
+  }
+  return descendants;
+}
+
+function processIsRunning(pid) {
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "tasklist",
+      ["/FI", `PID eq ${Number(pid)}`, "/FO", "CSV", "/NH"],
+      { encoding: "utf8", windowsHide: true },
+    );
+    if (result.status !== 0) return true;
+    return String(result.stdout).includes(`,"${Number(pid)}",`);
+  }
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  }
+  catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function waitForProcessIdsExit(pids, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (pids.some(processIsRunning)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+  return true;
 }
 
 function directorySize(path) {

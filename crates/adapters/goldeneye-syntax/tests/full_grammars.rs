@@ -234,7 +234,7 @@ fn full_provider_is_send_sync_and_supports_concurrent_lookup() {
 #[cfg(feature = "core-grammars")]
 #[test]
 fn core_and_full_providers_link_and_run_in_one_binary() {
-    use goldeneye_syntax::CoreGrammarProvider;
+    use goldeneye_syntax::{CoreFirstGrammarProvider, CoreGrammarProvider, GrammarSource};
 
     let core = CoreGrammarProvider;
     let full = FullGrammarProvider;
@@ -260,4 +260,16 @@ fn core_and_full_providers_link_and_run_in_one_binary() {
         parser.set_language(language).unwrap();
         assert!(parser.parse([], None).is_some());
     }
+
+    let core_first = CoreFirstGrammarProvider;
+    assert!(matches!(
+        core_first.grammar(&rust).unwrap().source,
+        GrammarSource::RustCrate { .. }
+    ));
+    assert!(matches!(
+        core_first.grammar(&yaml).unwrap().source,
+        GrammarSource::FullPack { .. }
+    ));
+    assert!(core_first.supported_ids().contains(&rust));
+    assert!(core_first.supported_ids().contains(&yaml));
 }

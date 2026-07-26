@@ -21,6 +21,24 @@ pub(super) fn path_stem(path: &ProjectRelativePath) -> String {
         .join(".")
 }
 
+pub(super) fn file_qualified_name(project: &ProjectId, path: &ProjectRelativePath) -> String {
+    format!(
+        "__file__.project.{}.path.{}",
+        hex_encode_utf8(project.as_str()),
+        hex_encode_utf8(path.as_str())
+    )
+}
+
+fn hex_encode_utf8(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
 pub(super) fn module_name(path: &ProjectRelativePath, language: &LanguageId) -> String {
     if language.as_str() != "go" {
         return path_stem(path);
@@ -164,6 +182,86 @@ mod tests {
         assert_eq!(module_name(&nested, &go), "pkg.http");
         assert_eq!(module_name(&root, &go), "");
         assert_eq!(module_name(&nested, &rust), "pkg.http.server");
+    }
+
+    #[test]
+    fn file_qualified_names_encode_exact_project_and_path_bytes() {
+        let project = ProjectId::new("repo").expect("valid project");
+        let javascript = ProjectRelativePath::new("src/shared.js").expect("valid JavaScript path");
+        let typescript = ProjectRelativePath::new("src/shared.ts").expect("valid TypeScript path");
+        let hyphenated = ProjectRelativePath::new("src/a-b.rs").expect("valid hyphenated path");
+        let underscored = ProjectRelativePath::new("src/a_b.rs").expect("valid underscored path");
+        let properties = ProjectRelativePath::new(
+            "spring-beans/src/test/resources/org/springframework/beans/factory/annotation/AutowiredConfigurationTests-custom.properties",
+        )
+        .expect("valid properties path");
+        let xml = ProjectRelativePath::new(
+            "spring-beans/src/test/resources/org/springframework/beans/factory/annotation/AutowiredConfigurationTests-custom.xml",
+        )
+        .expect("valid XML path");
+
+        let javascript_name = file_qualified_name(&project, &javascript);
+        let typescript_name = file_qualified_name(&project, &typescript);
+        let hyphenated_name = file_qualified_name(&project, &hyphenated);
+        let underscored_name = file_qualified_name(&project, &underscored);
+        let properties_name = file_qualified_name(&project, &properties);
+        let xml_name = file_qualified_name(&project, &xml);
+
+        assert_eq!(
+            javascript_name,
+            "__file__.project.7265706f.path.7372632f7368617265642e6a73"
+        );
+        assert_eq!(
+            typescript_name,
+            "__file__.project.7265706f.path.7372632f7368617265642e7473"
+        );
+        assert_ne!(javascript_name, typescript_name);
+        assert_ne!(hyphenated_name, underscored_name);
+        assert_ne!(properties_name, xml_name);
+        assert_ne!(
+            stable_node_id("File", &javascript_name).expect("JavaScript file ID"),
+            stable_node_id("File", &typescript_name).expect("TypeScript file ID")
+        );
+        assert_ne!(
+            stable_node_id("File", &properties_name).expect("properties file ID"),
+            stable_node_id("File", &xml_name).expect("XML file ID")
+        );
+    }
+
+    #[test]
+    fn file_qualified_names_frame_project_and_path_boundaries() {
+        let dotted_project = ProjectId::new("repo.src").expect("valid dotted project");
+        let plain_project = ProjectId::new("repo").expect("valid project");
+        let plain_path = ProjectRelativePath::new("shared.js").expect("valid path");
+        let dotted_path = ProjectRelativePath::new("src.shared.js").expect("valid dotted path");
+
+        let dotted_project_name = file_qualified_name(&dotted_project, &plain_path);
+        let dotted_path_name = file_qualified_name(&plain_project, &dotted_path);
+
+        assert_eq!(
+            dotted_project_name,
+            "__file__.project.7265706f2e737263.path.7368617265642e6a73"
+        );
+        assert_eq!(
+            dotted_path_name,
+            "__file__.project.7265706f.path.7372632e7368617265642e6a73"
+        );
+        assert_ne!(dotted_project_name, dotted_path_name);
+        assert_ne!(
+            stable_node_id("File", &dotted_project_name).expect("dotted project file ID"),
+            stable_node_id("File", &dotted_path_name).expect("dotted path file ID")
+        );
+    }
+
+    #[test]
+    fn file_qualified_names_hex_encode_unicode_utf8_bytes() {
+        let project = ProjectId::new("répo").expect("valid Unicode project");
+        let path = ProjectRelativePath::new("src/café.rs").expect("valid Unicode path");
+
+        assert_eq!(
+            file_qualified_name(&project, &path),
+            "__file__.project.72c3a9706f.path.7372632f636166c3a92e7273"
+        );
     }
 
     #[test]

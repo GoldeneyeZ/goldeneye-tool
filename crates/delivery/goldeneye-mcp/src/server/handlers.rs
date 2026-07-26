@@ -11,6 +11,24 @@ use super::{
     SemanticSearchRequest, Server, ServiceError, SnippetArguments, TraceArguments, TraceDirection,
     TracePathRequest, Value, fs, json,
 };
+const ARCHITECTURE_ITEM_LIMIT: usize = 25;
+
+fn wants_architecture_aspect(aspects: &[String], name: &str) -> bool {
+    aspects.is_empty()
+        || aspects.iter().any(|aspect| {
+            aspect == "all"
+                || aspect == name
+                || (name == "packages" && aspect == "modules")
+                || (aspect == "structure"
+                    && matches!(name, "packages" | "types" | "entry_points" | "edge_types"))
+        })
+}
+
+fn cap_architecture_items<T>(mut items: Vec<T>) -> (Vec<T>, usize) {
+    let total = items.len();
+    items.truncate(ARCHITECTURE_ITEM_LIMIT);
+    (items, total)
+}
 
 impl Server {
     pub(super) fn manage_adr(&self, arguments: Value) -> Result<Value, String> {
@@ -289,25 +307,86 @@ impl Server {
             .services()
             .get_architecture(&ArchitectureRequest::new(project))
             .map_err(service_error_message)?;
-        Ok(json!({
+
+        let mut response = json!({
             "project": result.project,
             "root_path": result.root_path,
             "generation": result.generation,
             "total_nodes": result.total_nodes,
             "total_edges": result.total_edges,
-            "languages": result.languages,
-            "packages": result.modules,
-            "types": result.types,
-            "entry_points": result.entry_points,
-            "edge_types": result.edge_types,
             "hotspots": [],
             "boundaries": [],
             "layers": [],
             "clusters": []
-        }))
+        });
+        let object = response
+            .as_object_mut()
+            .expect("architecture response is an object");
+        let mut counts = serde_json::Map::new();
+
+        let (languages, total) = cap_architecture_items(result.languages);
+        insert_architecture_aspect(
+            object,
+            &mut counts,
+            &args.aspects,
+            "languages",
+            &languages,
+            total,
+        );
+        let (packages, total) = cap_architecture_items(result.modules);
+        insert_architecture_aspect(
+            object,
+            &mut counts,
+            &args.aspects,
+            "packages",
+            &packages,
+            total,
+        );
+        let (types, total) = cap_architecture_items(result.types);
+        insert_architecture_aspect(object, &mut counts, &args.aspects, "types", &types, total);
+        let (entry_points, total) = cap_architecture_items(result.entry_points);
+        insert_architecture_aspect(
+            object,
+            &mut counts,
+            &args.aspects,
+            "entry_points",
+            &entry_points,
+            total,
+        );
+        let (edge_types, total) = cap_architecture_items(result.edge_types);
+        insert_architecture_aspect(
+            object,
+            &mut counts,
+            &args.aspects,
+            "edge_types",
+            &edge_types,
+            total,
+        );
+        object.insert("result_counts".to_owned(), Value::Object(counts));
+        Ok(response)
     }
 }
-
+fn insert_architecture_aspect<T: serde::Serialize>(
+    response: &mut serde_json::Map<String, Value>,
+    counts: &mut serde_json::Map<String, Value>,
+    aspects: &[String],
+    name: &str,
+    items: &[T],
+    total: usize,
+) {
+    let included = wants_architecture_aspect(aspects, name);
+    counts.insert(
+        name.to_owned(),
+        json!({
+            "total": total,
+            "returned": if included { items.len() } else { 0 },
+            "truncated": included && items.len() < total
+        }),
+    );
+    if included {
+        response.insert(name.to_owned(), json!(items));
+    }
+}
 struct SearchGraphDispatch {
     project: ProjectId,
     request: SearchGraphRequest,
@@ -385,4 +464,34 @@ fn add_trace_aliases(value: &mut Value, direction: TraceDirection) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod architecture_tests {
+    use super::{ARCHITECTURE_ITEM_LIMIT, cap_architecture_items, wants_architecture_aspect};
+
+    #[test]
+    fn architecture_items_are_capped_and_report_the_original_total() {
+        let total = ARCHITECTURE_ITEM_LIMIT + 7;
+        let (items, original_total) = cap_architecture_items((0..total).collect::<Vec<_>>());
+
+        assert_eq!(items.len(), ARCHITECTURE_ITEM_LIMIT);
+        assert_eq!(original_total, total);
+    }
+
+    #[test]
+    fn structure_and_module_aliases_select_expected_aspects() {
+        assert!(wants_architecture_aspect(
+            &["structure".to_owned()],
+            "types"
+        ));
+        assert!(wants_architecture_aspect(
+            &["modules".to_owned()],
+            "packages"
+        ));
+        assert!(!wants_architecture_aspect(
+            &["languages".to_owned()],
+            "packages"
+        ));
+    }
 }

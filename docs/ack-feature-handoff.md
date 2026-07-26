@@ -131,9 +131,11 @@ cross edges.
 - `goldeneye-http` serves the embedded UI, JSON-RPC, graph layouts, indexing
   jobs, project management, repository browsing, ADRs, health, processes, and
   logs from a bounded local HTTP server.
-- `goldeneye-watcher` uses adaptive polling, Git/file baselines, retry,
-  cancellation, wakeups, missing-root grace, and pruning. Watcher re-indexing
-  uses `fast` mode and preserves a configured project-name override.
+- `goldeneye-watcher` is generic over indexing and provides adaptive polling,
+  Git/file baselines, retry, cancellation, wakeups, missing-root grace, and
+  pruning. `goldeneye-bootstrap` owns the production adapter assembly and
+  shared-`Services` indexer; watcher re-indexing uses `fast` mode and preserves
+  a configured project-name override.
 - `goldeneye-artifact` implements compressed SQLite snapshots, metadata,
   integrity verification, bounded decompression, and atomic installation.
 - The standalone graph UI preserves project selection, graph search and
@@ -353,6 +355,7 @@ Fresh verification at commit `14cdb59`:
 - `crates/adapters/goldeneye-artifact/src/lib.rs`: artifact format and installation.
 - `crates/adapters/goldeneye-store/src/lib.rs`: project registration and shared store.
 - `crates/adapters/goldeneye-syntax/src/grammar.rs`: shipped core grammar provider.
+- `crates/delivery/goldeneye-bootstrap/src/lib.rs`: production service composition.
 - `crates/delivery/goldeneye-http/src/backend.rs`: HTTP API behavior.
 - `crates/delivery/goldeneye-watcher/src/lib.rs`: watcher behavior and defaults.
 - `crates/delivery/goldeneye-cli/src/main.rs`: direct CLI contract.

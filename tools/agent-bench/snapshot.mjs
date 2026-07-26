@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const MANIFEST_FILE = "snapshot-manifest.json";
 const WRITER_ARTIFACT = /(?:^|[\\/])(?:goldeneye\.db-(?:wal|shm)|.*\.(?:lock|lck))$/i;
@@ -68,6 +70,42 @@ export async function assertNoWriterArtifacts(root) {
   if (hit) {
     throw new Error(`snapshot source is not quiescent: ${hit.absolute}`);
   }
+}
+
+export function checkpointSqliteDatabase(databasePath) {
+  const target = path.resolve(databasePath);
+  if (!existsSync(target)) {
+    throw new Error(`SQLite database does not exist: ${target}`);
+  }
+  const database = new DatabaseSync(target);
+  let closed = false;
+  let journalMode;
+  let checkpoint;
+  try {
+    journalMode = database.prepare("PRAGMA journal_mode").get().journal_mode;
+    [checkpoint] = database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").all();
+    if (!checkpoint || checkpoint.busy !== 0) {
+      throw new Error(`SQLite checkpoint remained busy: ${JSON.stringify(checkpoint ?? null)}`);
+    }
+    database.close();
+    closed = true;
+  }
+  finally {
+    if (!closed) database.close();
+  }
+  const sidecars = [`${target}-wal`, `${target}-shm`].filter((candidate) => existsSync(candidate));
+  if (sidecars.length > 0) {
+    throw new Error(`SQLite checkpoint left writer artifacts: ${sidecars.join(", ")}`);
+  }
+  return {
+    database: target,
+    journal_mode: journalMode,
+    busy: checkpoint.busy,
+    log: checkpoint.log,
+    checkpointed: checkpoint.checkpointed,
+    closed: true,
+    sidecars_absent: true,
+  };
 }
 
 export async function copyRegularTree(source, destination, { exclude = [] } = {}) {

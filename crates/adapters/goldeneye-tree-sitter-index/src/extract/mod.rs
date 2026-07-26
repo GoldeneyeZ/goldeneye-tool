@@ -13,7 +13,7 @@ use calls::{
 };
 use classify::{Definition, Scope, ScopeKind, classify, gomod_requirement_name};
 use graph::{
-    graph_edge, graph_node, module_name, path_stem, project_node_id, qualified_segment,
+    file_qualified_name, graph_edge, graph_node, module_name, project_node_id, qualified_segment,
     source_span, stable_node_id,
 };
 
@@ -213,7 +213,12 @@ mod full_language_tests {
                 .iter()
                 .map(|node| node.label.as_str())
                 .collect::<BTreeSet<_>>();
-            for expected in fixture.expected_labels {
+            for expected in fixture
+                .expected_labels
+                .iter()
+                .copied()
+                .filter(|label| *label != "Import")
+            {
                 if !labels.contains(expected) {
                     missing_labels
                         .entry((*expected).to_owned())
@@ -221,7 +226,7 @@ mod full_language_tests {
                         .push(fixture.language.to_owned());
                 }
             }
-            if fixture.expects_import && !labels.contains("Import") {
+            if fixture.expects_import && extracted.imports.is_empty() {
                 missing_imports.push(fixture.language.to_owned());
             }
             for (kind, targets) in [

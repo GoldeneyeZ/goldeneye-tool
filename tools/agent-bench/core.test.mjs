@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   buildRunMatrix,
@@ -308,8 +309,15 @@ test("prepare-snapshot exits before spawning Codex", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-bench-prepare-"));
   const repo = join(directory, "source");
   const fakeAck = join(repo, "dist", "main.js");
+  const fakeBackend = join(repo, "dist", "backend.mjs");
   const configPath = join(directory, "config.json");
   const codexMarker = join(directory, "codex-spawned");
+  const recoveryEvidence = {
+    fixture: {
+      path: join(directory, "recovery.json"),
+      sha256: "a".repeat(64),
+    },
+  };
   const ready = {
     root: join(directory, "snapshots", "ready"),
     worktree: join(directory, "worktrees", "stable"),
@@ -325,11 +333,16 @@ test("prepare-snapshot exits before spawning Codex", () => {
     mkdirSync(join(repo, "dist"), { recursive: true });
     writeFileSync(
       fakeAck,
-      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "ready");\n`,
+      `import { spawn } from "node:child_process";\nimport { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nconst child = spawn(process.execPath, [fileURLToPath(new URL("./backend.mjs", import.meta.url))], { detached: true, env: process.env, stdio: "ignore", windowsHide: true });\nchild.unref();\nawait new Promise((resolveDelay) => setTimeout(resolveDelay, 1_500));\n`,
+    );
+    writeFileSync(
+      fakeBackend,
+      `import { DatabaseSync } from "node:sqlite";\nconst database = new DatabaseSync(process.env.GOLDENEYE_DB_PATH);\ndatabase.exec("PRAGMA journal_mode = WAL; CREATE TABLE evidence(value TEXT NOT NULL); INSERT INTO evidence VALUES ('ready')");\nawait new Promise((resolveDelay) => setTimeout(resolveDelay, 2_500));\ndatabase.exec("INSERT INTO evidence VALUES ('closed')");\ndatabase.close();\n`,
     );
     spawnSync("git", ["-C", repo, "add", "README.md"], { encoding: "utf8" });
     spawnSync("git", ["-C", repo, "add", "package-lock.json"], { encoding: "utf8" });
     spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
+    spawnSync("git", ["-C", repo, "add", "dist/backend.mjs"], { encoding: "utf8" });
     spawnSync(
       "git",
       ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "init"],
@@ -350,6 +363,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
           backend_command: process.execPath,
         }],
         ready_snapshot: ready,
+        recovery_evidence: recoveryEvidence,
       }),
     );
     const result = spawnSync(
@@ -360,7 +374,19 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(codexMarker), false);
     assert.equal(existsSync(join(ready.root, "snapshot-manifest.json")), true);
-    assert.equal(JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8")).snapshot.restore_verified, true);
+    const successfulPreparation = JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8"));
+    const preparedDatabase = new DatabaseSync(join(ready.root, "goldeneye.db"), { readOnly: true });
+    const closedRows = preparedDatabase
+      .prepare("SELECT COUNT(*) AS count FROM evidence WHERE value = 'closed'")
+      .get().count;
+    preparedDatabase.close();
+    assert.equal(closedRows, 1, JSON.stringify(successfulPreparation.lifecycle));
+    assert.equal(successfulPreparation.snapshot.restore_verified, true);
+    assert.equal(
+      successfulPreparation.gates.find((gate) => gate.name === "worktree_at_base_after_prepare").passed,
+      true,
+    );
+    assert.deepEqual(successfulPreparation.recovery_evidence, recoveryEvidence);
 
     writeFileSync(
       fakeAck,
@@ -372,6 +398,15 @@ test("prepare-snapshot exits before spawning Codex", () => {
       ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fail ack"],
       { encoding: "utf8" },
     );
+    const stable = spawnSync(
+      "git",
+      ["-C", repo, "worktree", "add", "--detach", ready.worktree, "HEAD"],
+      { encoding: "utf8" },
+    );
+    assert.equal(stable.status, 0, stable.stderr);
+    const stableHead = spawnSync("git", ["-C", ready.worktree, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).stdout.trim();
     const failure = spawnSync(
       process.execPath,
       [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
@@ -383,6 +418,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(preparation.eligible_for_scoring, false);
     assert.ok(preparation.provenance);
     assert.ok(preparation.failure_evidence);
+    assert.deepEqual(preparation.recovery_evidence, recoveryEvidence);
     assert.equal(preparation.failure_evidence.initializer.exit_code, 5);
     for (const entry of [
       preparation.failure_evidence.initializer.stdout,
@@ -398,7 +434,19 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "ack-state", "projects.json")), true);
     assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "goldeneye.db")), true);
     assert.equal(existsSync(join(ready.root, "failure")), false);
+    assert.equal(existsSync(ready.worktree), true);
+    assert.equal(
+      spawnSync("git", ["-C", ready.worktree, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(),
+      stableHead,
+    );
+    assert.equal(
+      spawnSync("git", ["-C", ready.worktree, "status", "--porcelain"], { encoding: "utf8" }).stdout,
+      "",
+    );
   } finally {
+    spawnSync("git", ["-C", repo, "worktree", "remove", "--force", ready.worktree], {
+      encoding: "utf8",
+    });
     rmSync(directory, { recursive: true, force: true });
   }
 });

@@ -1,0 +1,47 @@
+{
+  "repo": "../../../terax-ai",
+  "base_ref": "076d70f638ae7bff452e927d90dd34bceae079f8",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "cache_modes": "cold,warm",
+  "seed": 20260718,
+  "timeout_ms": 1800000,
+  "preindex_timeout_ms": 600000,
+  "output": "../../target/agent-bench/terax-report.json",
+  "engines": [
+    {
+      "id": "goldeneye",
+      "kind": "mcp",
+      "command": "../../target/release/goldeneye.exe"
+    },
+    {
+      "id": "codebase-memory-mcp",
+      "kind": "mcp",
+      "command": "codebase-memory-mcp"
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "terax-fuzzy-diacritics",
+      "prompt_file": "./tasks/terax-fuzzy-diacritics.md",
+      "grader": {
+        "command": "node",
+        "args": [
+          "./graders/terax-fuzzy-diacritics.mjs",
+          "{worktree}",
+          "{repo}"
+        ],
+        "timeout_ms": 180000
+      }
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 mod pagination;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use goldeneye_domain::{GraphEdge, GraphNode, NodeId};
 use goldeneye_ports::{QueryRepository, SearchHit};
@@ -95,12 +98,59 @@ fn filtered_candidates(
     let mut candidates = search_candidates(repository, request, graph)?;
     candidates
         .retain(|candidate| matches_search_filters(&candidate.node, request, graph, patterns));
+    // Model-facing identifier lookups should prefer the symbol itself over incidental matches in
+    // qualified names or file paths. Complex FTS queries retain their repository-provided rank.
+    let query_literal = request.query.as_deref().and_then(simple_query_literal);
     candidates.sort_by(|left, right| {
-        rank_cmp(left.rank, right.rank)
+        query_literal
+            .map_or(Ordering::Equal, |query| {
+                candidate_signal(left, query).cmp(&candidate_signal(right, query))
+            })
+            .then_with(|| rank_cmp(left.rank, right.rank))
             .then_with(|| left.node.qualified_name.cmp(&right.node.qualified_name))
             .then_with(|| left.node.id.cmp(&right.node.id))
     });
     Ok(candidates)
+}
+
+fn simple_query_literal(query: &str) -> Option<&str> {
+    let query = query.trim();
+    (!query.is_empty()
+        && query
+            .chars()
+            .all(|character| character.is_alphanumeric() || character == '_'))
+    .then_some(query)
+}
+
+fn candidate_signal(candidate: &Candidate, query: &str) -> (u8, u8) {
+    symbol_signal(&candidate.node.name, candidate.node.label.as_str(), query)
+}
+
+fn symbol_signal(name: &str, label: &str, query: &str) -> (u8, u8) {
+    let name_priority = if name == query {
+        0
+    } else if name.eq_ignore_ascii_case(query) {
+        1
+    } else {
+        2
+    };
+    let label_priority = if name_priority < 2 {
+        signal_label_priority(label)
+    } else {
+        u8::MAX
+    };
+    (name_priority, label_priority)
+}
+
+fn signal_label_priority(label: &str) -> u8 {
+    match label {
+        "Class" | "Struct" | "Interface" | "Enum" | "Record" | "Trait" | "TypeAlias"
+        | "Annotation" => 0,
+        "Function" | "Method" | "Constructor" => 1,
+        "Field" | "Property" | "Constant" => 2,
+        "Module" | "Namespace" | "Package" | "File" => 3,
+        _ => 4,
+    }
 }
 
 fn search_page(
@@ -356,6 +406,45 @@ fn rank_cmp(left: Option<f64>, right: Option<f64>) -> std::cmp::Ordering {
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::{signal_label_priority, simple_query_literal, symbol_signal};
+
+    #[test]
+    fn signal_ranking_only_applies_to_simple_literal_queries() {
+        assert_eq!(
+            simple_query_literal("SecurityConfig"),
+            Some("SecurityConfig")
+        );
+        assert_eq!(simple_query_literal(" café_42 "), Some("café_42"));
+        assert_eq!(simple_query_literal("SecurityConfig|Filter"), None);
+        assert_eq!(simple_query_literal("*Test"), None);
+        assert_eq!(simple_query_literal("@SpringBootTest"), None);
+        assert_eq!(simple_query_literal("two words"), None);
+    }
+
+    #[test]
+    fn signal_labels_prioritize_types_then_callable_members_then_fields() {
+        assert!(signal_label_priority("Class") < signal_label_priority("Method"));
+        assert!(signal_label_priority("Method") < signal_label_priority("Field"));
+        assert!(signal_label_priority("Field") < signal_label_priority("Module"));
+
+        let query = "SecurityConfig";
+        assert!(
+            symbol_signal("SecurityConfig", "Class", query)
+                < symbol_signal("SecurityConfig", "Module", query)
+        );
+        assert!(
+            symbol_signal("SecurityConfig", "Module", query)
+                < symbol_signal("buildSecurityConfig", "Function", query)
+        );
+        assert!(
+            symbol_signal("SecurityConfig", "Class", query)
+                < symbol_signal("securityconfig", "Class", query)
+        );
     }
 }
 

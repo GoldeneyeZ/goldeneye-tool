@@ -341,6 +341,6 @@ struct SnippetArguments {
 #[serde(deny_unknown_fields)]
 struct ArchitectureArguments {
     project: String,
-    #[serde(default, rename = "aspects")]
-    _aspects: Vec<String>,
+    #[serde(default)]
+    aspects: Vec<String>,
 }

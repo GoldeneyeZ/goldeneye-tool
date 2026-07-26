@@ -12,6 +12,8 @@ pub use engine::{
     DiagnosticKind, MAX_DIAGNOSTIC_DETAILS, ReparseResult, SyntaxDiagnostic, SyntaxEdit,
     SyntaxEngine, SyntaxSnapshot,
 };
+#[cfg(all(feature = "full-grammar-pack", feature = "core-grammars"))]
+pub use full_grammar::CoreFirstGrammarProvider;
 #[cfg(feature = "full-grammar-pack")]
 pub use full_grammar::FullGrammarProvider;
 pub use goldeneye_grammar_pack::{

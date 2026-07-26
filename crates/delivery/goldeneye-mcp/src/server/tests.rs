@@ -148,6 +148,15 @@ fn tools_list_truthfully_advertises_implemented_tools() {
     assert_eq!(tools.len(), 21);
     assert_eq!(tools[0]["name"], "index_repository");
     assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
+
+    let schema_for = |name: &str| {
+        tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or_else(|| panic!("missing {name} tool"))["inputSchema"]
+            .clone()
+    };
+    assert_eq!(schema_for("delete_project"), schema_for("index_status"));
 }
 
 #[test]

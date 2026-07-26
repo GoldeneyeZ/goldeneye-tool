@@ -142,11 +142,18 @@ fn architecture_tool(project: &Value) -> ToolDefinition {
     ToolDefinition::new(
         "get_architecture",
         "Get architecture",
-        "Return compact project counts, languages, modules, types, and entry points.",
+        "Return compact project counts plus capped, high-signal architecture lists. Use aspects to request only needed sections; result_counts reports total, returned, and truncation.",
         object_schema(
             &json!({
                 "project": project.clone(),
-                "aspects": {"type": "array", "items": {"type": "string"}}
+                "aspects": {
+                    "type": "array",
+                    "description": "Optional sections. Empty returns all capped sections.",
+                    "items": {
+                        "type": "string",
+                        "enum": ["all", "structure", "languages", "packages", "modules", "types", "entry_points", "edge_types"]
+                    }
+                }
             }),
             &["project"],
         ),

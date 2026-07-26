@@ -379,7 +379,6 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
     let mut failures = Vec::new();
     let mut label_counts = BTreeMap::<String, usize>::new();
     let mut call_edges = 0usize;
-    let mut import_edges = 0usize;
     let mut inheritance_edges = 0usize;
     let mut missing_labels = BTreeMap::<String, Vec<String>>::new();
     let expected_raw_calls = LANGUAGE_FIXTURES
@@ -434,7 +433,12 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
             .iter()
             .map(|node| node.label.as_str())
             .collect::<BTreeSet<_>>();
-        for expected in fixture.expected_labels {
+        for expected in fixture
+            .expected_labels
+            .iter()
+            .copied()
+            .filter(|label| *label != "Import")
+        {
             if !actual_labels.contains(expected) {
                 missing_labels
                     .entry((*expected).to_owned())
@@ -455,7 +459,6 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
                     "CALLS" => {
                         call_edges += 1;
                     }
-                    "IMPORTS" => import_edges += 1,
                     "INHERITS" | "IMPLEMENTS" => inheritance_edges += 1,
                     _ => {}
                 }
@@ -464,7 +467,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
     }
 
     println!(
-        "159-language extraction: labels={label_counts:?}, resolved_calls={call_edges}, expected_raw_calls={expected_raw_calls}, imports={import_edges}, expected_import_fixtures={expected_import_fixtures}, inheritance={inheritance_edges}, expected_relations={expected_relations}"
+        "159-language extraction: labels={label_counts:?}, resolved_calls={call_edges}, expected_raw_calls={expected_raw_calls}, expected_import_fixtures={expected_import_fixtures}, inheritance={inheritance_edges}, expected_relations={expected_relations}"
     );
     println!("missing expected labels by category: {missing_labels:?}");
     assert!(failures.is_empty(), "corpus failures: {failures:#?}");
@@ -474,10 +477,7 @@ fn audited_159_language_corpus_is_callable_and_indexable() {
     );
     assert!(label_counts.get("Function").copied().unwrap_or_default() > 0);
     assert!(call_edges > 0);
-    assert!(
-        import_edges >= expected_import_fixtures,
-        "expected at least one import edge for every import-positive fixture"
-    );
+    assert!(!label_counts.contains_key("Import"));
     assert!(expected_relations > 0);
     assert!(
         inheritance_edges > 0,
