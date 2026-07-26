@@ -179,6 +179,61 @@ fn corpus_options(language: &str) -> IndexOptions {
 }
 
 #[test]
+fn same_stem_properties_and_xml_files_keep_distinct_file_identity() {
+    let temp = TempDir::new().expect("temp repository");
+    let paths = [
+        "spring-context/src/test/resources/org/springframework/context/annotation/configuration/AutowiredConfigurationTests-custom.properties",
+        "spring-context/src/test/resources/org/springframework/context/annotation/configuration/AutowiredConfigurationTests-custom.xml",
+    ];
+    fs::create_dir_all(temp.path().join(paths[0]).parent().expect("fixture parent"))
+        .expect("create fixture parent");
+    fs::write(temp.path().join(paths[0]), "name=value\n").expect("write properties fixture");
+    fs::write(
+        temp.path().join(paths[1]),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<beans/>\n",
+    )
+    .expect("write XML fixture");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("replace project graph");
+
+    assert_eq!(result.counts.files, 2);
+    let mut file_ids = BTreeSet::new();
+    let mut qualified_names = BTreeSet::new();
+    for path in paths {
+        let file = FileId::new(
+            result.project.id.clone(),
+            ProjectRelativePath::new(path).expect("fixture path"),
+        );
+        let file_node = service
+            .repository()
+            .nodes_for_file(&file)
+            .expect("file nodes")
+            .into_iter()
+            .find(|node| node.label.as_str() == "File")
+            .expect("File node");
+        assert_eq!(
+            file_node
+                .file_path
+                .as_ref()
+                .map(ProjectRelativePath::as_str),
+            Some(path)
+        );
+        file_ids.insert(file_node.id);
+        qualified_names.insert(file_node.qualified_name);
+    }
+    assert_eq!(file_ids.len(), 2);
+    assert_eq!(qualified_names.len(), 2);
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
