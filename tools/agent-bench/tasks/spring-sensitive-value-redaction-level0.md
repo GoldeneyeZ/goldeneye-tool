@@ -6,7 +6,9 @@ Implement basic opt-in redaction for rejected values produced by Spring
 ## Contract
 
 - Add runtime, documented `org.springframework.core.annotation.Sensitive`,
-  targeting fields and bean accessor methods.
+  targeting fields, bean accessor methods, and annotation types.
+- Recognize composed annotations meta-annotated with `@Sensitive` using Spring
+  merged-annotation semantics.
 - For a field marked directly or through its getter/setter, replace the
   rejected value stored in public `FieldError` objects with `[REDACTED]`.
 - Support bean-property and direct-field binding.
@@ -30,5 +32,5 @@ dependencies, generated files, or files outside `spring-core`, `spring-beans`,
 and `spring-context`.
 
 Custom detector/redactor/context extension APIs, constructor binding,
-record components, composed annotations, web initializers, method validation,
-Spring MVC, and Spring WebFlux are outside Level 0.
+record components, web initializers, method validation, Spring MVC, and Spring
+WebFlux are outside Level 0.

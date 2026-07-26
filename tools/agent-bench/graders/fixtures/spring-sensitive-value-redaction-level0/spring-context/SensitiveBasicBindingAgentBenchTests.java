@@ -1,5 +1,8 @@
 package org.springframework.validation;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.MutablePropertyValues;
 import org.springframework.core.annotation.Sensitive;
 
+import static java.lang.annotation.ElementType.FIELD;
+import static java.lang.annotation.ElementType.METHOD;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SensitiveBasicBindingAgentBenchTests {
@@ -152,7 +157,7 @@ class SensitiveBasicBindingAgentBenchTests {
 
 		private int password;
 
-		@Sensitive
+		@Confidential
 		public int getPassword() {
 			return this.password;
 		}
@@ -196,5 +201,11 @@ class SensitiveBasicBindingAgentBenchTests {
 		public void setCount(int count) {
 			this.count = count;
 		}
+	}
+
+	@Target({FIELD, METHOD})
+	@Retention(RetentionPolicy.RUNTIME)
+	@Sensitive
+	@interface Confidential {
 	}
 }

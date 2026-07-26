@@ -20,6 +20,7 @@ class SensitiveBasicAnnotationAgentBenchTests {
 		assertThat(retention).isNotNull();
 		assertThat(retention.value()).isEqualTo(RetentionPolicy.RUNTIME);
 		assertThat(Sensitive.class.isAnnotationPresent(Documented.class)).isTrue();
-		assertThat(target.value()).contains(ElementType.FIELD, ElementType.METHOD);
+		assertThat(target.value()).contains(
+				ElementType.FIELD, ElementType.METHOD, ElementType.ANNOTATION_TYPE);
 	}
 }
