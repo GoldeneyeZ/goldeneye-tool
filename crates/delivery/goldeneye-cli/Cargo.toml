@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+full-grammar-pack = ["goldeneye-bootstrap/full-grammar-pack"]
+
 [dependencies]
 goldeneye-artifact = { path = "../../adapters/goldeneye-artifact" }
 goldeneye-bootstrap = { path = "../goldeneye-bootstrap" }

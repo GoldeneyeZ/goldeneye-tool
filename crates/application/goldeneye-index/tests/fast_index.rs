@@ -77,6 +77,20 @@ fn nodes_for(
         .expect("nodes for fixture")
 }
 
+fn file_qualified_name_for(
+    service: &IndexService<Store>,
+    project: &goldeneye_domain::ProjectId,
+    path: &str,
+) -> String {
+    nodes_for(service, project, path)
+        .into_iter()
+        .find(|node| node.label.as_str() == "File")
+        .expect("File node")
+        .qualified_name
+        .as_str()
+        .to_owned()
+}
+
 fn graph_snapshot(
     service: &IndexService<Store>,
     project: &goldeneye_domain::ProjectId,
@@ -641,13 +655,7 @@ fn normalized_core_fixture_matches_pinned_upstream_fast_graph() {
         .expect("branch lookup")
         .expect("branch node");
     assert_eq!(branch.label.as_str(), "Branch");
-    let rust_file_qualified_name = nodes_for(&index, &result.project.id, "rust.rs")
-        .into_iter()
-        .find(|node| node.label.as_str() == "File")
-        .expect("Rust File node")
-        .qualified_name
-        .as_str()
-        .to_owned();
+    let rust_file_qualified_name = file_qualified_name_for(&index, &result.project.id, "rust.rs");
     assert!(rust_file_qualified_name.starts_with("__file__.project."));
     assert!(rust_file_qualified_name.contains(".path."));
     for qualified_name in [

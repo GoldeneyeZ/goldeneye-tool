@@ -56,6 +56,14 @@ export function buildRunMatrix({ tasks, engines, cacheModes, repetitions, seed }
   return runs;
 }
 
+export function selectRunEngines(config, engineId) {
+  const engines = [...config.engines];
+  if (!engineId) return engines;
+  const selected = engines.filter((engine) => engine.id === engineId);
+  if (selected.length === 0) throw new Error(`Unknown engine: ${engineId}`);
+  return selected;
+}
+
 function walk(value, visit, path = []) {
   if (Array.isArray(value)) {
     value.forEach((item, index) => walk(item, visit, [...path, index]));
@@ -239,9 +247,30 @@ export function median(values) {
     : sorted[middle];
 }
 
+export function sampleStandardDeviation(values) {
+  if (values.length < 2) return null;
+  const valueMean = mean(values);
+  const variance = values.reduce((sum, value) => sum + ((value - valueMean) ** 2), 0) /
+    (values.length - 1);
+  return Math.sqrt(variance);
+}
+
+export function coefficientOfVariation(values) {
+  if (values.length < 2) return null;
+  const valueMean = mean(values);
+  if (valueMean === 0) return null;
+  return sampleStandardDeviation(values) / valueMean;
+}
+
 export function summarizeRuns(runs) {
+  const enriched = runs.map((run) => ({
+    ...run,
+    uncached_input_tokens: run.input_tokens - run.cached_input_tokens,
+    uncached_plus_output_tokens:
+      run.input_tokens - run.cached_input_tokens + run.output_tokens,
+  }));
   const groups = new Map();
-  for (const run of runs) {
+  for (const run of enriched) {
     const key = `${run.task_id}\u0000${run.cache_mode}\u0000${run.engine}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(run);
@@ -249,29 +278,60 @@ export function summarizeRuns(runs) {
   return [...groups.values()].map((group) => {
     const successful = group.filter((run) => run.success);
     const metric = (name) => successful.map((run) => run[name]).filter(Number.isFinite);
-    return {
+    const summary = {
       task_id: group[0].task_id,
       cache_mode: group[0].cache_mode,
       engine: group[0].engine,
       runs: group.length,
       successes: successful.length,
       success_rate: successful.length / group.length,
-      successful_wall_ms_p50: median(metric("wall_ms")),
       successful_wall_ms_p95: percentile(metric("wall_ms"), 0.95),
-      successful_setup_ms_p50: median(metric("setup_ms")),
-      successful_preindex_ms_p50: median(metric("preindex_ms")),
-      successful_completion_ms_p50: median(metric("completion_ms")),
-      successful_verified_e2e_ms_p50: median(metric("verified_e2e_ms")),
-      successful_input_tokens_p50: median(metric("input_tokens")),
-      successful_output_tokens_p50: median(metric("output_tokens")),
-      successful_total_tokens_p50: median(metric("total_tokens")),
-      successful_mcp_calls_p50: median(metric("mcp_calls")),
-      successful_ack_calls_p50: median(metric("ack_calls")),
-      successful_ack_failures_p50: median(metric("ack_failures")),
-      successful_cache_bytes_p50: median(metric("cache_bytes")),
-      successful_patch_bytes_p50: median(metric("patch_bytes")),
     };
+    for (const name of SUMMARY_METRICS) {
+      Object.assign(summary, successfulMetricSummary(name, metric(name)));
+    }
+    return summary;
   });
+}
+
+const SUMMARY_METRICS = [
+  "wall_ms",
+  "verified_e2e_ms",
+  "input_tokens",
+  "cached_input_tokens",
+  "uncached_input_tokens",
+  "output_tokens",
+  "uncached_plus_output_tokens",
+  "total_tokens",
+  "setup_ms",
+  "preindex_ms",
+  "completion_ms",
+  "mcp_calls",
+  "ack_calls",
+  "ack_failures",
+  "cache_bytes",
+  "patch_bytes",
+];
+
+function successfulMetricSummary(name, values) {
+  return {
+    [`successful_${name}_mean`]: mean(values),
+    [`successful_${name}_median`]: median(values),
+    [`successful_${name}_p50`]: median(values),
+    [`successful_${name}_range`]: range(values),
+    [`successful_${name}_sample_sd`]: sampleStandardDeviation(values),
+    [`successful_${name}_cv`]: coefficientOfVariation(values),
+  };
+}
+
+function mean(values) {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function range(values) {
+  if (values.length === 0) return null;
+  return Math.max(...values) - Math.min(...values);
 }
 
 export function tomlString(value) {
@@ -282,6 +342,29 @@ export function tomlInlineTable(object) {
   return `{ ${Object.entries(object)
     .map(([key, value]) => `${JSON.stringify(key)} = ${tomlString(value)}`)
     .join(", ")} }`;
+}
+
+export function codexSandboxArgs({ fullAccess, worktree }) {
+  if (fullAccess) {
+    return [
+      "-s",
+      "danger-full-access",
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      "features.code_mode_host=false",
+    ];
+  }
+  return [
+    "-s",
+    "workspace-write",
+    "--add-dir",
+    worktree,
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "features.code_mode_host=false",
+  ];
 }
 
 export function expandTokens(value, tokens) {
@@ -327,7 +410,7 @@ export function normalizeReadySnapshot(config, configPath) {
     live_cache: resolve(ready.live_cache),
     allowed_worktree_root: resolve(ready.allowed_worktree_root),
     allowed_cache_root: resolve(ready.allowed_cache_root),
-    allowed_snapshot_root: resolve(ready.allowed_snapshot_root),
+    allowed_snapshot_root: resolveFromConfig(configPath, ready.allowed_snapshot_root),
   };
   normalized.root = assertContainedPath(
     normalized.root,

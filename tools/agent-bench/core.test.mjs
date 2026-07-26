@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   buildRunMatrix,
+  codexSandboxArgs,
   isDirectSourceReadCommand,
   loadConfig,
   parseCodexJsonl,
@@ -14,10 +15,22 @@ import {
   resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
+  selectRunEngines,
   shouldPrimeIndex,
   summarizeRuns,
   tomlInlineTable,
 } from "./core.mjs";
+
+test("codexSandboxArgs grants full access without bypass process-tree mode", () => {
+  assert.deepEqual(codexSandboxArgs({ fullAccess: true, worktree: "D:\\repo" }), [
+    "-s",
+    "danger-full-access",
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "features.code_mode_host=false",
+  ]);
+});
 
 test("sanitizeId creates stable filesystem-safe identifiers", () => {
   assert.equal(sanitizeId("Terax / Fuzzy Diacritics"), "terax-fuzzy-diacritics");
@@ -55,6 +68,49 @@ test("buildRunMatrix runs vanilla once without cold/warm duplication", () => {
   const vanilla = runs.filter((run) => run.engine.id === "vanilla");
   assert.equal(vanilla.length, 2);
   assert.deepEqual(new Set(vanilla.map((run) => run.cacheMode)), new Set(["none"]));
+});
+
+test("selectRunEngines preserves the ACK provenance engine when selecting vanilla", () => {
+  const ack = { id: "goldeneye-ack", kind: "ack" };
+  const vanilla = { id: "vanilla", kind: "vanilla" };
+  const config = { engines: [ack, vanilla] };
+
+  assert.deepEqual(selectRunEngines(config, "vanilla"), [vanilla]);
+  assert.deepEqual(config.engines, [ack, vanilla]);
+  assert.equal(config.engines.find((engine) => engine.kind === "ack"), ack);
+});
+
+test("calibration mode validates its vanilla-only single-run contract before repository access", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-bench-calibration-"));
+  const configPath = join(directory, "config.json");
+  writeFileSync(configPath, JSON.stringify({
+    repo: join(directory, "missing-repository"),
+    output: join(directory, "report.json"),
+    repetitions: 2,
+    tasks: [{ id: "task", prompt_file: "task.md", grader: { command: "grader.mjs" } }],
+    engines: [
+      { id: "ack", kind: "ack", command: "ack", backend_command: "goldeneye" },
+      { id: "vanilla", kind: "vanilla" },
+    ],
+  }));
+  try {
+    const run = (args) => spawnSync(
+      process.execPath,
+      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--calibration", ...args],
+      { cwd: resolve(), encoding: "utf8" },
+    );
+    assert.match(run(["--calibration-id", "attempt-1"]).stderr, /requires --engine <vanilla-id>/);
+    assert.match(
+      run(["--engine", "vanilla", "--calibration-id", "attempt-1"]).stderr,
+      /requires --repetitions 1/,
+    );
+    assert.match(
+      run(["--engine", "vanilla", "--repetitions", "1"]).stderr,
+      /--calibration-id is required/,
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
 });
 
 test("parseCodexJsonl extracts cumulative usage, tool calls, bytes, and violations", () => {
@@ -210,6 +266,49 @@ test("summarizeRuns never rewards failed runs with fast timings", () => {
   assert.equal(summary.successful_total_tokens_p50, 60);
 });
 
+test("summarizeRuns reports sample SD and CV", () => {
+  const summary = summarizeRuns([
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 100,
+      input_tokens: 800,
+      cached_input_tokens: 600,
+      output_tokens: 20,
+      total_tokens: 820,
+    },
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 200,
+      input_tokens: 1000,
+      cached_input_tokens: 700,
+      output_tokens: 30,
+      total_tokens: 1030,
+    },
+    {
+      task_id: "task",
+      cache_mode: "cold",
+      engine: "goldeneye",
+      success: true,
+      wall_ms: 300,
+      input_tokens: 1200,
+      cached_input_tokens: 800,
+      output_tokens: 40,
+      total_tokens: 1240,
+    },
+  ])[0];
+  assert.equal(summary.successful_wall_ms_mean, 200);
+  assert.equal(summary.successful_wall_ms_sample_sd, 100);
+  assert.equal(summary.successful_wall_ms_cv, 0.5);
+  assert.equal(summary.successful_uncached_input_tokens_p50, 300);
+  assert.equal(summary.successful_uncached_plus_output_tokens_p50, 330);
+});
+
 test("tomlInlineTable quotes Windows paths and environment keys", () => {
   assert.equal(
     tomlInlineTable({ CBM_CACHE_DIR: "D:\\cache path" }),
@@ -231,7 +330,7 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
       live_cache: "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
       allowed_worktree_root: "D:\\Dev\\IdeaProjects\\.gab",
       allowed_cache_root: "D:\\Dev\\IdeaProjects\\.gab-cache",
-      allowed_snapshot_root: "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots",
+      allowed_snapshot_root: "../../target/agent-bench/snapshots",
     },
   };
   try {
@@ -240,13 +339,16 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
     assert.equal(normalized.ready_snapshot.root, resolve(directory, "../../target/agent-bench/snapshots/spring-stringutils"));
     assert.equal(normalized.ready_snapshot.worktree, resolve(config.ready_snapshot.worktree));
     assert.equal(normalized.ready_snapshot.live_cache, resolve(config.ready_snapshot.live_cache));
-    assert.equal(normalized.ready_snapshot.allowed_snapshot_root, resolve(config.ready_snapshot.allowed_snapshot_root));
+    assert.equal(
+      normalized.ready_snapshot.allowed_snapshot_root,
+      resolve(directory, config.ready_snapshot.allowed_snapshot_root),
+    );
 
     delete config.ready_snapshot.allowed_snapshot_root;
     writeFileSync(configPath, JSON.stringify(config));
     assert.throws(() => loadConfig(configPath), /ready_snapshot\.allowed_snapshot_root/);
 
-    config.ready_snapshot.allowed_snapshot_root = "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots";
+    config.ready_snapshot.allowed_snapshot_root = "../../target/agent-bench/snapshots";
     config.ready_snapshot.worktree = config.ready_snapshot.allowed_worktree_root;
     writeFileSync(configPath, JSON.stringify(config));
     assert.throws(() => loadConfig(configPath), /worktree must be a strict descendant/);
@@ -263,6 +365,28 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
   } finally {
     rmSync(configPath, { force: true });
   }
+});
+
+test("Level-2 Spring config declares the million-token qualification and audit policy", () => {
+  const config = JSON.parse(readFileSync(resolve(
+    "tools",
+    "agent-bench",
+    "configs",
+    "spring-sensitive-value-redaction-level2.json",
+  ), "utf8"));
+
+  assert.deepEqual(config.qualification, {
+    min_input_tokens: 800_000,
+    max_input_tokens: 1_200_000,
+    min_uncached_input_tokens: 100_000,
+  });
+  assert.deepEqual(config.audit, {
+    expected_candidate_runs: 3,
+    expected_vanilla_runs: 3,
+  });
+  assert.equal(config.allowed_dirty_policy.max_paths, 40);
+  assert.equal(config.tasks[0].source_language, "Java");
+  assert.deepEqual(config.tasks[0].source_extensions, [".java"]);
 });
 
 test("ready snapshots use stable ACK paths and skip priming", () => {
@@ -366,6 +490,12 @@ test("prepare-snapshot exits before spawning Codex", () => {
         recovery_evidence: recoveryEvidence,
       }),
     );
+    mkdirSync(ready.allowed_worktree_root, { recursive: true });
+    spawnSync("git", ["-C", repo, "worktree", "add", "--detach", ready.worktree, "HEAD"], {
+      encoding: "utf8",
+    });
+    spawnSync("git", ["-C", repo, "worktree", "lock", ready.worktree], { encoding: "utf8" });
+    rmSync(ready.worktree, { recursive: true, force: true });
     const result = spawnSync(
       process.execPath,
       [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],

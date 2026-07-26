@@ -15,6 +15,7 @@ fn tracked_text(path: impl AsRef<Path>) -> String {
     let path = workspace_root().join(path);
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read tracked file {}: {error}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 #[track_caller]

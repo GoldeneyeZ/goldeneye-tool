@@ -2,34 +2,124 @@
 
 //! Production composition for Goldeneye services and background indexing.
 
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use goldeneye_artifact::FileArtifactPersistence;
 use goldeneye_discovery::FileSystemDiscovery;
+use goldeneye_domain::LanguageId;
 use goldeneye_git::GitCommandRepository;
+use goldeneye_ports::{
+    LanguageClassifier, PortError, RepositoryDiscovery, RepositoryDiscoveryOptions,
+    RepositoryDiscoveryReport, SourceDiscovery,
+};
 use goldeneye_services::{
     IndexRepositoryMode, IndexRepositoryRequest, ProjectId, ServiceConfig, ServiceDependencies,
     ServiceError, Services,
 };
 use goldeneye_store::{SqliteRepositoryFactory, Store, StoreError};
-use goldeneye_syntax::{CoreFirstGrammarProvider, SyntaxEngine};
+#[cfg(feature = "full-grammar-pack")]
+use goldeneye_syntax::CoreFirstGrammarProvider;
+use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, WatcherConfig};
 
 /// Builds the production adapter set used by Goldeneye delivery crates.
 #[must_use]
 pub fn service_dependencies() -> ServiceDependencies {
-    let discovery = Arc::new(FileSystemDiscovery);
-    ServiceDependencies::new(
-        Arc::new(FileArtifactPersistence),
-        Arc::new(GitCommandRepository),
-        discovery,
-        Arc::new(SqliteRepositoryFactory),
-        Arc::new(TreeSitterIndexExtractor::new(CoreFirstGrammarProvider)),
-        Arc::new(SyntaxEngine::new(CoreFirstGrammarProvider)),
-    )
+    let pack = env::var("GOLDENEYE_GRAMMAR_PACK").ok();
+    service_dependencies_for_pack(configured_grammar_pack(pack.as_deref()))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GrammarPack {
+    Core,
+    Full,
+}
+
+fn configured_grammar_pack(value: Option<&str>) -> GrammarPack {
+    match value {
+        Some(value) if value.eq_ignore_ascii_case("full") => GrammarPack::Full,
+        _ => GrammarPack::Core,
+    }
+}
+
+fn configured_include_paths() -> Vec<PathBuf> {
+    env::var("GOLDENEYE_INCLUDE_PATHS")
+        .ok()
+        .map(|value| {
+            value
+                .split(';')
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn path_is_included(path: &Path, includes: &[PathBuf]) -> bool {
+    includes.iter().any(|include| path.starts_with(include))
+}
+
+struct FilteredSourceDiscovery {
+    includes: Vec<PathBuf>,
+}
+
+impl LanguageClassifier for FilteredSourceDiscovery {
+    fn classify(&self, path: &Path) -> Option<LanguageId> {
+        FileSystemDiscovery.classify(path)
+    }
+}
+
+impl RepositoryDiscovery for FilteredSourceDiscovery {
+    fn discover(
+        &self,
+        root: &Path,
+        options: &RepositoryDiscoveryOptions,
+    ) -> Result<RepositoryDiscoveryReport, PortError> {
+        let mut report = FileSystemDiscovery.discover(root, options)?;
+        report
+            .files
+            .retain(|file| path_is_included(&file.relative_path, &self.includes));
+        Ok(report)
+    }
+}
+
+fn service_dependencies_for_pack(pack: GrammarPack) -> ServiceDependencies {
+    let includes = configured_include_paths();
+    let discovery: Arc<dyn SourceDiscovery> = if includes.is_empty() {
+        Arc::new(FileSystemDiscovery)
+    } else {
+        Arc::new(FilteredSourceDiscovery { includes })
+    };
+    match pack {
+        GrammarPack::Core => ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            discovery,
+            Arc::new(SqliteRepositoryFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreGrammarProvider)),
+        ),
+        #[cfg(not(feature = "full-grammar-pack"))]
+        GrammarPack::Full => {
+            panic!(
+                "GOLDENEYE_GRAMMAR_PACK=full requires building with the full-grammar-pack feature"
+            )
+        }
+        #[cfg(feature = "full-grammar-pack")]
+        GrammarPack::Full => ServiceDependencies::new(
+            Arc::new(FileArtifactPersistence),
+            Arc::new(GitCommandRepository),
+            discovery,
+            Arc::new(SqliteRepositoryFactory),
+            Arc::new(TreeSitterIndexExtractor::new(CoreFirstGrammarProvider)),
+            Arc::new(SyntaxEngine::new(CoreFirstGrammarProvider)),
+        ),
+    }
 }
 
 /// Reopens and closes the durable store after all service readers have stopped.
@@ -156,5 +246,62 @@ impl Indexer for ServiceIndexer {
             .delete_project(&project)
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{
+        GrammarPack, configured_grammar_pack, path_is_included, service_dependencies_for_pack,
+    };
+
+    #[test]
+    fn full_grammar_pack_is_selected_explicitly() {
+        assert_eq!(configured_grammar_pack(Some("full")), GrammarPack::Full);
+        assert_eq!(configured_grammar_pack(Some("FULL")), GrammarPack::Full);
+        assert_eq!(configured_grammar_pack(None), GrammarPack::Core);
+        assert_eq!(configured_grammar_pack(Some("core")), GrammarPack::Core);
+    }
+
+    #[test]
+    fn configured_include_paths_match_relative_files_and_trees() {
+        let includes = [
+            Path::new("spring-core/src/main/java/example/StringUtils.java").to_path_buf(),
+            Path::new("spring-core/src/test/java").to_path_buf(),
+        ];
+
+        assert!(path_is_included(
+            Path::new("spring-core/src/main/java/example/StringUtils.java"),
+            &includes
+        ));
+        assert!(!path_is_included(
+            Path::new("spring-core/src/main/java/example/Other.java"),
+            &includes
+        ));
+        assert!(path_is_included(
+            Path::new("spring-core/src/test/java/example/StringUtilsTests.java"),
+            &includes
+        ));
+        assert!(!path_is_included(
+            Path::new("spring-core/src/testFixtures/java/example/StringUtilsTests.java"),
+            &includes
+        ));
+    }
+
+    #[cfg(feature = "full-grammar-pack")]
+    #[test]
+    fn compiled_full_grammar_pack_constructs_dependencies() {
+        let _dependencies = service_dependencies_for_pack(GrammarPack::Full);
+    }
+
+    #[cfg(not(feature = "full-grammar-pack"))]
+    #[test]
+    #[should_panic(
+        expected = "GOLDENEYE_GRAMMAR_PACK=full requires building with the full-grammar-pack feature"
+    )]
+    fn unavailable_full_grammar_pack_fails_loudly() {
+        service_dependencies_for_pack(GrammarPack::Full);
     }
 }

@@ -13,10 +13,13 @@ Preserve:
 - existing UTF-16 code-unit threshold semantics in all other cases;
 - `CharSequence` support.
 
+Do not reassign `threshold`: the existing precondition captures it in a lambda.
+Use a separate local endpoint for any surrogate-boundary adjustment.
+
 Add focused coverage to
 `spring-core/src/test/java/org/springframework/util/StringUtilsTests.java`.
 
-Run:
-`.\gradlew.bat :spring-core:test --tests org.springframework.util.StringUtilsTests --build-cache`
+Do not run Gradle. The held-out grader runs the focused Spring Core test after
+your response. You may run quick source and diff checks only.
 
 Do not run `clean`. Do not change public API or unrelated files.

@@ -670,8 +670,12 @@ fn cli_generates_and_checks_provider_and_notices() {
 #[test]
 fn full_grammar_crate_is_default_empty_and_lint_isolated() {
     let crate_root = workspace_root().join("crates/adapters/goldeneye-full-grammars");
-    let manifest = fs::read_to_string(crate_root.join("Cargo.toml")).unwrap();
-    let library = fs::read_to_string(crate_root.join("src/lib.rs")).unwrap();
+    let manifest = fs::read_to_string(crate_root.join("Cargo.toml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let library = fs::read_to_string(crate_root.join("src/lib.rs"))
+        .unwrap()
+        .replace("\r\n", "\n");
 
     assert!(manifest.contains("[features]\ndefault = []"));
     assert!(manifest.contains("[lints.rust]\nunsafe_code = \"deny\""));

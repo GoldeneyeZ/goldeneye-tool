@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   buildRunMatrix,
+  codexSandboxArgs,
   emptyTelemetry,
   expandTokens,
   loadConfig,
@@ -25,12 +26,17 @@ import {
   resolveRepositoryGate,
   resolveRunLayout,
   sanitizeId,
+  selectRunEngines,
   shouldPrimeIndex,
   summarizeRuns,
   tomlInlineTable,
   tomlString,
   accumulateCodexLine,
 } from "./agent-bench/core.mjs";
+import {
+  compileDirtyPathPolicy,
+  evaluateDirtyPaths,
+} from "./agent-bench/path-policy.mjs";
 import {
   assertNoWriterArtifacts,
   buildManifest,
@@ -40,14 +46,26 @@ import {
   restoreReadySnapshot,
   verifyTreeAgainstManifest,
   verifyReadySnapshot,
+  waitForNoWriterArtifacts,
 } from "./agent-bench/snapshot.mjs";
-import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./agent-bench/timing.mjs";
+import {
+  closeWritableStream,
+  scoreRunDurations,
+  spawnWithTimer,
+  stopTimerAtClose,
+} from "./agent-bench/timing.mjs";
 import {
   captureRepositoryProvenance,
   compareProvenance,
   selectDependencyLock,
   sha256,
 } from "./agent-bench/provenance.mjs";
+import {
+  auditBenchmarkReport,
+  mergeReportRuns,
+  renderMarkdownReport,
+} from "./agent-bench/report.mjs";
+import { evaluateCalibrationRun } from "./agent-bench/qualification.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = parseFlags(process.argv.slice(2));
@@ -73,6 +91,9 @@ Options:
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
   --verify-only             validate frozen candidate, source, and snapshot without Codex
   --smoke                   run one unscored ACK candidate and held-out grader
+  --calibration             run one non-scored vanilla calibration
+  --calibration-id <id>     immutable artifact attempt identifier
+  --audit-report            audit the four-run report against raw artifacts
   --keep-worktrees          keep agent worktrees
   --keep-caches             keep MCP caches
 `);
@@ -83,6 +104,7 @@ const configFlag = flags.get("--config");
 if (!configFlag) fail("--config is required");
 
 const { config, path: configPath } = loadConfig(configFlag);
+const benchmarkEngines = [...config.engines];
 config.repo = resolve(flags.get("--repo") ?? config.repo);
 config.base_ref = flags.get("--base-ref") ?? config.base_ref ?? "HEAD";
 config.model = flags.get("--model") ?? config.model;
@@ -99,15 +121,24 @@ if (config.cache_modes.some((mode) => !["cold", "warm"].includes(mode))) {
   fail("--cache-modes accepts only cold,warm");
 }
 config.tasks = select(config.tasks, flags.get("--task"), "task");
-config.engines = select(config.engines, flags.get("--engine"), "engine");
+const runEngines = selectRunEngines(config, flags.get("--engine"));
+if (flags.has("--calibration")) {
+  if (runEngines.length !== 1 || runEngines[0].kind !== "vanilla") {
+    fail("--calibration requires --engine <vanilla-id>");
+  }
+  if (config.repetitions !== 1) fail("--calibration requires --repetitions 1");
+  if (!flags.get("--calibration-id")) fail("--calibration-id is required");
+}
+const calibrationId = flags.has("--calibration")
+  ? sanitizeId(flags.get("--calibration-id"))
+  : null;
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
-const runId = `${timestamp()}-${baseCommit.slice(0, 10)}`;
 const shortRunId = `${baseCommit.slice(0, 8)}-${Date.now().toString(36)}`;
 const runRoot = resolve(
   config.run_root ??
-    join(workspace, "target", "agent-bench", "runs", runId),
+    dirname(config.output),
 );
 const worktreeRoot = resolve(
   config.worktree_root ?? join(dirname(config.repo), ".gab", shortRunId),
@@ -115,7 +146,7 @@ const worktreeRoot = resolve(
 const cacheRoot = resolve(config.cache_root ?? join(dirname(config.repo), ".gab-cache", shortRunId));
 const matrix = buildRunMatrix({
   tasks: config.tasks,
-  engines: config.engines,
+  engines: runEngines,
   cacheModes: config.cache_modes,
   repetitions: config.repetitions,
   seed: config.seed,
@@ -146,7 +177,46 @@ if (flags.has("--dry-run")) {
   process.exit(0);
 }
 
-if (!flags.has("--skip-build") && config.engines.some((engine) => engine.id === "goldeneye")) {
+const candidateEngine = benchmarkEngines.find((engine) => engine.kind === "ack")?.id;
+const vanillaEngine = benchmarkEngines.find((engine) => engine.kind === "vanilla")?.id;
+const markdownOutput = config.output.toLowerCase().endsWith(".json")
+  ? `${config.output.slice(0, -5)}.md`
+  : `${config.output}.md`;
+
+if (flags.has("--audit-report")) {
+  if (!candidateEngine || !vanillaEngine) fail("--audit-report requires ACK and vanilla engines");
+  const preparation = readPreparation(resolvePreparationArtifacts(config).preparation);
+  if (!preparation.eligible_for_scoring) fail("--audit-report requires eligible preparation");
+  const verification = await verifyPreparedSnapshot({
+    baseCommit,
+    config,
+    expectedCandidate: preparation.provenance?.candidate ?? null,
+  });
+  const report = readJson(config.output, "benchmark report");
+  const markdown = readFileSync(markdownOutput, "utf8");
+  const audit = auditBenchmarkReport(report, {
+    expectedCandidateRuns: config.audit?.expected_candidate_runs ?? 3,
+    expectedVanillaRuns: config.audit?.expected_vanilla_runs ?? 1,
+    dirtyPathPolicy: compileDirtyPathPolicy(
+      config.allowed_dirty_policy ?? { exact: config.allowed_dirty_paths ?? [] },
+    ),
+    artifactExists: (directory, name) => existsSync(join(directory, name)),
+    candidateEngine,
+    markdown,
+    readArtifact: (directory, name) => readFileSync(join(directory, name), "utf8"),
+    vanillaEngine,
+  });
+  report.audit = {
+    ...audit,
+    audited_at: new Date().toISOString(),
+    verification,
+  };
+  persistReport(config.output, report);
+  console.log(`Audit PASS: ${config.output}`);
+  process.exit(0);
+}
+
+if (!flags.has("--skip-build") && runEngines.some((engine) => engine.id === "goldeneye")) {
   console.log("Building Goldeneye release binary...");
   const fullGrammarPack = join(workspace, "target", "goldeneye-grammars");
   if (!process.env.GOLDENEYE_GRAMMAR_PACK_DIR && existsSync(fullGrammarPack)) {
@@ -200,8 +270,56 @@ if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("
   process.exit(preparation.eligible_for_scoring || !flags.has("--smoke") ? 0 : 1);
 }
 
+if (flags.has("--calibration")) {
+  if (matrix.length !== 1) fail("--calibration requires exactly one selected vanilla task");
+  if (!config.qualification) fail("--calibration requires qualification configuration");
+  const calibrationRoot = join(runRoot, "calibration", calibrationId);
+  const expectedCandidate = captureBenchmarkProvenance({ config, configPath }).candidate;
+  const result = await executeRun(matrix[0], {
+    baseCommit,
+    cacheRoot,
+    config,
+    repoName,
+    runRoot: join(calibrationRoot, "run"),
+    worktreeRoot,
+  });
+  result.discovery = analyzeDiscoveryTrace(join(result.artifact_dir, "codex.jsonl"));
+  result.hashes = runHashes({
+    candidate: expectedCandidate,
+    configPath,
+    run: matrix[0],
+    runDir: result.artifact_dir,
+    snapshot: result.snapshot,
+  });
+  const qualification = evaluateCalibrationRun(result, config.qualification);
+  persistReport(join(calibrationRoot, "calibration.json"), {
+    schema_version: 1,
+    kind: "vanilla-calibration",
+    calibration_id: calibrationId,
+    task_id: result.task_id,
+    candidate: expectedCandidate,
+    task_hash: result.hashes.task_sha256,
+    grader_hash: result.hashes.grader_sha256,
+    run: result,
+    qualification,
+  });
+  console.log(`Calibration ${qualification.qualified ? "QUALIFIED" : "NOT QUALIFIED"}: ${calibrationRoot}`);
+  process.exit(qualification.qualified ? 0 : 1);
+}
+
 mkdirSync(runRoot, { recursive: true });
-const report = {
+const preparation = readPreparation(resolvePreparationArtifacts(config).preparation);
+if (!preparation.eligible_for_scoring) {
+  fail("Scored runs require eligible snapshot preparation and smoke evidence");
+}
+const existingReport = flags.get("--engine") && existsSync(config.output)
+  ? readJson(config.output, "benchmark report")
+  : null;
+if (existingReport && existingReport.base_commit !== baseCommit) {
+  fail(`Existing report base commit differs: ${existingReport.base_commit}`);
+}
+const report = existingReport ?? {
+  schema_version: 1,
   generated_at: new Date().toISOString(),
   config: configPath,
   repository: config.repo,
@@ -218,7 +336,7 @@ const report = {
     timeout_ms: config.timeout_ms,
     codex_full_access: config.codex_full_access === true,
     randomized_order: matrix.map((run) => run.id),
-    engines: config.engines.map((engine) => ({
+    engines: benchmarkEngines.map((engine) => ({
       id: engine.id,
       kind: engine.kind,
       command: engine.command ?? null,
@@ -228,9 +346,20 @@ const report = {
   runs: [],
   summary: [],
 };
+report.settings.randomized_order = mergeUnique(
+  report.settings.randomized_order ?? [],
+  matrix.map((run) => run.id),
+);
+report.run_roots = mergeUnique(report.run_roots ?? [], [runRoot]);
+delete report.completed_at;
 
 for (const [position, run] of matrix.entries()) {
   console.log(`[${position + 1}/${matrix.length}] ${run.id}`);
+  const preRunVerification = await verifyPreparedSnapshot({
+    baseCommit,
+    config,
+    expectedCandidate: preparation.provenance?.candidate ?? null,
+  });
   const result = await executeRun(run, {
     baseCommit,
     cacheRoot,
@@ -239,9 +368,18 @@ for (const [position, run] of matrix.entries()) {
     runRoot,
     worktreeRoot,
   });
-  report.runs.push(result);
+  result.pre_run_verification = preRunVerification;
+  result.discovery = analyzeDiscoveryTrace(join(result.artifact_dir, "codex.jsonl"));
+  result.hashes = runHashes({
+    candidate: preparation.provenance?.candidate ?? null,
+    configPath,
+    run,
+    runDir: result.artifact_dir,
+    snapshot: preRunVerification.snapshot,
+  });
+  report.runs = mergeReportRuns(report.runs, [result]);
   report.summary = summarizeRuns(report.runs);
-  persistReport(config.output, report);
+  persistBenchmarkReport(config.output, markdownOutput, report, { candidateEngine, vanillaEngine });
   console.log(
     `  ${result.success ? "PASS" : "FAIL"} wall=${formatMs(result.wall_ms)} tokens=${result.total_tokens} grader=${result.grader_exit_code}`,
   );
@@ -249,13 +387,13 @@ for (const [position, run] of matrix.entries()) {
 
 report.completed_at = new Date().toISOString();
 report.summary = summarizeRuns(report.runs);
-persistReport(config.output, report);
+persistBenchmarkReport(config.output, markdownOutput, report, { candidateEngine, vanillaEngine });
 console.log(`Agent benchmark artifact: ${config.output}`);
 
 async function prepareReadySnapshot({ baseCommit, config, repoName }) {
   const readySnapshot = config.ready_snapshot;
   if (!readySnapshot) throw new Error("--prepare-snapshot requires ready_snapshot configuration");
-  const ackEngine = config.engines.find((engine) => engine.kind === "ack");
+  const ackEngine = benchmarkEngines.find((engine) => engine.kind === "ack");
   if (!ackEngine) throw new Error("--prepare-snapshot requires an ACK engine");
 
   const startedAt = performance.now();
@@ -317,7 +455,7 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       observed: sqliteCheckpoint,
       passed: true,
     });
-    await assertNoWriterArtifacts(readySnapshot.live_cache);
+    await waitForNoWriterArtifacts(readySnapshot.live_cache);
     activeGate = "snapshot_create_restore_verify";
     const manifest = await createReadySnapshot({
       liveCache: readySnapshot.live_cache,
@@ -665,7 +803,7 @@ async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repo
 }
 
 async function executeRun(run, context) {
-  const runDir = join(context.runRoot, run.id);
+  const runDir = join(context.runRoot, run.engine.id, run.id);
   const laneKey = createHash("sha256").update(run.id).digest("hex").slice(0, 12);
   const layout = resolveRunLayout({
     kind: run.engine.kind,
@@ -704,6 +842,7 @@ async function executeRun(run, context) {
     mkdirSync(dirname(worktree), { recursive: true });
     runChecked("git", ["-C", context.config.repo, "worktree", "add", "--detach", worktree, context.baseCommit]);
     worktreeAdded = true;
+    await waitForRepositoryAtBase(worktree, context.baseCommit);
     linkWorkspaceDependencies(context.config.repo, worktree);
 
     if (usesReadySnapshot) {
@@ -794,6 +933,22 @@ async function executeRun(run, context) {
     telemetry.protocol_violations,
     run.engine.kind,
   );
+  const dirtyFileNames = status
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+  const dirtyPolicy = compileDirtyPathPolicy(
+    context.config.allowed_dirty_policy ?? {
+      exact: context.config.allowed_dirty_paths ?? [],
+    },
+  );
+  const dirtyPathPolicy = evaluateDirtyPaths(dirtyFileNames, dirtyPolicy);
+  if (!dirtyPathPolicy.passed) {
+    protocolViolations.push({
+      kind: "dirty-path-policy",
+      ...dirtyPathPolicy,
+    });
+  }
   const graderPassed = graderResult.exit_code === 0;
   const graderMs = graderResult.duration_ms;
   const durations = Number.isFinite(agentResult.duration_ms) && Number.isFinite(graderMs)
@@ -854,6 +1009,7 @@ async function executeRun(run, context) {
     },
     ...engineMetrics,
     protocol_violations: protocolViolations,
+    dirty_path_policy: dirtyPathPolicy,
     patch_bytes: Buffer.byteLength(diff),
     patch_files: patchStats.files,
     patch_insertions: patchStats.insertions,
@@ -871,7 +1027,7 @@ function composePrompt(task, cacheMode, engine) {
     engine.kind === "vanilla"
       ? "- No code-memory MCP is available. Use ordinary local shell and file tools for discovery."
       : engine.kind === "ack"
-        ? `- Use only the ack CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Use ack search/symbol/get/inspect/callers/callees/arch/status instead. git status, git diff, edits, and build/test commands remain allowed.`
+        ? `- Use only the ack CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use ack search/symbol/get/inspect/callers/callees/arch/status instead. git status, git diff, edits, and build/test commands remain allowed.`
         : `- Use only the assigned ${engine.id} MCP tools to discover and read ${sourceLanguage} source.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Use the assigned MCP's semantic search and source tools instead. git status, git diff, edits, and build/test commands remain allowed.`;
   const cacheInstructions =
     cacheMode === "none"
@@ -1028,11 +1184,10 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     "--color",
     "never",
   ];
-  if (config.codex_full_access === true) {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else {
-    args.push("-s", "workspace-write", "--add-dir", worktree, "-c", 'approval_policy="never"');
-  }
+  args.push(...codexSandboxArgs({
+    fullAccess: config.codex_full_access === true,
+    worktree,
+  }));
   args.push("-C", worktree);
   if (engine.kind !== "vanilla" && engine.kind !== "ack") {
     const serverName = engine.mcpServerName;
@@ -1098,7 +1253,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   });
   clearTimeout(timer);
   lines.close();
-  await Promise.all([closeStream(jsonlStream), closeStream(stderrStream)]);
+  await Promise.all([closeWritableStream(jsonlStream), closeWritableStream(stderrStream)]);
   return {
     duration_ms: outcome.durationMs,
     error: outcome.error ? errorMessage(outcome.error) : null,
@@ -1331,11 +1486,18 @@ function removeWorktreeIfRegistered(repo, worktree, allowedRoot) {
   if (!isInside(resolvedWorktree, resolvedAllowedRoot)) {
     throw new Error(`Refusing worktree cleanup outside ${resolvedAllowedRoot}: ${resolvedWorktree}`);
   }
+  spawnSync("git", ["-C", resolvedRepo, "worktree", "unlock", resolvedWorktree], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
   spawnSync("git", ["-C", resolvedRepo, "worktree", "remove", "--force", resolvedWorktree], {
     encoding: "utf8",
     windowsHide: true,
   });
   spawnSync("git", ["-C", resolvedRepo, "worktree", "prune"], { encoding: "utf8", windowsHide: true });
+  if (existsSync(resolvedWorktree)) {
+    rmIfInside(resolvedWorktree, resolvedAllowedRoot);
+  }
 }
 
 function ensurePreparationWorktree(repo, worktree, allowedRoot, baseCommit) {
@@ -1349,7 +1511,7 @@ function ensurePreparationWorktree(repo, worktree, allowedRoot, baseCommit) {
     .filter((line) => line.startsWith("worktree "))
     .map((line) => resolve(line.slice("worktree ".length)));
   const isRegistered = registered.some((candidate) => pathsEqual(candidate, resolvedWorktree));
-  if (isRegistered) {
+  if (isRegistered && existsSync(resolvedWorktree)) {
     assertRepositoryAtBase(resolvedWorktree, baseCommit);
     return {
       path: resolvedWorktree,
@@ -1357,6 +1519,9 @@ function ensurePreparationWorktree(repo, worktree, allowedRoot, baseCommit) {
       created: false,
       reused: true,
     };
+  }
+  if (isRegistered) {
+    removeWorktreeIfRegistered(repo, resolvedWorktree, resolvedAllowedRoot);
   }
   if (existsSync(resolvedWorktree)) {
     throw new Error(`Refusing to replace unregistered worktree path: ${resolvedWorktree}`);
@@ -1392,7 +1557,12 @@ function rmIfInside(target, parent) {
   if (!isInside(absoluteTarget, absoluteParent)) {
     throw new Error(`Refusing recursive delete outside ${absoluteParent}: ${absoluteTarget}`);
   }
-  rmSync(absoluteTarget, { force: true, recursive: true });
+  rmSync(absoluteTarget, {
+    force: true,
+    maxRetries: process.platform === "win32" ? 20 : 0,
+    recursive: true,
+    retryDelay: 250,
+  });
 }
 
 function isInside(child, parent) {
@@ -1449,6 +1619,23 @@ function assertRepositoryAtBase(repo, baseCommit) {
   }
 }
 
+async function waitForRepositoryAtBase(repo, baseCommit, timeoutMs = 120_000) {
+  const deadline = performance.now() + timeoutMs;
+  let lastError = null;
+  do {
+    try {
+      assertRepositoryAtBase(repo, baseCommit);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  } while (performance.now() < deadline);
+  throw new Error(
+    `worktree did not become ready within ${timeoutMs}ms: ${errorMessage(lastError)}`,
+  );
+}
+
 function runChecked(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true });
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr}`);
@@ -1470,11 +1657,6 @@ function killProcessTree(pid) {
       }
     }
   }
-}
-
-function closeStream(stream) {
-  if (stream.closed) return Promise.resolve();
-  return new Promise((resolveClose) => stream.end(resolveClose));
 }
 
 function waitForExit(child, timeoutMs) {
@@ -1591,6 +1773,84 @@ function failedAgentResult(error) {
 function persistReport(path, report) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+function persistBenchmarkReport(jsonPath, markdownPath, report, engines) {
+  persistReport(jsonPath, report);
+  writeFileSync(markdownPath, renderMarkdownReport(report, engines));
+}
+
+function readJson(path, label) {
+  if (!existsSync(path)) throw new Error(`Missing ${label}: ${path}`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function mergeUnique(existing, additions) {
+  return [...new Set([...existing, ...additions])];
+}
+
+function runHashes({ candidate, configPath: resolvedConfigPath, run, runDir, snapshot }) {
+  const graderPath = run.task.grader.args.find(
+    (value) => typeof value === "string" && existsSync(value) && statSync(value).isFile(),
+  );
+  return {
+    prompt_sha256: hashFile(join(runDir, "prompt.txt")),
+    config_sha256: hashFile(resolvedConfigPath),
+    task_sha256: hashFile(run.task.prompt_file),
+    grader_sha256: graderPath ? hashFile(graderPath) : null,
+    candidate_provenance_sha256: candidate ? hashJson(candidate) : null,
+    snapshot_manifest_sha256: snapshot?.manifest_sha256 ?? null,
+  };
+}
+
+function analyzeDiscoveryTrace(path) {
+  const commands = [];
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const item = event.item;
+    if (
+      event.type !== "item.completed" ||
+      item?.type !== "command_execution" ||
+      !/(?:^|[\s'"])ack\s+/i.test(item.command ?? "")
+    ) {
+      continue;
+    }
+    const action = item.command.match(/\back\s+(status|search|symbol|inspect|get|callers|callees|arch)\b/i)?.[1]
+      ?.toLowerCase() ?? "other";
+    const output = String(item.aggregated_output ?? "");
+    commands.push({
+      order: commands.length + 1,
+      action,
+      command: item.command,
+      exit_code: item.exit_code,
+      payload_bytes: Buffer.byteLength(output),
+      payload_cardinality: output.split(/\r?\n/).filter(Boolean).length,
+    });
+  }
+  return {
+    first_selection: commands.find((command) => command.action !== "status") ?? commands[0] ?? null,
+    ordering: commands.map(({ order, action, exit_code }) => ({ order, action, exit_code })),
+    failed_commands: commands.filter((command) => command.exit_code !== 0),
+    discovery_turns: commands.length,
+    result_payload_bytes: commands.reduce((sum, command) => sum + command.payload_bytes, 0),
+    result_payload_cardinality: commands.reduce(
+      (sum, command) => sum + command.payload_cardinality,
+      0,
+    ),
+  };
+}
+
+function hashFile(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function hashJson(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function parseFlags(args) {

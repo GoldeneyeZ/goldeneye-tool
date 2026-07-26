@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 
 const MANIFEST_FILE = "snapshot-manifest.json";
 const WRITER_ARTIFACT = /(?:^|[\\/])(?:goldeneye\.db-(?:wal|shm)|.*\.(?:lock|lck))$/i;
@@ -44,7 +45,13 @@ export async function collectRegularFiles(root) {
     for (const name of entries) {
       const absolute = path.join(directory, name);
       const relative = relativeDirectory ? `${relativeDirectory}/${name}` : name;
-      const stats = await lstat(absolute);
+      let stats;
+      try {
+        stats = await lstat(absolute);
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
       if (stats.isSymbolicLink()) {
         throw unsafeEntryError(absolute);
       }
@@ -106,6 +113,27 @@ export function checkpointSqliteDatabase(databasePath) {
     closed: true,
     sidecars_absent: true,
   };
+}
+
+export async function waitForNoWriterArtifacts(
+  root,
+  { timeoutMs = 5_000, pollMs = 50 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() <= deadline) {
+    try {
+      await assertNoWriterArtifacts(root);
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith("snapshot source is not quiescent:")) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await delay(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+  }
+  throw lastError;
 }
 
 export async function copyRegularTree(source, destination, { exclude = [] } = {}) {

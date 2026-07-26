@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { scoreRunDurations, spawnWithTimer, stopTimerAtClose } from "./timing.mjs";
+import {
+  closeWritableStream,
+  scoreRunDurations,
+  spawnWithTimer,
+  stopTimerAtClose,
+} from "./timing.mjs";
+
+test("closeWritableStream resolves after an already-ended stream", async () => {
+  const stream = new PassThrough();
+  stream.resume();
+  stream.end("complete");
+  await new Promise((resolve) => stream.once("finish", resolve));
+
+  await closeWritableStream(stream);
+  assert.equal(stream.writableFinished, true);
+});
 
 test("spawn timer excludes pre-spawn maintenance and includes spawn callback work", () => {
   let now = 1_000;
