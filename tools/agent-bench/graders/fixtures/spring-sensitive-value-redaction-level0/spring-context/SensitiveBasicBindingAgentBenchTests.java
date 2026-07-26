@@ -1,5 +1,8 @@
 package org.springframework.validation;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.MutablePropertyValues;
@@ -39,6 +42,38 @@ class SensitiveBasicBindingAgentBenchTests {
 		assertThat(error).isNotNull();
 		assertThat(error.getRejectedValue()).isEqualTo("[REDACTED]");
 		assertThat(target.pin).isZero();
+	}
+
+	@Test
+	void redactsNestedBeanPropertyTypeMismatch() {
+		NestedRoot target = new NestedRoot();
+		DataBinder binder = new DataBinder(target, "nestedRoot");
+		MutablePropertyValues values = new MutablePropertyValues();
+		values.add("credentials.password", "not-a-number");
+
+		binder.bind(values);
+
+		FieldError error = binder.getBindingResult().getFieldError("credentials.password");
+		assertThat(error).isNotNull();
+		assertThat(error.getRejectedValue()).isEqualTo("[REDACTED]");
+		assertThat(error.isBindingFailure()).isTrue();
+		assertThat(target.getCredentials().getPassword()).isZero();
+	}
+
+	@Test
+	void redactsIndexedBeanPropertyTypeMismatch() {
+		IndexedRoot target = new IndexedRoot();
+		DataBinder binder = new DataBinder(target, "indexedRoot");
+		MutablePropertyValues values = new MutablePropertyValues();
+		values.add("accounts[0].pin", "not-a-number");
+
+		binder.bind(values);
+
+		FieldError error = binder.getBindingResult().getFieldError("accounts[0].pin");
+		assertThat(error).isNotNull();
+		assertThat(error.getRejectedValue()).isEqualTo("[REDACTED]");
+		assertThat(error.isBindingFailure()).isTrue();
+		assertThat(target.getAccounts().get(0).getPin()).isZero();
 	}
 
 	@Test
@@ -101,6 +136,52 @@ class SensitiveBasicBindingAgentBenchTests {
 		@Sensitive
 		public String getPassword() {
 			return this.password;
+		}
+	}
+
+	static class NestedRoot {
+
+		private final NestedCredentials credentials = new NestedCredentials();
+
+		public NestedCredentials getCredentials() {
+			return this.credentials;
+		}
+	}
+
+	static class NestedCredentials {
+
+		private int password;
+
+		@Sensitive
+		public int getPassword() {
+			return this.password;
+		}
+
+		public void setPassword(int password) {
+			this.password = password;
+		}
+	}
+
+	static class IndexedRoot {
+
+		private final List<IndexedAccount> accounts = new ArrayList<>(List.of(new IndexedAccount()));
+
+		public List<IndexedAccount> getAccounts() {
+			return this.accounts;
+		}
+	}
+
+	static class IndexedAccount {
+
+		private int pin;
+
+		@Sensitive
+		public int getPin() {
+			return this.pin;
+		}
+
+		public void setPin(int pin) {
+			this.pin = pin;
 		}
 	}
 
