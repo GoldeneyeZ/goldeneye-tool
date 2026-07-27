@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    ArchitectureRequest, ArchitectureResult, CodeSnippetRequest, CodeSnippetResult,
+    ArchitectureRequest, ArchitectureResult, CodeSnippetChunkRequest, CodeSnippetChunkResult,
+    CodeSnippetManifestRequest, CodeSnippetManifestResult, CodeSnippetRequest, CodeSnippetResult,
     GraphSchemaRequest, GraphSchemaResult, IndexStatusRequest, IndexStatusResult, ProjectId,
     ProjectSummary, QueryGraphRequest, QueryGraphResult, SearchCodeRequest, SearchCodeResult,
     SearchGraphPage, SearchGraphRequest, SemanticSearchRequest, SemanticSearchResult, ServiceError,
@@ -187,6 +188,30 @@ impl Services {
         request: &CodeSnippetRequest,
     ) -> Result<CodeSnippetResult, ServiceError> {
         self.with_query_engine(|engine| engine.get_code_snippet(request))
+    }
+
+    /// Returns source metadata and deterministic chunk count for one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed argument, symbol, freshness, source, storage, or query failures.
+    pub fn get_code_snippet_manifest(
+        &self,
+        request: &CodeSnippetManifestRequest,
+    ) -> Result<CodeSnippetManifestResult, ServiceError> {
+        self.with_query_engine(|engine| engine.get_code_snippet_manifest(request))
+    }
+
+    /// Returns one deterministic UTF-8-safe source chunk for one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed argument, symbol, freshness, source, storage, or query failures.
+    pub fn get_code_snippet_chunk(
+        &self,
+        request: &CodeSnippetChunkRequest,
+    ) -> Result<CodeSnippetChunkResult, ServiceError> {
+        self.with_query_engine(|engine| engine.get_code_snippet_chunk(request))
     }
 
     /// Returns compact architecture summaries for one project.

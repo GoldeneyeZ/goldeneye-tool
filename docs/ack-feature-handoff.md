@@ -11,7 +11,7 @@ possibly stale running development server. Phase 1 still excludes `ack elect`.
 
 ## Scope and baseline
 
-The MCP registry grew from 10 to 21 tools. Eleven tool names are new:
+The MCP registry grew from 10 to 23 tools. Thirteen tool names are new:
 
 ```text
 delete_project
@@ -25,6 +25,8 @@ insert_after_node
 detect_changes
 manage_adr
 ingest_traces
+get_code_snippet_manifest
+get_code_snippet_chunk
 ```
 
 Existing contracts also changed:
@@ -144,13 +146,14 @@ cross edges.
 
 ## MCP contracts
 
-The current registry groups its 21 tools as follows:
+The current registry groups its 23 tools as follows:
 
 ```text
 Index/meta:   index_repository, list_projects, delete_project,
               index_status, get_graph_schema
 Search/query: search_graph, search_code, query_graph
-Trace/source: trace_path, trace_call_path, get_code_snippet, get_architecture
+Trace/source: trace_path, trace_call_path, get_code_snippet,
+              get_code_snippet_manifest, get_code_snippet_chunk, get_architecture
 Edit:         inspect_syntax, create_file, replace_node, delete_node,
               insert_before_node, insert_after_node
 Compatibility: detect_changes, manage_adr, ingest_traces
@@ -345,7 +348,7 @@ Fresh verification at commit `14cdb59`:
 
 - `crates/delivery/goldeneye-mcp/src/tools.rs`: canonical tool schemas.
 - `crates/delivery/goldeneye-mcp/src/server.rs`: dispatch and compatibility behavior.
-- `tests/fixtures/mcp/foundation.expected.jsonl`: frozen 21-tool protocol.
+- `tests/fixtures/mcp/foundation.expected.jsonl`: frozen 23-tool protocol.
 - `crates/application/goldeneye-services/src/edit.rs`: edit requests, results, and runtime.
 - `crates/application/goldeneye-services/src/git.rs`: change-impact contract.
 - `crates/application/goldeneye-services/src/adr_traces.rs`: ADR and trace contracts.

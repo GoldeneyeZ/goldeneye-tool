@@ -1,15 +1,16 @@
 use super::errors::{
-    compatibility_error, missing_project_error, parse_arguments, project_id, query_value,
-    service_error_message, to_value,
+    SnippetToolError, compatibility_error, missing_project_error, parse_arguments, project_id,
+    query_value, service_error_message, to_value,
 };
 use super::{
-    ArchitectureArguments, ArchitectureRequest, CancellationToken, CodeSnippetRequest,
-    DetectChangesArguments, DetectChangesRequest, IndexRepositoryRequest, IndexStatusRequest,
-    IngestTracesArguments, IngestTracesRequest, ManageAdrArguments, ManageAdrRequest,
-    OperationHooks, PageRequest, ProjectId, QueryArguments, QueryError, QueryGraphRequest,
-    RequestId, SearchArguments, SearchCodeArguments, SearchCodeRequest, SearchGraphRequest,
-    SemanticSearchRequest, Server, ServiceError, SnippetArguments, TraceArguments, TraceDirection,
-    TracePathRequest, Value, fs, json,
+    ArchitectureArguments, ArchitectureRequest, CancellationToken, CodeSnippetChunkRequest,
+    CodeSnippetManifestRequest, CodeSnippetRequest, DetectChangesArguments, DetectChangesRequest,
+    IndexRepositoryRequest, IndexStatusRequest, IngestTracesArguments, IngestTracesRequest,
+    ManageAdrArguments, ManageAdrRequest, OperationHooks, PageRequest, ProjectId, QueryArguments,
+    QueryError, QueryGraphRequest, RequestId, SearchArguments, SearchCodeArguments,
+    SearchCodeRequest, SearchGraphRequest, SemanticSearchRequest, Server, ServiceError,
+    SnippetArguments, SnippetChunkArguments, SnippetManifestArguments, TraceArguments,
+    TraceDirection, TracePathRequest, Value, fs, json,
 };
 const ARCHITECTURE_ITEM_LIMIT: usize = 25;
 
@@ -277,14 +278,22 @@ impl Server {
         Ok(value)
     }
 
-    pub(super) fn get_code_snippet(&self, args: SnippetArguments) -> Result<Value, String> {
-        let project = project_id("get_code_snippet", args.project)?;
+    pub(super) fn get_code_snippet(
+        &self,
+        args: SnippetArguments,
+    ) -> Result<Value, SnippetToolError> {
+        let project =
+            project_id("get_code_snippet", args.project).map_err(SnippetToolError::untyped)?;
         let result = self
             .services()
             .get_code_snippet(&CodeSnippetRequest::new(project, args.qualified_name))
-            .map_err(service_error_message)?;
-        let Value::Object(mut object) = to_value(&result.symbol)? else {
-            return Err("snippet symbol serialization did not produce an object".to_owned());
+            .map_err(SnippetToolError::from_legacy_service)?;
+        let Value::Object(mut object) =
+            to_value(&result.symbol).map_err(SnippetToolError::untyped)?
+        else {
+            return Err(SnippetToolError::untyped(
+                "snippet symbol serialization did not produce an object",
+            ));
         };
         object.insert("project".to_owned(), Value::String(result.project));
         object.insert("source".to_owned(), Value::String(result.source.clone()));
@@ -298,6 +307,109 @@ impl Server {
             "content_hash".to_owned(),
             Value::String(result.content_hash),
         );
+        Ok(Value::Object(object))
+    }
+
+    pub(super) fn get_code_snippet_manifest(
+        &self,
+        args: SnippetManifestArguments,
+    ) -> Result<Value, SnippetToolError> {
+        let project = project_id("get_code_snippet_manifest", args.project)
+            .map_err(|message| SnippetToolError::invalid("project", message))?;
+        let mut request = CodeSnippetManifestRequest::new(project, args.qualified_name);
+        request.chunk_bytes = args.chunk_bytes;
+        let result = self
+            .services()
+            .get_code_snippet_manifest(&request)
+            .map_err(SnippetToolError::from_service)?;
+        let Value::Object(mut object) =
+            to_value(&result.symbol).map_err(SnippetToolError::untyped)?
+        else {
+            return Err(SnippetToolError::untyped(
+                "snippet symbol serialization did not produce an object",
+            ));
+        };
+        object.insert("project".to_owned(), Value::String(result.project));
+        object.insert("file_path".to_owned(), Value::String(result.file_path));
+        object.insert("start_byte".to_owned(), json!(result.start_byte));
+        object.insert("end_byte".to_owned(), json!(result.end_byte));
+        object.insert("start_line".to_owned(), json!(result.start_line));
+        object.insert("end_line".to_owned(), json!(result.end_line));
+        object.insert("source_bytes".to_owned(), json!(result.source_bytes));
+        object.insert("source_lines".to_owned(), json!(result.source_lines));
+        object.insert(
+            "source_sha256".to_owned(),
+            Value::String(result.source_sha256),
+        );
+        object.insert(
+            "indexed_file_hash".to_owned(),
+            Value::String(result.indexed_file_hash),
+        );
+        object.insert("chunk_bytes".to_owned(), json!(result.chunk_bytes));
+        object.insert("chunk_count".to_owned(), json!(result.chunk_count));
+        Ok(Value::Object(object))
+    }
+
+    pub(super) fn get_code_snippet_chunk(
+        &self,
+        args: SnippetChunkArguments,
+    ) -> Result<Value, SnippetToolError> {
+        let project = project_id("get_code_snippet_chunk", args.project)
+            .map_err(|message| SnippetToolError::invalid("project", message))?;
+        let mut request = CodeSnippetChunkRequest::new(project, args.qualified_name, args.chunk);
+        request.chunk_bytes = args.chunk_bytes;
+        request.expected_source_sha256 = args.expected_source_sha256;
+        let result = self
+            .services()
+            .get_code_snippet_chunk(&request)
+            .map_err(SnippetToolError::from_service)?;
+        let Value::Object(mut object) =
+            to_value(&result.symbol).map_err(SnippetToolError::untyped)?
+        else {
+            return Err(SnippetToolError::untyped(
+                "snippet symbol serialization did not produce an object",
+            ));
+        };
+        object.insert("project".to_owned(), Value::String(result.project));
+        object.insert("source".to_owned(), Value::String(result.source));
+        object.insert("file_path".to_owned(), Value::String(result.file_path));
+        object.insert("start_byte".to_owned(), json!(result.start_byte));
+        object.insert("end_byte".to_owned(), json!(result.end_byte));
+        object.insert("start_line".to_owned(), json!(result.start_line));
+        object.insert("end_line".to_owned(), json!(result.end_line));
+        object.insert("source_bytes".to_owned(), json!(result.source_bytes));
+        object.insert("source_lines".to_owned(), json!(result.source_lines));
+        object.insert(
+            "source_sha256".to_owned(),
+            Value::String(result.source_sha256),
+        );
+        object.insert(
+            "indexed_file_hash".to_owned(),
+            Value::String(result.indexed_file_hash),
+        );
+        object.insert("chunk_bytes".to_owned(), json!(result.chunk_bytes));
+        object.insert("chunk_count".to_owned(), json!(result.chunk_count));
+        object.insert("chunk".to_owned(), json!(result.chunk));
+        object.insert(
+            "chunk_start_byte".to_owned(),
+            json!(result.chunk_start_byte),
+        );
+        object.insert("chunk_end_byte".to_owned(), json!(result.chunk_end_byte));
+        object.insert(
+            "file_chunk_start_byte".to_owned(),
+            json!(result.file_chunk_start_byte),
+        );
+        object.insert(
+            "file_chunk_end_byte".to_owned(),
+            json!(result.file_chunk_end_byte),
+        );
+        object.insert(
+            "chunk_start_line".to_owned(),
+            json!(result.chunk_start_line),
+        );
+        object.insert("chunk_end_line".to_owned(), json!(result.chunk_end_line));
+        object.insert("eof".to_owned(), json!(result.eof));
+        object.insert("truncated".to_owned(), json!(result.truncated));
         Ok(Value::Object(object))
     }
 

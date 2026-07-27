@@ -20,7 +20,8 @@ use goldeneye_domain::{Generation, ProjectId};
 use goldeneye_ports::QueryRepository;
 
 use crate::types::{
-    ArchitectureRequest, ArchitectureResult, CodeSnippetRequest, CodeSnippetResult,
+    ArchitectureRequest, ArchitectureResult, CodeSnippetChunkRequest, CodeSnippetChunkResult,
+    CodeSnippetManifestRequest, CodeSnippetManifestResult, CodeSnippetRequest, CodeSnippetResult,
     GraphSchemaRequest, GraphSchemaResult, IndexStatusRequest, IndexStatusResult, ProjectSummary,
     QueryError, QueryGraphRequest, QueryGraphResult, SchemaEntry, SearchCodeRequest,
     SearchCodeResult, SearchGraphPage, SearchGraphRequest, SemanticSearchRequest,
@@ -195,6 +196,36 @@ impl QueryEngine {
         let project = self.require_project(&request.project)?;
         let graph = self.cached_graph_at_generation(&request.project, project.generation)?;
         snippet::execute(self.repository.as_ref(), request, &project, &graph)
+    }
+
+    /// Returns bounded metadata and a deterministic UTF-8 chunk count for one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error for invalid chunk size, resolution, stale/missing source, corrupt
+    /// spans, or invalid UTF-8.
+    pub fn get_code_snippet_manifest(
+        &self,
+        request: &CodeSnippetManifestRequest,
+    ) -> Result<CodeSnippetManifestResult, QueryError> {
+        let project = self.require_project(&request.project)?;
+        let graph = self.cached_graph_at_generation(&request.project, project.generation)?;
+        snippet::execute_manifest(self.repository.as_ref(), request, &project, &graph)
+    }
+
+    /// Returns one deterministic, UTF-8-safe source chunk for one symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns a query error for invalid arguments, resolution, stale/missing source, corrupt
+    /// spans, invalid UTF-8, stale source hashes, or out-of-range chunks.
+    pub fn get_code_snippet_chunk(
+        &self,
+        request: &CodeSnippetChunkRequest,
+    ) -> Result<CodeSnippetChunkResult, QueryError> {
+        let project = self.require_project(&request.project)?;
+        let graph = self.cached_graph_at_generation(&request.project, project.generation)?;
+        snippet::execute_chunk(self.repository.as_ref(), request, &project, &graph)
     }
 
     /// Returns a deterministic high-level graph architecture summary.

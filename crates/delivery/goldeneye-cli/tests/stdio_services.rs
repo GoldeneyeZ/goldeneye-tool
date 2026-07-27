@@ -192,8 +192,18 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
     let second = responses(&run_server(second_input.as_bytes(), &database, temp.path()));
     assert_eq!(second.len(), 5);
     let tools = second[0]["result"]["tools"].as_array().expect("tools");
-    assert_eq!(tools.len(), 21);
+    assert_eq!(tools.len(), 23);
     assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == "get_code_snippet_manifest")
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == "get_code_snippet_chunk")
+    );
     assert_eq!(
         second[1]["result"]["structuredContent"]["projects"][0]["name"],
         project
@@ -404,6 +414,37 @@ fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_ack_reads() {
             .expect("source")
             .contains("{ 2 }")
     );
+    let manifest = call_tool(
+        &database,
+        temp.path(),
+        151,
+        "get_code_snippet_manifest",
+        json!({"project": project, "qualified_name": qualified, "chunk_bytes": 256}),
+    );
+    let manifest = successful_content(&manifest);
+    assert_eq!(manifest["chunk_count"], 1);
+    assert!(manifest.get("source").is_none());
+    let chunk = call_tool(
+        &database,
+        temp.path(),
+        152,
+        "get_code_snippet_chunk",
+        json!({
+            "project": project,
+            "qualified_name": qualified,
+            "chunk": 1,
+            "chunk_bytes": 256,
+            "expected_source_sha256": manifest["source_sha256"]
+        }),
+    );
+    let chunk = successful_content(&chunk);
+    assert!(
+        chunk["source"]
+            .as_str()
+            .expect("chunk source")
+            .contains("{ 2 }")
+    );
+    assert!(chunk.get("code").is_none());
     let trace = call_tool(
         &database,
         temp.path(),

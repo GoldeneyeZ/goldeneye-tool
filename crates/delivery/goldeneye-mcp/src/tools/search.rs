@@ -101,6 +101,8 @@ pub(super) fn trace_and_source_tools(project: &Value, trace_schema: &Value) -> V
         trace_path_tool(trace_schema),
         trace_call_path_tool(trace_schema),
         code_snippet_tool(project),
+        code_snippet_manifest_tool(project),
+        code_snippet_chunk_tool(project),
         architecture_tool(project),
     ]
 }
@@ -134,6 +136,54 @@ fn code_snippet_tool(project: &Value) -> ToolDefinition {
                 "qualified_name": {"type": "string", "description": "Exact or short symbol name"}
             }),
             &["project", "qualified_name"],
+        ),
+    )
+}
+
+fn code_snippet_manifest_tool(project: &Value) -> ToolDefinition {
+    ToolDefinition::new(
+        "get_code_snippet_manifest",
+        "Get code snippet manifest",
+        "Return bounded source metadata, hashes, and deterministic UTF-8 chunk count without source.",
+        object_schema(
+            &json!({
+                "project": project.clone(),
+                "qualified_name": {"type": "string", "description": "Exact or short symbol name"},
+                "chunk_bytes": {
+                    "type": "integer",
+                    "minimum": 256,
+                    "maximum": 8192,
+                    "default": 8192
+                }
+            }),
+            &["project", "qualified_name"],
+        ),
+    )
+}
+
+fn code_snippet_chunk_tool(project: &Value) -> ToolDefinition {
+    ToolDefinition::new(
+        "get_code_snippet_chunk",
+        "Get code snippet chunk",
+        "Return one 1-based deterministic UTF-8 source chunk with exact offsets and hashes.",
+        object_schema(
+            &json!({
+                "project": project.clone(),
+                "qualified_name": {"type": "string", "description": "Exact or short symbol name"},
+                "chunk": {"type": "integer", "minimum": 1, "description": "1-based chunk number"},
+                "chunk_bytes": {
+                    "type": "integer",
+                    "minimum": 256,
+                    "maximum": 8192,
+                    "default": 8192
+                },
+                "expected_source_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Optional lowercase SHA-256 snapshot guard"
+                }
+            }),
+            &["project", "qualified_name", "chunk"],
         ),
     )
 }

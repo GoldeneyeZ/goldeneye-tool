@@ -1,12 +1,13 @@
 use super::errors::{
-    parse_arguments, project_id, project_list_error, service_error_message, to_value,
+    SnippetToolError, parse_arguments, project_id, project_list_error, service_error_message,
+    to_value,
 };
 use super::{
     ArchitectureArguments, CreateFileRequest, DeleteNodeRequest, EmptyArguments,
     GraphSchemaRequest, IndexArguments, IndexRepositoryMode, IndexRepositoryRequest,
     IndexStatusRequest, InspectSyntaxRequest, NodeContentRequest, ProjectArguments, QueryArguments,
-    RequestId, SearchArguments, SearchCodeArguments, Server, SnippetArguments, TraceArguments,
-    Value, json,
+    RequestId, SearchArguments, SearchCodeArguments, Server, SnippetArguments,
+    SnippetChunkArguments, SnippetManifestArguments, TraceArguments, Value, json,
 };
 
 impl Server {
@@ -28,7 +29,6 @@ impl Server {
             "search_code" => self.dispatch_search_code(name, arguments),
             "query_graph" => self.dispatch_query_graph(name, arguments),
             "trace_path" | "trace_call_path" => self.dispatch_trace_path(name, arguments),
-            "get_code_snippet" => self.dispatch_get_code_snippet(name, arguments),
             "get_architecture" => self.dispatch_get_architecture(name, arguments),
             "inspect_syntax" => self.dispatch_inspect_syntax(name, arguments),
             "create_file" => self.dispatch_create_file(name, arguments),
@@ -165,9 +165,31 @@ impl Server {
         self.trace_path(args)
     }
 
-    fn dispatch_get_code_snippet(&self, name: &str, arguments: Value) -> Result<Value, String> {
-        let args: SnippetArguments = parse_arguments(name, arguments)?;
-        self.get_code_snippet(args)
+    pub(super) fn dispatch_snippet_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, SnippetToolError> {
+        match name {
+            "get_code_snippet" => {
+                let args: SnippetArguments =
+                    serde_json::from_value(arguments).map_err(|error| {
+                        SnippetToolError::untyped(format!("Invalid parameters for {name}: {error}"))
+                    })?;
+                self.get_code_snippet(args)
+            }
+            "get_code_snippet_manifest" => {
+                let args: SnippetManifestArguments = serde_json::from_value(arguments)
+                    .map_err(|error| SnippetToolError::invalid("arguments", error.to_string()))?;
+                self.get_code_snippet_manifest(args)
+            }
+            "get_code_snippet_chunk" => {
+                let args: SnippetChunkArguments = serde_json::from_value(arguments)
+                    .map_err(|error| SnippetToolError::invalid("arguments", error.to_string()))?;
+                self.get_code_snippet_chunk(args)
+            }
+            _ => Err(SnippetToolError::untyped(format!("Unknown tool: {name}"))),
+        }
     }
 
     fn dispatch_get_architecture(&self, name: &str, arguments: Value) -> Result<Value, String> {

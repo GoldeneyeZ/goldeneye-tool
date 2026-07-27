@@ -47,14 +47,16 @@ pub use goldeneye_edit::{RecoveryAction, RecoveryEntry, RecoveryReport};
 pub use goldeneye_index::CancellationToken;
 pub use goldeneye_ports::GitContext;
 pub use goldeneye_query::{
-    ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
-    CodeSnippetResult, CountSummary, EdgeSummary, GraphSchemaRequest, GraphSchemaResult,
-    IndexStatusRequest, IndexStatusResult, NodeSummary, PageRequest, ProjectSummary, QueryError,
-    QueryGraphRequest, QueryGraphResult, QueryValue, SchemaEntry, SearchCodeFilesResult,
-    SearchCodeHit, SearchCodeMatchesResult, SearchCodeMode, SearchCodeRequest, SearchCodeResult,
-    SearchGraphPage, SearchGraphRequest, SemanticSearchHit, SemanticSearchRequest,
-    SemanticSearchResult, SimilaritySearchHit, SimilaritySearchRequest, SimilaritySearchResult,
-    TraceDirection, TraceHop, TracePathRequest, TracePathResult,
+    ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetChunkRequest,
+    CodeSnippetChunkResult, CodeSnippetManifestRequest, CodeSnippetManifestResult,
+    CodeSnippetRequest, CodeSnippetResult, CountSummary, DEFAULT_SNIPPET_CHUNK_BYTES, EdgeSummary,
+    GraphSchemaRequest, GraphSchemaResult, IndexStatusRequest, IndexStatusResult,
+    MAX_SNIPPET_CHUNK_BYTES, MIN_SNIPPET_CHUNK_BYTES, NodeSummary, PageRequest, ProjectSummary,
+    QueryError, QueryGraphRequest, QueryGraphResult, QueryValue, SchemaEntry,
+    SearchCodeFilesResult, SearchCodeHit, SearchCodeMatchesResult, SearchCodeMode,
+    SearchCodeRequest, SearchCodeResult, SearchGraphPage, SearchGraphRequest, SemanticSearchHit,
+    SemanticSearchRequest, SemanticSearchResult, SimilaritySearchHit, SimilaritySearchRequest,
+    SimilaritySearchResult, TraceDirection, TraceHop, TracePathRequest, TracePathResult,
 };
 
 #[derive(Clone)]

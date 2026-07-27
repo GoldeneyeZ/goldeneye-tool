@@ -183,6 +183,18 @@ impl ToolCallResult {
             is_error: true,
         }
     }
+
+    #[must_use]
+    pub(crate) fn typed_error(text: impl Into<String>, structured_content: Value) -> Self {
+        Self {
+            content: vec![TextContent {
+                content_type: "text",
+                text: text.into(),
+            }],
+            structured_content: Some(structured_content),
+            is_error: true,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -364,5 +376,23 @@ mod tests {
             .expect("JSON text content"),
             payload
         );
+    }
+
+    #[test]
+    fn typed_errors_preserve_legacy_text_and_structured_content_in_every_mode() {
+        let payload = json!({
+            "code": "SnippetTooLarge",
+            "message": "snippet exceeds bounds",
+            "details": {"actual_bytes": 65_537}
+        });
+        let value = serde_json::to_value(ToolCallResult::typed_error(
+            "snippet exceeds bounds",
+            payload.clone(),
+        ))
+        .expect("serialize typed error response");
+
+        assert_eq!(value["isError"], true);
+        assert_eq!(value["content"][0]["text"], "snippet exceeds bounds");
+        assert_eq!(value["structuredContent"], payload);
     }
 }

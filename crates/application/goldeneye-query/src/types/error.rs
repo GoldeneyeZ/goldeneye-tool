@@ -78,6 +78,26 @@ pub enum QueryError {
         actual: usize,
         maximum: usize,
     },
+    #[error("{field} is invalid: {reason}")]
+    InvalidSnippetArguments {
+        field: &'static str,
+        reason: &'static str,
+    },
+    #[error("chunk_bytes must be between {minimum} and {maximum}, got {actual}")]
+    InvalidSnippetChunkBytes {
+        actual: usize,
+        minimum: usize,
+        maximum: usize,
+    },
+    #[error("snippet chunk must be between 1 and {chunk_count}, got {actual}")]
+    InvalidSnippetChunk { actual: usize, chunk_count: usize },
+    #[error(
+        "snippet source changed: expected {expected_source_sha256}, got {actual_source_sha256}"
+    )]
+    StaleSnippetSource {
+        expected_source_sha256: String,
+        actual_source_sha256: String,
+    },
     #[error("mutating Cypher keyword is forbidden: {keyword}")]
     MutatingQuery { keyword: String },
     #[error("unsupported Cypher query: {message}")]

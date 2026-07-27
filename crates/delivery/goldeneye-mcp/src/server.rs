@@ -3,13 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_services::{
-    ArchitectureRequest, CancellationToken, CodeSnippetRequest, CreateFileRequest,
-    DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
-    IndexRepositoryRequest, IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest,
-    ManageAdrRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
-    QueryGraphRequest, QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest,
-    SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
-    TracePathRequest,
+    ArchitectureRequest, CancellationToken, CodeSnippetChunkRequest, CodeSnippetManifestRequest,
+    CodeSnippetRequest, CreateFileRequest, DEFAULT_SNIPPET_CHUNK_BYTES, DeleteNodeRequest,
+    DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode, IndexRepositoryRequest,
+    IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest,
+    NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest,
+    QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest, SemanticSearchRequest,
+    ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection, TracePathRequest,
 };
 use goldeneye_watcher::Watcher;
 use serde::de::DeserializeOwned;
@@ -188,6 +188,15 @@ impl Server {
                 Err(message) => ToolCallResult::error(message),
             };
         }
+        if matches!(
+            name,
+            "get_code_snippet" | "get_code_snippet_manifest" | "get_code_snippet_chunk"
+        ) {
+            return match self.dispatch_snippet_tool(name, arguments) {
+                Ok(value) => ToolCallResult::success_with_mode(value, self.response_mode),
+                Err(error) => error.into_tool_call_result(),
+            };
+        }
         match self.dispatch(name, arguments, id) {
             Ok(value) => ToolCallResult::success_with_mode(value, self.response_mode),
             Err(message) => ToolCallResult::error(message),
@@ -335,6 +344,30 @@ fn default_edge_types() -> Vec<String> {
 struct SnippetArguments {
     project: String,
     qualified_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnippetManifestArguments {
+    project: String,
+    qualified_name: String,
+    #[serde(default = "default_snippet_chunk_bytes")]
+    chunk_bytes: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnippetChunkArguments {
+    project: String,
+    qualified_name: String,
+    chunk: usize,
+    #[serde(default = "default_snippet_chunk_bytes")]
+    chunk_bytes: usize,
+    expected_source_sha256: Option<String>,
+}
+
+const fn default_snippet_chunk_bytes() -> usize {
+    DEFAULT_SNIPPET_CHUNK_BYTES
 }
 
 #[derive(Deserialize)]

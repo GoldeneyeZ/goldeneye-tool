@@ -83,6 +83,7 @@ fn assert_success(result: &Value) -> &Value {
     &result["structuredContent"]
 }
 
+#[allow(clippy::too_many_lines)]
 fn assert_query_trace_snippet_architecture(server: &Server, project: &str, qualified_name: &str) {
     let query = call(
         server,
@@ -138,6 +139,47 @@ fn assert_query_trace_snippet_architecture(server: &Server, project: &str, quali
             .expect("source")
             .contains("pub fn helper")
     );
+    let manifest = call(
+        server,
+        91,
+        "get_code_snippet_manifest",
+        json!({"project": project, "qualified_name": qualified_name, "chunk_bytes": 256}),
+    );
+    let manifest = assert_success(&manifest);
+    assert_eq!(manifest["chunk_bytes"], 256);
+    assert_eq!(manifest["chunk_count"], 1);
+    assert_eq!(
+        manifest["source_sha256"]
+            .as_str()
+            .expect("source SHA-256")
+            .len(),
+        64
+    );
+    assert!(manifest.get("source").is_none());
+    assert!(manifest["indexed_file_hash"].is_string());
+    let chunk = call(
+        server,
+        92,
+        "get_code_snippet_chunk",
+        json!({
+            "project": project,
+            "qualified_name": qualified_name,
+            "chunk": 1,
+            "chunk_bytes": 256,
+            "expected_source_sha256": manifest["source_sha256"]
+        }),
+    );
+    let chunk = assert_success(&chunk);
+    assert_eq!(chunk["chunk"], 1);
+    assert_eq!(chunk["chunk_count"], 1);
+    assert_eq!(chunk["eof"], true);
+    assert!(
+        chunk["source"]
+            .as_str()
+            .expect("chunk source")
+            .contains("pub fn helper")
+    );
+    assert!(chunk.get("code").is_none());
     let architecture = call(
         server,
         10,
@@ -179,6 +221,8 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
             "trace_path",
             "trace_call_path",
             "get_code_snippet",
+            "get_code_snippet_manifest",
+            "get_code_snippet_chunk",
             "get_architecture",
             "inspect_syntax",
             "create_file",
@@ -207,8 +251,37 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
     assert_eq!(second["result"]["tools"].as_array().expect("page").len(), 8);
     assert_eq!(second["result"]["nextCursor"], "16");
     let third = request(&server, 4, "tools/list", json!({"cursor": "16"}));
-    assert_eq!(third["result"]["tools"].as_array().expect("page").len(), 5);
+    assert_eq!(third["result"]["tools"].as_array().expect("page").len(), 7);
     assert!(third["result"].get("nextCursor").is_none());
+
+    let tools = all["result"]["tools"].as_array().expect("tools");
+    let manifest = tools
+        .iter()
+        .find(|tool| tool["name"] == "get_code_snippet_manifest")
+        .expect("manifest tool");
+    assert_eq!(manifest["inputSchema"]["additionalProperties"], false);
+    assert_eq!(
+        manifest["inputSchema"]["properties"]["chunk_bytes"]["minimum"],
+        256
+    );
+    assert_eq!(
+        manifest["inputSchema"]["properties"]["chunk_bytes"]["maximum"],
+        8192
+    );
+    assert_eq!(
+        manifest["inputSchema"]["properties"]["chunk_bytes"]["default"],
+        8192
+    );
+    let chunk = tools
+        .iter()
+        .find(|tool| tool["name"] == "get_code_snippet_chunk")
+        .expect("chunk tool");
+    assert_eq!(chunk["inputSchema"]["additionalProperties"], false);
+    assert_eq!(chunk["inputSchema"]["properties"]["chunk"]["minimum"], 1);
+    assert_eq!(
+        chunk["inputSchema"]["properties"]["expected_source_sha256"]["pattern"],
+        "^[0-9a-f]{64}$"
+    );
 }
 
 #[test]
@@ -338,4 +411,153 @@ fn malformed_forbidden_unknown_project_and_unknown_tool_are_tool_errors() {
                 > 5
         );
     }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn snippet_tools_return_bounded_typed_errors_without_source() {
+    let temp = TempDir::new().expect("temp directory");
+    let repo = temp.path().join("fixture");
+    fixture(&repo);
+    let mut huge = String::from("pub fn huge() {\n");
+    for _ in 0..401 {
+        huge.push_str("    let _ = 1;\n");
+    }
+    huge.push_str("}\n");
+    fs::write(repo.join("src/huge.rs"), huge).expect("write huge fixture");
+    let server = server(&temp, temp.path());
+    let indexed = call(
+        &server,
+        1,
+        "index_repository",
+        json!({"repo_path": repo, "mode": "fast"}),
+    );
+    let project = assert_success(&indexed)["project"]
+        .as_str()
+        .expect("project")
+        .to_owned();
+    let search = call(
+        &server,
+        2,
+        "search_graph",
+        json!({"project": project, "name_pattern": "^huge$", "limit": 20}),
+    );
+    let qualified_name = assert_success(&search)["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .find(|row| row["label"] == "Function")
+        .expect("huge function")["qualified_name"]
+        .as_str()
+        .expect("qualified name")
+        .to_owned();
+
+    let oversized = call(
+        &server,
+        3,
+        "get_code_snippet",
+        json!({"project": project, "qualified_name": qualified_name}),
+    );
+    assert_eq!(oversized["isError"], true);
+    let legacy_text = oversized["content"][0]["text"]
+        .as_str()
+        .expect("legacy text");
+    assert!(legacy_text.starts_with("snippet exceeds bounds:"));
+    assert_eq!(oversized["structuredContent"]["code"], "SnippetTooLarge");
+    assert_eq!(oversized["structuredContent"]["message"], legacy_text);
+    assert!(
+        oversized["structuredContent"]["details"]["actual_lines"]
+            .as_u64()
+            .expect("actual lines")
+            > 400
+    );
+    assert!(oversized["structuredContent"].get("source").is_none());
+    assert!(serde_json::to_vec(&oversized).expect("error JSON").len() < 1_024);
+
+    let legacy_unknown = call(
+        &server,
+        31,
+        "get_code_snippet",
+        json!({
+            "project": project,
+            "qualified_name": qualified_name,
+            "unknown": true
+        }),
+    );
+    assert_eq!(legacy_unknown["isError"], true);
+    assert!(legacy_unknown.get("structuredContent").is_none());
+    assert!(
+        legacy_unknown["content"][0]["text"]
+            .as_str()
+            .expect("legacy invalid argument text")
+            .starts_with("Invalid parameters for get_code_snippet:")
+    );
+
+    for (id, arguments, code) in [
+        (
+            4,
+            json!({"project": project, "qualified_name": qualified_name, "chunk_bytes": 255}),
+            "SnippetChunkBytesOutOfRange",
+        ),
+        (
+            5,
+            json!({"project": project, "qualified_name": qualified_name, "chunk": 0}),
+            "SnippetChunkOutOfRange",
+        ),
+        (
+            6,
+            json!({
+                "project": project,
+                "qualified_name": qualified_name,
+                "chunk": 1,
+                "expected_source_sha256": "0"
+            }),
+            "InvalidSnippetArguments",
+        ),
+        (
+            7,
+            json!({
+                "project": project,
+                "qualified_name": qualified_name,
+                "chunk": 1,
+                "unknown": true
+            }),
+            "InvalidSnippetArguments",
+        ),
+        (
+            8,
+            json!({
+                "project": project,
+                "qualified_name": qualified_name,
+                "chunk": 1,
+                "expected_source_sha256": "0".repeat(64)
+            }),
+            "StaleSnippetSource",
+        ),
+    ] {
+        let name = if id == 4 {
+            "get_code_snippet_manifest"
+        } else {
+            "get_code_snippet_chunk"
+        };
+        let result = call(&server, id, name, arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        assert_eq!(result["structuredContent"]["code"], code, "{result}");
+        assert!(result["structuredContent"].get("source").is_none());
+        assert!(serde_json::to_vec(&result).expect("error JSON").len() < 1_024);
+    }
+
+    fs::write(repo.join("src/huge.rs"), "pub fn changed() {}\n").expect("mutate indexed file");
+    let stale_file = call(
+        &server,
+        9,
+        "get_code_snippet_manifest",
+        json!({"project": project, "qualified_name": qualified_name}),
+    );
+    assert_eq!(stale_file["isError"], true);
+    assert_eq!(stale_file["structuredContent"]["code"], "StaleIndexedFile");
+    assert!(stale_file["structuredContent"]["details"]["file_path"].is_string());
+    assert!(stale_file["structuredContent"]["details"]["expected_indexed_file_hash"].is_string());
+    assert!(stale_file["structuredContent"]["details"]["actual_file_hash"].is_string());
+    assert!(stale_file["structuredContent"].get("source").is_none());
 }

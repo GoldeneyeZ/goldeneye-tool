@@ -33,10 +33,12 @@ pub use similarity::{
     normalize_leaf_kind,
 };
 pub use types::{
-    ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetRequest,
-    CodeSnippetResult, CountSummary, EdgeSummary, GraphSchemaRequest, GraphSchemaResult,
-    IndexStatusRequest, IndexStatusResult, NodeSummary, PageRequest, ProjectSummary, QueryError,
-    QueryGraphRequest, QueryGraphResult, QueryValue, RawCodeMatch, SchemaEntry,
+    ArchitectureModule, ArchitectureRequest, ArchitectureResult, CodeSnippetChunkRequest,
+    CodeSnippetChunkResult, CodeSnippetManifestRequest, CodeSnippetManifestResult,
+    CodeSnippetRequest, CodeSnippetResult, CountSummary, DEFAULT_SNIPPET_CHUNK_BYTES, EdgeSummary,
+    GraphSchemaRequest, GraphSchemaResult, IndexStatusRequest, IndexStatusResult,
+    MAX_SNIPPET_CHUNK_BYTES, MIN_SNIPPET_CHUNK_BYTES, NodeSummary, PageRequest, ProjectSummary,
+    QueryError, QueryGraphRequest, QueryGraphResult, QueryValue, RawCodeMatch, SchemaEntry,
     SearchCodeFilesResult, SearchCodeHit, SearchCodeMatchesResult, SearchCodeMode,
     SearchCodeRequest, SearchCodeResult, SearchGraphPage, SearchGraphRequest, SemanticSearchHit,
     SemanticSearchRequest, SemanticSearchResult, SimilaritySearchHit, SimilaritySearchRequest,

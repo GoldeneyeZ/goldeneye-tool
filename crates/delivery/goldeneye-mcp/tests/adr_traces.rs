@@ -71,7 +71,7 @@ fn successful(result: &Value) -> &Value {
 fn registry_exposes_exact_upstream_adr_and_trace_schemas() {
     let registry = ToolRegistry::implemented();
     let all = registry.page(None).expect("all tools");
-    assert_eq!(all.tools.len(), 21);
+    assert_eq!(all.tools.len(), 23);
     let manage = all
         .tools
         .iter()
@@ -125,7 +125,7 @@ fn registry_exposes_exact_upstream_adr_and_trace_schemas() {
         registry.page(Some("8")).expect("second page").tools.len(),
         8
     );
-    assert_eq!(registry.page(Some("16")).expect("last page").tools.len(), 5);
+    assert_eq!(registry.page(Some("16")).expect("last page").tools.len(), 7);
 }
 
 #[test]

@@ -145,9 +145,19 @@ fn tools_list_truthfully_advertises_implemented_tools() {
     let value = serde_json::to_value(response).expect("serialize response");
 
     let tools = value["result"]["tools"].as_array().expect("tools");
-    assert_eq!(tools.len(), 21);
+    assert_eq!(tools.len(), 23);
     assert_eq!(tools[0]["name"], "index_repository");
     assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == "get_code_snippet_manifest")
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == "get_code_snippet_chunk")
+    );
 
     let schema_for = |name: &str| {
         tools

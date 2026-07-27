@@ -1,7 +1,178 @@
 use super::{
     BootstrapRuntime, DeserializeOwned, ProjectId, QueryError, QueryValue, Serialize, Server,
-    ServiceConfig, ServiceError, ServiceErrorCode, Services, Value, json,
+    ServiceConfig, ServiceError, ServiceErrorCode, Services, ToolCallResult, Value, json,
 };
+
+pub(super) struct SnippetToolError {
+    message: String,
+    structured_content: Option<Value>,
+}
+
+impl SnippetToolError {
+    pub(super) fn untyped(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            structured_content: None,
+        }
+    }
+
+    pub(super) fn invalid(field: &'static str, reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        let reason = bounded_reason(&reason);
+        let message = format!("{field} is invalid: {reason}");
+        Self::typed(
+            message,
+            "InvalidSnippetArguments",
+            &json!({"field": field, "reason": reason}),
+        )
+    }
+
+    pub(super) fn from_service(error: ServiceError) -> Self {
+        let structured = snippet_error_details(&error);
+        let message = service_error_message(error);
+        match structured {
+            Some((code, details)) => Self::typed(message, code, &details),
+            None => Self::untyped(message),
+        }
+    }
+
+    pub(super) fn from_legacy_service(error: ServiceError) -> Self {
+        let structured = legacy_snippet_error_details(&error);
+        let message = service_error_message(error);
+        match structured {
+            Some((code, details)) => Self::typed(message, code, &details),
+            None => Self::untyped(message),
+        }
+    }
+
+    pub(super) fn into_tool_call_result(self) -> ToolCallResult {
+        match self.structured_content {
+            Some(structured_content) => {
+                ToolCallResult::typed_error(self.message, structured_content)
+            }
+            None => ToolCallResult::error(self.message),
+        }
+    }
+
+    fn typed(message: String, code: &'static str, details: &Value) -> Self {
+        let structured_content = json!({
+            "code": code,
+            "message": message,
+            "details": details,
+        });
+        Self {
+            message,
+            structured_content: Some(structured_content),
+        }
+    }
+}
+
+fn snippet_error_details(error: &ServiceError) -> Option<(&'static str, Value)> {
+    let ServiceError::Query(error) = error else {
+        return None;
+    };
+    match error {
+        QueryError::SnippetTooLarge {
+            actual_bytes,
+            actual_lines,
+            maximum_bytes,
+            maximum_lines,
+        } => Some((
+            "SnippetTooLarge",
+            json!({
+                "actual_bytes": actual_bytes,
+                "actual_lines": actual_lines,
+                "maximum_bytes": maximum_bytes,
+                "maximum_lines": maximum_lines,
+            }),
+        )),
+        QueryError::InvalidSnippetArguments { field, reason } => Some((
+            "InvalidSnippetArguments",
+            json!({"field": field, "reason": reason}),
+        )),
+        QueryError::InvalidSnippetChunkBytes {
+            actual,
+            minimum,
+            maximum,
+        } => Some((
+            "SnippetChunkBytesOutOfRange",
+            json!({"actual": actual, "minimum": minimum, "maximum": maximum}),
+        )),
+        QueryError::InvalidSnippetChunk {
+            actual,
+            chunk_count,
+        } => Some((
+            "SnippetChunkOutOfRange",
+            json!({"actual": actual, "chunk_count": chunk_count}),
+        )),
+        QueryError::StaleSnippetSource {
+            expected_source_sha256,
+            actual_source_sha256,
+        } => Some((
+            "StaleSnippetSource",
+            json!({
+                "expected_source_sha256": expected_source_sha256,
+                "actual_source_sha256": actual_source_sha256,
+            }),
+        )),
+        QueryError::StaleFile {
+            path,
+            expected_hash,
+            actual_hash,
+        } => Some((
+            "StaleIndexedFile",
+            json!({
+                "file_path": path,
+                "expected_indexed_file_hash": expected_hash,
+                "actual_file_hash": actual_hash,
+            }),
+        )),
+        QueryError::SourceNotUtf8 { qualified_name } => Some((
+            "SnippetSourceNotUtf8",
+            json!({"qualified_name": qualified_name}),
+        )),
+        QueryError::CorruptSourceSpan { qualified_name } => Some((
+            "InconsistentSnippetIndex",
+            json!({
+                "qualified_name": qualified_name,
+                "reason": "source span is outside file bounds",
+            }),
+        )),
+        _ => None,
+    }
+}
+
+fn legacy_snippet_error_details(error: &ServiceError) -> Option<(&'static str, Value)> {
+    let ServiceError::Query(QueryError::SnippetTooLarge {
+        actual_bytes,
+        actual_lines,
+        maximum_bytes,
+        maximum_lines,
+    }) = error
+    else {
+        return None;
+    };
+    Some((
+        "SnippetTooLarge",
+        json!({
+            "actual_bytes": actual_bytes,
+            "actual_lines": actual_lines,
+            "maximum_bytes": maximum_bytes,
+            "maximum_lines": maximum_lines,
+        }),
+    ))
+}
+
+fn bounded_reason(reason: &str) -> String {
+    const MAX_REASON_CHARS: usize = 512;
+    let mut chars = reason.chars();
+    let bounded = chars.by_ref().take(MAX_REASON_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{bounded}…")
+    } else {
+        bounded
+    }
+}
 
 pub(super) fn response_mode_configuration_error(message: String) -> ServiceError {
     ServiceError::Edit {
