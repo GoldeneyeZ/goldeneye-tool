@@ -244,6 +244,7 @@ MCP URL.
 | --- | --- |
 | `GOLDENEYE_DB_PATH` | Overrides the SQLite database path |
 | `GOLDENEYE_PROJECT_ROOT` | Default repository root; otherwise current directory |
+| `GOLDENEYE_WATCHER_ENABLED` | Defaults enabled; `0`, `false`, `off`, or `disabled` skips watcher seed/spawn for short-lived read-only processes |
 | `CBM_ALLOWED_ROOT` | Repository and mutation authorization boundary |
 | `CBM_CACHE_DIR` | First database fallback directory |
 | `CBM_SEMANTIC_ENABLED` | Parsed when the value starts with `1`, but currently unused |

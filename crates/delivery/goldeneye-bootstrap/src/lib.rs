@@ -26,6 +26,12 @@ use goldeneye_syntax::{CoreGrammarProvider, SyntaxEngine};
 use goldeneye_tree_sitter_index::TreeSitterIndexExtractor;
 use goldeneye_watcher::{IndexDisposition, Indexer, WatchRuntime, Watcher, WatcherConfig};
 
+/// Controls background repository watching for delivery runtimes.
+///
+/// `0`, `false`, `off`, or `disabled` selects the read-only, watcher-free
+/// runtime. Every other value and an unset variable preserve watching.
+pub const WATCHER_ENABLED_ENV: &str = "GOLDENEYE_WATCHER_ENABLED";
+
 /// Builds the production adapter set used by Goldeneye delivery crates.
 #[must_use]
 pub fn service_dependencies() -> ServiceDependencies {
@@ -58,6 +64,15 @@ fn configured_include_paths() -> Vec<PathBuf> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn watcher_enabled_from_value(value: Option<std::ffi::OsString>) -> bool {
+    !value.is_some_and(|value| {
+        matches!(
+            value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "disabled"
+        )
+    })
 }
 
 fn path_is_included(path: &Path, includes: &[PathBuf]) -> bool {
@@ -150,16 +165,34 @@ impl BootstrapRuntime {
     /// Creates, seeds, and starts one best-effort watcher over `services`.
     #[must_use]
     pub fn new(services: Services) -> Self {
+        Self::with_watcher(services, true)
+    }
+
+    /// Creates one runtime without seeding or starting the background watcher.
+    ///
+    /// This mode is intended for short-lived, read-only processes. Indexing
+    /// entry points must use [`Self::new`] so newly indexed projects remain
+    /// watched after the request completes.
+    #[must_use]
+    pub fn new_query_only(services: Services) -> Self {
+        Self::with_watcher(services, false)
+    }
+
+    fn with_watcher(services: Services, enabled: bool) -> Self {
         let watcher = Arc::new(Watcher::new(
             WatcherConfig::default(),
             ServiceIndexer::new(services.clone()),
         ));
-        if let Ok(projects) = services.list_projects() {
-            for project in projects {
-                let _ = watcher.watch(project.project, project.root_path);
+        let watch_runtime = if enabled {
+            if let Ok(projects) = services.list_projects() {
+                for project in projects {
+                    let _ = watcher.watch(project.project, project.root_path);
+                }
             }
-        }
-        let watch_runtime = watcher.spawn().ok();
+            watcher.spawn().ok()
+        } else {
+            None
+        };
         Self {
             services,
             watcher,
@@ -179,7 +212,23 @@ impl BootstrapRuntime {
     ///
     /// Returns a typed configuration or recovery error when services cannot be opened.
     pub fn from_env() -> Result<Self, ServiceError> {
-        Services::from_env(service_dependencies()).map(Self::new)
+        let watcher_enabled = watcher_enabled_from_value(env::var_os(WATCHER_ENABLED_ENV));
+        Services::from_env(service_dependencies()).map(|services| {
+            if watcher_enabled {
+                Self::new(services)
+            } else {
+                Self::new_query_only(services)
+            }
+        })
+    }
+
+    /// Creates one read-only runtime from process environment configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed configuration or recovery error when services cannot be opened.
+    pub fn from_env_query_only() -> Result<Self, ServiceError> {
+        Services::from_env(service_dependencies()).map(Self::new_query_only)
     }
 
     #[must_use]
@@ -255,6 +304,7 @@ mod tests {
 
     use super::{
         GrammarPack, configured_grammar_pack, path_is_included, service_dependencies_for_pack,
+        watcher_enabled_from_value,
     };
 
     #[test]
@@ -288,6 +338,17 @@ mod tests {
             Path::new("spring-core/src/testFixtures/java/example/StringUtilsTests.java"),
             &includes
         ));
+    }
+
+    #[test]
+    fn watcher_is_enabled_by_default_and_can_be_disabled_explicitly() {
+        assert!(watcher_enabled_from_value(None));
+        assert!(watcher_enabled_from_value(Some("1".into())));
+        assert!(watcher_enabled_from_value(Some("true".into())));
+        assert!(!watcher_enabled_from_value(Some("0".into())));
+        assert!(!watcher_enabled_from_value(Some("false".into())));
+        assert!(!watcher_enabled_from_value(Some("OFF".into())));
+        assert!(!watcher_enabled_from_value(Some(" disabled ".into())));
     }
 
     #[cfg(feature = "full-grammar-pack")]

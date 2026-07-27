@@ -38,6 +38,36 @@ fn dropping_runtime_stops_its_watcher() {
 }
 
 #[test]
+fn query_only_runtime_does_not_seed_watched_projects() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let root = temp.path().join("repo");
+    fs::create_dir(&root).expect("repository directory");
+    fs::write(root.join("lib.rs"), "fn first() {}\n").expect("source");
+    let services = Services::new(
+        ServiceConfig::new(temp.path().join("graph.sqlite3"), &root),
+        service_dependencies(),
+    );
+    services
+        .index_repository(&IndexRepositoryRequest {
+            repo_path: root,
+            name: Some("demo".to_owned()),
+            mode: IndexRepositoryMode::Fast,
+            persistence: false,
+        })
+        .expect("initial index");
+
+    let runtime = BootstrapRuntime::new_query_only(services);
+
+    assert!(
+        runtime
+            .watcher()
+            .projects()
+            .expect("query-only watcher state")
+            .is_empty()
+    );
+}
+
+#[test]
 fn reindex_and_prune_are_visible_through_the_original_services_cache() {
     let temp = tempfile::tempdir().expect("temporary directory");
     let root = temp.path().join("repo");
