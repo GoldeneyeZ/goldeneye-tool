@@ -1,6 +1,6 @@
 # Plan Progression
 
-Last updated: 2026-07-28 00:00
+Last updated: 2026-07-28 10:00
 
 ## Execution Policy
 
@@ -14,38 +14,39 @@ Last updated: 2026-07-28 00:00
 
 ## Goal Phases
 
-- Implementation: pending
-- Spec review: unchecked
-- Code quality: unchecked
-- Integration review: unchecked
-- Next action: Implement next pending task.
+- Implementation: checked
+- Spec review: checked
+- Code quality: checked
+- Integration review: checked
+- Goal: complete
+- Next action: Goal complete.
 
 ## Task 1: Add failing isolation contract
 
 - Path: `docs/superfastpowers/plans/ABFI/2026-07-28-agent-bench-folder-isolation/tasks/ABFI-1/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete
+- Next action: Task complete; goal complete.
 
 ## Task 2: Relocate benchmark entrypoints
 
 - Path: `docs/superfastpowers/plans/ABFI/2026-07-28-agent-bench-folder-isolation/tasks/ABFI-2/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete
+- Next action: Task complete; goal complete.
 
 ## Task 3: Add private package boundary and operator README
 
 - Path: `docs/superfastpowers/plans/ABFI/2026-07-28-agent-bench-folder-isolation/tasks/ABFI-3/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete
+- Next action: Task complete; goal complete.
 
 ## Task 4: Migrate every tracked entrypoint reference
 
 - Path: `docs/superfastpowers/plans/ABFI/2026-07-28-agent-bench-folder-isolation/tasks/ABFI-4/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete
+- Next action: Task complete; goal complete.
 
 ## Task 5: Verify production separation and full acceptance
 
 - Path: `docs/superfastpowers/plans/ABFI/2026-07-28-agent-bench-folder-isolation/tasks/ABFI-5/`
-- Status: pending
-- Next action: Start implementation.
+- Status: complete
+- Next action: Task complete; goal complete.
