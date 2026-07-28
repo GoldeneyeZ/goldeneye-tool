@@ -32,11 +32,11 @@ import {
   tomlInlineTable,
   tomlString,
   accumulateCodexLine,
-} from "./agent-bench/core.mjs";
+} from "../core.mjs";
 import {
   compileDirtyPathPolicy,
   evaluateDirtyPaths,
-} from "./agent-bench/path-policy.mjs";
+} from "../path-policy.mjs";
 import {
   assertNoWriterArtifacts,
   buildManifest,
@@ -47,27 +47,27 @@ import {
   verifyTreeAgainstManifest,
   verifyReadySnapshot,
   waitForNoWriterArtifacts,
-} from "./agent-bench/snapshot.mjs";
+} from "../snapshot.mjs";
 import {
   closeWritableStream,
   scoreRunDurations,
   spawnWithTimer,
   stopTimerAtClose,
-} from "./agent-bench/timing.mjs";
+} from "../timing.mjs";
 import {
   captureRepositoryProvenance,
   compareProvenance,
   selectDependencyLock,
   sha256,
-} from "./agent-bench/provenance.mjs";
+} from "../provenance.mjs";
 import {
   auditBenchmarkReport,
   mergeReportRuns,
   renderMarkdownReport,
-} from "./agent-bench/report.mjs";
-import { evaluateCalibrationRun } from "./agent-bench/qualification.mjs";
+} from "../report.mjs";
+import { evaluateCalibrationRun } from "../qualification.mjs";
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const flags = parseFlags(process.argv.slice(2));
 
 if (flags.has("--help")) {
@@ -680,7 +680,7 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
     ]),
   ].map((file) => resolve(file));
   const harnessFiles = [
-    "tools/benchmark-agent-tasks.mjs",
+    "tools/agent-bench/bin/benchmark-agent-tasks.mjs",
     "tools/agent-bench/core.mjs",
     "tools/agent-bench/snapshot.mjs",
     "tools/agent-bench/timing.mjs",

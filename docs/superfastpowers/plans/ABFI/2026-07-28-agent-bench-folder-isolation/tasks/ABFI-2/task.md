@@ -26,7 +26,7 @@ import { buildBenchmarkReport } from "../report.mjs";
 import { evaluateQualification } from "../qualification.mjs";
 ```
 
-Every previous `./agent-bench/<module>.mjs` import becomes `../<module>.mjs`. No other code changes.
+Every previous `./agent-bench/<module>.mjs` import becomes `../<module>.mjs`. Preserve all other behavior; because the runner moves two additional directory levels below the repository root, update its location-derived `workspace` calculation to continue resolving the repository root.
 
 - [ ] **Step 2: Move competitor runner unchanged**
 

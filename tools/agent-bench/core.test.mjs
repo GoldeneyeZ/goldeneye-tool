@@ -96,7 +96,7 @@ test("calibration mode validates its vanilla-only single-run contract before rep
   try {
     const run = (args) => spawnSync(
       process.execPath,
-      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--calibration", ...args],
+      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--calibration", ...args],
       { cwd: resolve(), encoding: "utf8" },
     );
     assert.match(run(["--calibration-id", "attempt-1"]).stderr, /requires --engine <vanilla-id>/);
@@ -498,7 +498,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
     rmSync(ready.worktree, { recursive: true, force: true });
     const result = spawnSync(
       process.execPath,
-      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
+      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
       { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
     );
     assert.equal(result.status, 0, result.stderr);
@@ -539,7 +539,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
     }).stdout.trim();
     const failure = spawnSync(
       process.execPath,
-      [resolve("tools/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
+      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
       { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
     );
     assert.notEqual(failure.status, 0);
