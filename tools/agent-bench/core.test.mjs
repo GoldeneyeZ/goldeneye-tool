@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   buildRunMatrix,
   codexSandboxArgs,
@@ -20,6 +21,10 @@ import {
   summarizeRuns,
   tomlInlineTable,
 } from "./core.mjs";
+
+const BENCH_ROOT = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(BENCH_ROOT, "../..");
+const AGENT_RUNNER = join(BENCH_ROOT, "bin", "benchmark-agent-tasks.mjs");
 
 test("codexSandboxArgs grants full access without bypass process-tree mode", () => {
   assert.deepEqual(codexSandboxArgs({ fullAccess: true, worktree: "D:\\repo" }), [
@@ -96,8 +101,8 @@ test("calibration mode validates its vanilla-only single-run contract before rep
   try {
     const run = (args) => spawnSync(
       process.execPath,
-      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--calibration", ...args],
-      { cwd: resolve(), encoding: "utf8" },
+      [AGENT_RUNNER, "--config", configPath, "--calibration", ...args],
+      { cwd: REPO_ROOT, encoding: "utf8" },
     );
     assert.match(run(["--calibration-id", "attempt-1"]).stderr, /requires --engine <vanilla-id>/);
     assert.match(
@@ -317,7 +322,7 @@ test("tomlInlineTable quotes Windows paths and environment keys", () => {
 });
 
 test("loadConfig normalizes and validates ready snapshot paths", () => {
-  const directory = resolve("tools", "agent-bench");
+  const directory = BENCH_ROOT;
   const configPath = join(directory, `ready-snapshot-${process.pid}.json`);
   const config = {
     repo: "../spring-framework",
@@ -368,9 +373,8 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
 });
 
 test("Level-2 Spring config declares the million-token qualification and audit policy", () => {
-  const config = JSON.parse(readFileSync(resolve(
-    "tools",
-    "agent-bench",
+  const config = JSON.parse(readFileSync(join(
+    BENCH_ROOT,
     "configs",
     "spring-sensitive-value-redaction-level2.json",
   ), "utf8"));
@@ -498,8 +502,8 @@ test("prepare-snapshot exits before spawning Codex", () => {
     rmSync(ready.worktree, { recursive: true, force: true });
     const result = spawnSync(
       process.execPath,
-      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
-      { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
+      [AGENT_RUNNER, "--config", configPath, "--prepare-snapshot", "--skip-build"],
+      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000 },
     );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(codexMarker), false);
@@ -539,8 +543,8 @@ test("prepare-snapshot exits before spawning Codex", () => {
     }).stdout.trim();
     const failure = spawnSync(
       process.execPath,
-      [resolve("tools/agent-bench/bin/benchmark-agent-tasks.mjs"), "--config", configPath, "--prepare-snapshot", "--skip-build"],
-      { cwd: resolve(), encoding: "utf8", timeout: 30_000 },
+      [AGENT_RUNNER, "--config", configPath, "--prepare-snapshot", "--skip-build"],
+      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000 },
     );
     assert.notEqual(failure.status, 0);
     assert.match(failure.stderr, /intentional ACK failure/);
