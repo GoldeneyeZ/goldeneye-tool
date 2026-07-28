@@ -77,3 +77,19 @@ test("production Rust sources do not reference benchmark runtime paths", async (
     assert.doesNotMatch(source, forbidden, candidate);
   }
 });
+
+test("bench package is private ESM with stable commands", async () => {
+  const manifest = JSON.parse(
+    await readFile(path.join(BENCH_ROOT, "package.json"), "utf8"),
+  );
+
+  assert.equal(manifest.private, true);
+  assert.equal(manifest.type, "module");
+  assert.equal(manifest.engines.node, ">=20");
+  assert.deepEqual(manifest.scripts, {
+    test: "node --test",
+    check: "node --check ./bin/benchmark-agent-tasks.mjs && node --check ./bin/benchmark-competitors.mjs",
+    "benchmark:agents": "node ./bin/benchmark-agent-tasks.mjs",
+    "benchmark:competitors": "node ./bin/benchmark-competitors.mjs",
+  });
+});

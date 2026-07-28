@@ -1,0 +1,14 @@
+{
+  "name": "@goldeneye/agent-bench",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check ./bin/benchmark-agent-tasks.mjs && node --check ./bin/benchmark-competitors.mjs",
+    "benchmark:agents": "node ./bin/benchmark-agent-tasks.mjs",
+    "benchmark:competitors": "node ./bin/benchmark-competitors.mjs"
+  }
+}
