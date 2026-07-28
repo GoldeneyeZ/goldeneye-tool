@@ -14,7 +14,7 @@ import { performance } from "node:perf_hooks";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const suffix = process.platform === "win32" ? ".exe" : "";
 const QUERY_CASE_NAMES = Object.freeze([
   "exact_search",
