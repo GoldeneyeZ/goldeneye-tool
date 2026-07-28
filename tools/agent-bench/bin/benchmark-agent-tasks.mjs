@@ -1081,6 +1081,7 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
       cbmDecoy,
       environment: {
         ACK_HOME: ackHome,
+        ACK_BACKEND: "benchmark",
         ACK_MCP_COMMAND: resolveExecutable(engine.backend_command),
         CBM_ALLOWED_ROOT: allowedRoot,
         CBM_CACHE_DIR: cbmDecoy,

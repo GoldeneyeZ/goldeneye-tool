@@ -93,3 +93,12 @@ test("bench package is private ESM with stable commands", async () => {
     "benchmark:competitors": "node ./bin/benchmark-competitors.mjs",
   });
 });
+
+test("ACK benchmark runs select the explicit benchmark backend", async () => {
+  const source = await readFile(NEW_ENTRYPOINTS[0], "utf8");
+
+  assert.match(
+    source,
+    /ACK_BACKEND:\s*"benchmark",\s*\r?\n\s*ACK_MCP_COMMAND:/,
+  );
+});
