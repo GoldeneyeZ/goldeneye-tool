@@ -31,7 +31,7 @@
   limitations, policy-based dirty-path audit.
 - Modify `tools/agent-bench/report.test.mjs`: 3+1 compatibility and 3+3 audit
   tests.
-- Modify `tools/benchmark-agent-tasks.mjs`: calibration CLI, policy wiring,
+- Modify `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: calibration CLI, policy wiring,
   qualification persistence, dynamic audit options.
 
 ### Spring task and grader
@@ -91,7 +91,7 @@
 **Files:**
 - Create: `tools/agent-bench/path-policy.mjs`
 - Create: `tools/agent-bench/path-policy.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 - [ ] **Step 1: Write failing normalization and policy tests**
 
@@ -263,7 +263,7 @@ Expected: all tests PASS.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add -- tools/agent-bench/path-policy.mjs tools/agent-bench/path-policy.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/path-policy.mjs tools/agent-bench/path-policy.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git commit -m "bench: add dirty path policies"
 ```
 
@@ -276,7 +276,7 @@ git commit -m "bench: add dirty path policies"
 - Modify: `tools/agent-bench/core.test.mjs`
 - Modify: `tools/agent-bench/report.mjs`
 - Modify: `tools/agent-bench/report.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 - [ ] **Step 1: Write failing sample-statistic tests**
 
@@ -416,7 +416,7 @@ Expected: all tests PASS, including prior 3+1 fixtures.
 - [ ] **Step 8: Commit**
 
 ```powershell
-git add -- tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/report.mjs tools/agent-bench/report.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/report.mjs tools/agent-bench/report.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git commit -m "bench: generalize scored report audit"
 ```
 
@@ -427,7 +427,7 @@ git commit -m "bench: generalize scored report audit"
 **Files:**
 - Create: `tools/agent-bench/qualification.mjs`
 - Create: `tools/agent-bench/qualification.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
 
 - [ ] **Step 1: Write failing qualification tests**
@@ -606,7 +606,7 @@ Expected: all tests PASS.
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add -- tools/agent-bench/qualification.mjs tools/agent-bench/qualification.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/qualification.mjs tools/agent-bench/qualification.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git commit -m "bench: add vanilla token qualification"
 ```
 
@@ -918,7 +918,7 @@ of all six modules.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --repetitions 3 `
   --seed 20260725 `
@@ -935,7 +935,7 @@ Run:
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --engine goldeneye-ack `
   --prepare-snapshot
@@ -949,7 +949,7 @@ Codex process.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --verify-only
 ```
@@ -1005,7 +1005,7 @@ Run:
 ```powershell
 cargo test -p goldeneye-ack
 cargo build --release -p goldeneye
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --verify-only
 ```
@@ -1065,7 +1065,7 @@ Expected: no uncommitted source change before calibration.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --engine vanilla `
   --repetitions 1 `
@@ -1110,7 +1110,7 @@ Run:
 $QualifiedConfig = 'tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json'
 # On the Level-3 decision branch, assign:
 # $QualifiedConfig = 'tools/agent-bench/configs/spring-sensitive-value-redaction-level3.json'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --verify-only
 git status --short
@@ -1191,7 +1191,7 @@ $FrozenSeed = [Convert]::ToUInt32($SeedHash.Substring(0, 8), 16)
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --repetitions 3 `
   --seed $FrozenSeed `
@@ -1213,7 +1213,7 @@ gate failure aborts remaining runs.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --out $ScoredReport `
   --audit-report
@@ -1244,7 +1244,7 @@ discard the report.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs --config $QualifiedConfig --verify-only
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs --config $QualifiedConfig --verify-only
 git status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' rev-parse HEAD

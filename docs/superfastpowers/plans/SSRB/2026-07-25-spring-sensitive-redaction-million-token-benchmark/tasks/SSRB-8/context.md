@@ -8,7 +8,7 @@ subsequent report commit.
 
 ## Starting Context
 
-- `tools/benchmark-agent-tasks.mjs`: six-run execution and audit CLI.
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: six-run execution and audit CLI.
 - `target/agent-bench/spring-sensitive-value-redaction-level2/qualification-selection.json`: chosen frozen workload.
 - `target/agent-bench/spring-sensitive-value-redaction-level2/provenance.json`: seed and audit inputs.
 

@@ -48,7 +48,7 @@ The affected agent then treated the Goldeneye tool inventory as unavailable and 
 Command:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/abyssal-zenith-goldeneye-serena-vanilla.config.json `
   --engine goldeneye `
   --cache-modes warm `

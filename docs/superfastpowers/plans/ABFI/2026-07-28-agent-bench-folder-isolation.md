@@ -21,8 +21,8 @@
 
 ### Move
 
-- `tools/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
-- `tools/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
+- `tools/agent-bench/bin/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
 
 ### Modify
 
@@ -155,8 +155,8 @@ git commit -m "test(bench): require one-folder runtime isolation"
 
 **Files:**
 
-- Move: `tools/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
-- Move: `tools/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
+- Move: `tools/agent-bench/bin/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
+- Move: `tools/agent-bench/bin/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
 - Test: `tools/agent-bench/isolation.test.mjs`
 
@@ -184,7 +184,7 @@ Every previous `./agent-bench/<module>.mjs` import becomes `../<module>.mjs`. No
 Move through `apply_patch`:
 
 ```text
-tools/benchmark-competitors.mjs
+tools/agent-bench/bin/benchmark-competitors.mjs
 → tools/agent-bench/bin/benchmark-competitors.mjs
 ```
 
@@ -195,7 +195,7 @@ Its imports are Node built-ins; no relative rewrite is required.
 In `tools/agent-bench/core.test.mjs`, replace:
 
 ```text
-tools/benchmark-agent-tasks.mjs
+tools/agent-bench/bin/benchmark-agent-tasks.mjs
 ```
 
 with:
@@ -225,7 +225,7 @@ Expected: both test files pass, 0 fail.
 - [ ] **Step 6: Commit relocation**
 
 ```powershell
-git add -- tools/benchmark-agent-tasks.mjs tools/benchmark-competitors.mjs tools/agent-bench/bin tools/agent-bench/core.test.mjs
+git add -- tools/agent-bench/bin/benchmark-agent-tasks.mjs tools/agent-bench/bin/benchmark-competitors.mjs tools/agent-bench/bin tools/agent-bench/core.test.mjs
 git commit -m "refactor(bench): isolate runtime entrypoints"
 ```
 
@@ -338,7 +338,7 @@ Entrypoint arguments and environment variables remain defined by each runner and
 
 ## Production boundary
 
-Goldeneye production builds use Cargo packages under `crates/`. Removing `tools/agent-bench/` removes benchmark runtime tooling without changing the Cargo package graph. Legacy paths `tools/benchmark-agent-tasks.mjs` and `tools/benchmark-competitors.mjs` no longer exist.
+Goldeneye production builds use Cargo packages under `crates/`. Removing `tools/agent-bench/` removes benchmark runtime tooling without changing the Cargo package graph. Legacy paths `tools/agent-bench/bin/benchmark-agent-tasks.mjs` and `tools/agent-bench/bin/benchmark-competitors.mjs` no longer exist.
 ```
 
 - [ ] **Step 5: Verify GREEN**
@@ -381,10 +381,10 @@ git commit -m "docs(bench): define isolated package boundary"
 Across tracked files:
 
 ```text
-tools/benchmark-agent-tasks.mjs
+tools/agent-bench/bin/benchmark-agent-tasks.mjs
 → tools/agent-bench/bin/benchmark-agent-tasks.mjs
 
-tools/benchmark-competitors.mjs
+tools/agent-bench/bin/benchmark-competitors.mjs
 → tools/agent-bench/bin/benchmark-competitors.mjs
 ```
 
@@ -396,8 +396,8 @@ const { execFileSync } = require("node:child_process");
 const { readFileSync, writeFileSync } = require("node:fs");
 
 const replacements = new Map([
-  ["tools/benchmark-agent-tasks.mjs", "tools/agent-bench/bin/benchmark-agent-tasks.mjs"],
-  ["tools/benchmark-competitors.mjs", "tools/agent-bench/bin/benchmark-competitors.mjs"],
+  ["tools/agent-bench/bin/benchmark-agent-tasks.mjs", "tools/agent-bench/bin/benchmark-agent-tasks.mjs"],
+  ["tools/agent-bench/bin/benchmark-competitors.mjs", "tools/agent-bench/bin/benchmark-competitors.mjs"],
 ]);
 
 const files = execFileSync("git", ["grep", "-Il", "-e", [...replacements.keys()][0], "-e", [...replacements.keys()][1]], {
@@ -420,8 +420,8 @@ for (const file of files) {
 - [ ] **Step 2: Verify old references are gone**
 
 ```powershell
-$oldAgent = git grep -n -- 'tools/benchmark-agent-tasks.mjs'
-$oldCompetitor = git grep -n -- 'tools/benchmark-competitors.mjs'
+$oldAgent = git grep -n -- 'tools/agent-bench/bin/benchmark-agent-tasks.mjs'
+$oldCompetitor = git grep -n -- 'tools/agent-bench/bin/benchmark-competitors.mjs'
 if ($oldAgent -or $oldCompetitor) {
   throw "legacy benchmark entrypoint reference remains"
 }

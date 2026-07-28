@@ -7,7 +7,7 @@
 ## Starting Context
 
 - `tools/agent-bench/configs/spring-stringutils-unicode-truncate.json`: prior pinned Spring snapshot config.
-- `tools/benchmark-agent-tasks.mjs`: dry-run matrix and snapshot preparation entry points.
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: dry-run matrix and snapshot preparation entry points.
 
 ## Open Context Rule
 

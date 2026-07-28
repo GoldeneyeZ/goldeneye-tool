@@ -12,7 +12,7 @@ No brainstorming or TDD ceremony. Work directly, preserve correctness, and keep 
 
 Start by inspecting git status/diff, then run a baseline:
 
-node tools/benchmark-competitors.mjs --repo D:/Dev/IdeaProjects/terax-ai --cold-runs 1 --warmups 3 --samples 20 --out target/benchmarks/baseline.json
+node tools/agent-bench/bin/benchmark-competitors.mjs --repo D:/Dev/IdeaProjects/terax-ai --cold-runs 1 --warmups 3 --samples 20 --out target/benchmarks/baseline.json
 
 The comparator defaults to `codebase-memory-mcp` from PATH. Override with
 `--comparator <absolute-path>` when needed.
@@ -24,7 +24,7 @@ engines returned materially different work.
 Pick the highest-impact bottleneck, implement one focused optimization, verify
 correctness, then rerun with:
 
-node tools/benchmark-competitors.mjs --repo D:/Dev/IdeaProjects/terax-ai --cold-runs 1 --warmups 3 --samples 20 --out target/benchmarks/after.json
+node tools/agent-bench/bin/benchmark-competitors.mjs --repo D:/Dev/IdeaProjects/terax-ai --cold-runs 1 --warmups 3 --samples 20 --out target/benchmarks/after.json
 
 Report before/after p50, p95, index time, response size/cardinality, tests, and
 remaining gaps. Continue while a safe measurable optimization remains.
@@ -56,7 +56,7 @@ Do not commit unless explicitly requested.
 Use this after small changes:
 
 ```powershell
-node tools/benchmark-competitors.mjs `
+node tools/agent-bench/bin/benchmark-competitors.mjs `
   --repo D:/Dev/IdeaProjects/terax-ai `
   --cold-runs 1 `
   --warmups 1 `

@@ -6,7 +6,7 @@
 
 - Create: `tools/agent-bench/provenance.mjs`
 - Create: `tools/agent-bench/provenance.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 - Generate: `target/agent-bench/snapshots/spring-stringutils/snapshot-manifest.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/provenance.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/preparation.json`
@@ -100,7 +100,7 @@ Expected: PASS.
 **Step 3: Commit Task 4 source before capturing final fingerprints**
 
 ```powershell
-git add -- tools/agent-bench/provenance.mjs tools/agent-bench/provenance.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/provenance.mjs tools/agent-bench/provenance.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git diff --cached --check
 git commit -m "bench: freeze candidate provenance"
 ```
@@ -112,7 +112,7 @@ Expected: only Task 4 source staged. Recompute benchmark provenance after commit
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --prepare-snapshot
@@ -135,7 +135,7 @@ Expected:
 Restore snapshot once and run the task with an explicit smoke flag:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --repetitions 1 `

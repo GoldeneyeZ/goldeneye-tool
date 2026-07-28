@@ -4,8 +4,8 @@
 
 **Files:**
 
-- Move: `tools/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
-- Move: `tools/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
+- Move: `tools/agent-bench/bin/benchmark-agent-tasks.mjs` → `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
+- Move: `tools/agent-bench/bin/benchmark-competitors.mjs` → `tools/agent-bench/bin/benchmark-competitors.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
 - Test: `tools/agent-bench/isolation.test.mjs`
 
@@ -33,7 +33,7 @@ Every previous `./agent-bench/<module>.mjs` import becomes `../<module>.mjs`. Pr
 Move through `apply_patch`:
 
 ```text
-tools/benchmark-competitors.mjs
+tools/agent-bench/bin/benchmark-competitors.mjs
 → tools/agent-bench/bin/benchmark-competitors.mjs
 ```
 
@@ -44,7 +44,7 @@ Its imports are Node built-ins; no relative rewrite is required.
 In `tools/agent-bench/core.test.mjs`, replace:
 
 ```text
-tools/benchmark-agent-tasks.mjs
+tools/agent-bench/bin/benchmark-agent-tasks.mjs
 ```
 
 with:
@@ -74,6 +74,6 @@ Expected: both test files pass, 0 fail.
 - [ ] **Step 6: Commit relocation**
 
 ```powershell
-git add -- tools/benchmark-agent-tasks.mjs tools/benchmark-competitors.mjs tools/agent-bench/bin tools/agent-bench/core.test.mjs
+git add -- tools/agent-bench/bin/benchmark-agent-tasks.mjs tools/agent-bench/bin/benchmark-competitors.mjs tools/agent-bench/bin tools/agent-bench/core.test.mjs
 git commit -m "refactor(bench): isolate runtime entrypoints"
 ```

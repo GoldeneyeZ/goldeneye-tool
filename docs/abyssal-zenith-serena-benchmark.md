@@ -26,7 +26,7 @@ The task centralized duplicated public Spring Security endpoint matching into a 
 Run the benchmark from the Goldeneye repository:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/abyssal-zenith-goldeneye-serena-vanilla.config.json `
   --skip-build
 ```

@@ -6,7 +6,7 @@
 
 ## Starting Context
 
-- `tools/benchmark-agent-tasks.mjs`: runner finalizes dirty paths and protocol violations.
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: runner finalizes dirty paths and protocol violations.
 - `tools/agent-bench/core.mjs`: shared harness utilities and config loading.
 
 ## Open Context Rule
@@ -16,8 +16,8 @@ The files above are starting points only. Inspect any additional files needed to
 ## Completion Updates
 
 - Files created: `tools/agent-bench/path-policy.mjs`, `tools/agent-bench/path-policy.test.mjs`.
-- Files modified: `tools/benchmark-agent-tasks.mjs`.
+- Files modified: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`.
 - Additional relevant files: this context file and the SSRB plan progression record.
 - Verification: `node --test tools/agent-bench/path-policy.test.mjs` (PASS, 3 tests);
   `node --test tools/agent-bench/*.test.mjs` (PASS, 26 tests);
-  `node --check tools/benchmark-agent-tasks.mjs` (PASS).
+  `node --check tools/agent-bench/bin/benchmark-agent-tasks.mjs` (PASS).

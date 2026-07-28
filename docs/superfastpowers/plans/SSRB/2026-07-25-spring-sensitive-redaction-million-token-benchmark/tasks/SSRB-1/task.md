@@ -5,7 +5,7 @@
 **Files:**
 - Create: `tools/agent-bench/path-policy.mjs`
 - Create: `tools/agent-bench/path-policy.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 - [ ] **Step 1: Write failing normalization and policy tests**
 
@@ -177,6 +177,6 @@ Expected: all tests PASS.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add -- tools/agent-bench/path-policy.mjs tools/agent-bench/path-policy.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/path-policy.mjs tools/agent-bench/path-policy.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git commit -m "bench: add dirty path policies"
 ```

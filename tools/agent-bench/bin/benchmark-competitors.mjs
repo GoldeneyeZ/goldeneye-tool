@@ -41,7 +41,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
 
 if (flags.has("--help")) {
   console.log(`Usage:
-  node tools/benchmark-competitors.mjs --repo <path> [options]
+  node tools/agent-bench/bin/benchmark-competitors.mjs --repo <path> [options]
 
 Options:
   --goldeneye <path>       default: target/release/goldeneye${suffix}

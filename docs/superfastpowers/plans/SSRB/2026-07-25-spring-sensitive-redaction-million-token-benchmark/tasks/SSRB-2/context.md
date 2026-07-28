@@ -8,7 +8,7 @@
 
 - `tools/agent-bench/core.mjs`: lane grouping and descriptive summaries.
 - `tools/agent-bench/report.mjs`: Markdown rendering and scored artifact audit.
-- `tools/benchmark-agent-tasks.mjs`: passes config and artifact readers into report audit.
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: passes config and artifact readers into report audit.
 
 ## Open Context Rule
 
@@ -26,7 +26,7 @@ Files modified:
 - `tools/agent-bench/core.test.mjs`
 - `tools/agent-bench/report.mjs`
 - `tools/agent-bench/report.test.mjs`
-- `tools/benchmark-agent-tasks.mjs`
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 Verification:
 

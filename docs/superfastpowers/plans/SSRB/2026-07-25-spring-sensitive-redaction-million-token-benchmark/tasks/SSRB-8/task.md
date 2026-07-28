@@ -50,7 +50,7 @@ $FrozenSeed = [Convert]::ToUInt32($SeedHash.Substring(0, 8), 16)
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --repetitions 3 `
   --seed $FrozenSeed `
@@ -72,7 +72,7 @@ gate failure aborts remaining runs.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --out $ScoredReport `
   --audit-report
@@ -103,7 +103,7 @@ discard the report.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs --config $QualifiedConfig --verify-only
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs --config $QualifiedConfig --verify-only
 git status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' rev-parse HEAD

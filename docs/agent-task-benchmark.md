@@ -1,6 +1,6 @@
 # Paired agent task benchmark
 
-`tools/benchmark-agent-tasks.mjs` compares Goldeneye,
+`tools/agent-bench/bin/benchmark-agent-tasks.mjs` compares Goldeneye,
 `codebase-memory-mcp`, and vanilla Codex on actual code changes, not isolated
 search calls. Each lane receives the same repository commit, task prompt, Codex
 model, reasoning effort, sandbox, command-line tools, and held-out grader. MCP
@@ -56,7 +56,7 @@ task-level Rust compilation is involved.
 Validate the matrix without running agents:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/terax.config.json `
   --dry-run
 ```
@@ -64,7 +64,7 @@ node tools/benchmark-agent-tasks.mjs `
 Run a cheap paired pilot first:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/terax.config.json `
   --repetitions 1 `
   --cache-modes cold
@@ -74,7 +74,7 @@ Run the full configured experiment (15 agent runs: two MCP engines × two cache
 conditions × three repetitions, plus three vanilla runs):
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/terax.config.json
 ```
 

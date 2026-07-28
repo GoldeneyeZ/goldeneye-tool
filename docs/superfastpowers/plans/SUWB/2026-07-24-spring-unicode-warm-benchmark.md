@@ -253,7 +253,7 @@ Expected: commit contains only two Task 1 files.
 - Create: `tools/agent-bench/timing.test.mjs`
 - Modify: `tools/agent-bench/core.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 **Step 1: Write failing timing-boundary tests**
 
@@ -502,7 +502,7 @@ Expected: all harness unit tests PASS.
 **Step 7: Commit only Task 2 files**
 
 ```powershell
-git add -- tools/agent-bench/timing.mjs tools/agent-bench/timing.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/timing.mjs tools/agent-bench/timing.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git diff --cached --check
 git commit -m "bench: restore ready snapshots before scored runs"
 ```
@@ -698,7 +698,7 @@ Run:
 
 ```powershell
 node --test tools/agent-bench/*.test.mjs
-node tools/benchmark-agent-tasks.mjs --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json --dry-run
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json --dry-run
 ```
 
 Expected: tests PASS; dry run prints one task, candidate three repetitions,
@@ -745,7 +745,7 @@ Expected: commit contains only four Task 3 files.
 
 - Create: `tools/agent-bench/provenance.mjs`
 - Create: `tools/agent-bench/provenance.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 - Generate: `target/agent-bench/snapshots/spring-stringutils/snapshot-manifest.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/provenance.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/preparation.json`
@@ -839,7 +839,7 @@ Expected: PASS.
 **Step 3: Commit Task 4 source before capturing final fingerprints**
 
 ```powershell
-git add -- tools/agent-bench/provenance.mjs tools/agent-bench/provenance.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/provenance.mjs tools/agent-bench/provenance.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git diff --cached --check
 git commit -m "bench: freeze candidate provenance"
 ```
@@ -851,7 +851,7 @@ Expected: only Task 4 source staged. Recompute benchmark provenance after commit
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --prepare-snapshot
@@ -874,7 +874,7 @@ Expected:
 Restore snapshot once and run the task with an explicit smoke flag:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --repetitions 1 `
@@ -929,7 +929,7 @@ Before any scored run:
 ```powershell
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' rev-parse HEAD
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --verify-only
 ```
@@ -949,7 +949,7 @@ No valid cached Spring baseline exists, so create it once:
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine vanilla `
   --repetitions 1
@@ -965,7 +965,7 @@ attempt.
 **Step 3: Run candidate three times serially**
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --repetitions 3
@@ -987,7 +987,7 @@ Expected: three candidate artifact sets and unchanged immutable snapshot.
 **Step 4: Verify post-run invariants**
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --verify-only
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
@@ -1058,7 +1058,7 @@ Programmatically assert:
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --audit-report
 ```

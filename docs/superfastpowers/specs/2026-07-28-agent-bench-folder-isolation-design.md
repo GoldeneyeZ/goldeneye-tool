@@ -14,9 +14,9 @@ Production Rust packages, targets, and behavior remain unchanged.
 
 - `tools/agent-bench/` contains 47 tracked files: core modules, tests, configs, graders, fixtures, and tasks.
 - Two runtime entrypoints remain outside:
-  - `tools/benchmark-agent-tasks.mjs`
-  - `tools/benchmark-competitors.mjs`
-- `tools/benchmark-agent-tasks.mjs` imports seven modules from `tools/agent-bench/`.
+  - `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
+  - `tools/agent-bench/bin/benchmark-competitors.mjs`
+- `tools/agent-bench/bin/benchmark-agent-tasks.mjs` imports seven modules from `tools/agent-bench/`.
 - Production `crates/**` contain no bench-tool references.
 - Cargo metadata contains 22 workspace packages, zero bench targets, and zero tool-path dependencies.
 - Root `Cargo.toml` contains no benchmark-tool reference.
@@ -67,8 +67,8 @@ tools/agent-bench/
 ## Migration
 
 1. Add a failing isolation-contract test.
-2. Move `tools/benchmark-agent-tasks.mjs` to `tools/agent-bench/bin/benchmark-agent-tasks.mjs`.
-3. Move `tools/benchmark-competitors.mjs` to `tools/agent-bench/bin/benchmark-competitors.mjs`.
+2. Move `tools/agent-bench/bin/benchmark-agent-tasks.mjs` to `tools/agent-bench/bin/benchmark-agent-tasks.mjs`.
+3. Move `tools/agent-bench/bin/benchmark-competitors.mjs` to `tools/agent-bench/bin/benchmark-competitors.mjs`.
 4. Rewrite moved agent-task runner imports:
    - `./agent-bench/core.mjs` → `../core.mjs`
    - Apply same rewrite to its other six local bench imports.
@@ -132,8 +132,8 @@ node --check tools/agent-bench/bin/benchmark-competitors.mjs
 
 Then verify:
 
-- No tracked reference contains `tools/benchmark-agent-tasks.mjs`.
-- No tracked reference contains `tools/benchmark-competitors.mjs`.
+- No tracked reference contains `tools/agent-bench/bin/benchmark-agent-tasks.mjs`.
+- No tracked reference contains `tools/agent-bench/bin/benchmark-competitors.mjs`.
 - Cargo metadata reports no bench targets or tool-path packages.
 - `git diff --check` passes.
 

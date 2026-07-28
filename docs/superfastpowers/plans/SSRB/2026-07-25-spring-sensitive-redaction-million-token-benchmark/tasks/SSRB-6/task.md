@@ -27,7 +27,7 @@ Run:
 ```powershell
 cargo test -p goldeneye-ack
 cargo build --release -p goldeneye
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --verify-only
 ```

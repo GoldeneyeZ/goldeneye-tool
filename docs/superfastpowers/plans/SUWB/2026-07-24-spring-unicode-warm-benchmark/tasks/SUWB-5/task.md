@@ -16,7 +16,7 @@ Before any scored run:
 ```powershell
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
 git -C 'D:\Dev\IdeaProjects\spring-framework' rev-parse HEAD
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --verify-only
 ```
@@ -36,7 +36,7 @@ No valid cached Spring baseline exists, so create it once:
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine vanilla `
   --repetitions 1
@@ -52,7 +52,7 @@ attempt.
 **Step 3: Run candidate three times serially**
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --engine goldeneye-ack `
   --repetitions 3
@@ -74,7 +74,7 @@ Expected: three candidate artifact sets and unchanged immutable snapshot.
 **Step 4: Verify post-run invariants**
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --verify-only
 git -C 'D:\Dev\IdeaProjects\spring-framework' status --short
@@ -145,7 +145,7 @@ Programmatically assert:
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
   --audit-report
 ```

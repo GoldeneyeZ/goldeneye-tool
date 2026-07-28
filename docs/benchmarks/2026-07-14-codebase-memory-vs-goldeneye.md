@@ -39,7 +39,7 @@ The globally installed v0.8.1 binary was rejected as stale.
 - Query process: persistent MCP session; 3 warmups, then 20 measured repetitions
 - Startup update thread: 6-second wait after `initialize` before indexing
 
-Reusable runner: `node tools/benchmark-competitors.mjs --repo <corpus-path>`.
+Reusable runner: `node tools/agent-bench/bin/benchmark-competitors.mjs --repo <corpus-path>`.
 It writes machine-readable latency, response-size, cardinality, version, index,
 and cache metrics under `target/benchmarks/`.
 

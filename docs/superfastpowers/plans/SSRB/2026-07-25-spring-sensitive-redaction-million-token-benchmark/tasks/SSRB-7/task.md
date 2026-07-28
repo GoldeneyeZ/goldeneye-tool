@@ -17,7 +17,7 @@
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --engine vanilla `
   --repetitions 1 `
@@ -62,7 +62,7 @@ Run:
 $QualifiedConfig = 'tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json'
 # On the Level-3 decision branch, assign:
 # $QualifiedConfig = 'tools/agent-bench/configs/spring-sensitive-value-redaction-level3.json'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config $QualifiedConfig `
   --verify-only
 git status --short

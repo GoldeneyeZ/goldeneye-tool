@@ -72,7 +72,7 @@ const flags = parseFlags(process.argv.slice(2));
 
 if (flags.has("--help")) {
   console.log(`Usage:
-  node tools/benchmark-agent-tasks.mjs --config <json> [options]
+  node tools/agent-bench/bin/benchmark-agent-tasks.mjs --config <json> [options]
 
 Options:
   --repo <path>             override repository

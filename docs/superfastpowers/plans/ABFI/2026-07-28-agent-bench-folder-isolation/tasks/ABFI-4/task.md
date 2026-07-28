@@ -19,10 +19,10 @@
 Across tracked files:
 
 ```text
-tools/benchmark-agent-tasks.mjs
+tools/agent-bench/bin/benchmark-agent-tasks.mjs
 → tools/agent-bench/bin/benchmark-agent-tasks.mjs
 
-tools/benchmark-competitors.mjs
+tools/agent-bench/bin/benchmark-competitors.mjs
 → tools/agent-bench/bin/benchmark-competitors.mjs
 ```
 
@@ -34,8 +34,8 @@ const { execFileSync } = require("node:child_process");
 const { readFileSync, writeFileSync } = require("node:fs");
 
 const replacements = new Map([
-  ["tools/benchmark-agent-tasks.mjs", "tools/agent-bench/bin/benchmark-agent-tasks.mjs"],
-  ["tools/benchmark-competitors.mjs", "tools/agent-bench/bin/benchmark-competitors.mjs"],
+  ["tools/agent-bench/bin/benchmark-agent-tasks.mjs", "tools/agent-bench/bin/benchmark-agent-tasks.mjs"],
+  ["tools/agent-bench/bin/benchmark-competitors.mjs", "tools/agent-bench/bin/benchmark-competitors.mjs"],
 ]);
 
 const files = execFileSync("git", ["grep", "-Il", "-e", [...replacements.keys()][0], "-e", [...replacements.keys()][1]], {
@@ -58,8 +58,8 @@ for (const file of files) {
 - [ ] **Step 2: Verify old references are gone**
 
 ```powershell
-$oldAgent = git grep -n -- 'tools/benchmark-agent-tasks.mjs'
-$oldCompetitor = git grep -n -- 'tools/benchmark-competitors.mjs'
+$oldAgent = git grep -n -- 'tools/agent-bench/bin/benchmark-agent-tasks.mjs'
+$oldCompetitor = git grep -n -- 'tools/agent-bench/bin/benchmark-competitors.mjs'
 if ($oldAgent -or $oldCompetitor) {
   throw "legacy benchmark entrypoint reference remains"
 }

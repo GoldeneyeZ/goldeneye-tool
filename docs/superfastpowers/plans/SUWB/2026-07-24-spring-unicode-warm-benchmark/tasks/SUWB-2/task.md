@@ -8,7 +8,7 @@
 - Create: `tools/agent-bench/timing.test.mjs`
 - Modify: `tools/agent-bench/core.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 
 **Step 1: Write failing timing-boundary tests**
 
@@ -257,7 +257,7 @@ Expected: all harness unit tests PASS.
 **Step 7: Commit only Task 2 files**
 
 ```powershell
-git add -- tools/agent-bench/timing.mjs tools/agent-bench/timing.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/timing.mjs tools/agent-bench/timing.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git diff --cached --check
 git commit -m "bench: restore ready snapshots before scored runs"
 ```

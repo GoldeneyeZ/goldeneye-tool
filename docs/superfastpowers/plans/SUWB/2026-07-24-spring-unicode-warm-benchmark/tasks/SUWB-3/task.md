@@ -187,7 +187,7 @@ Run:
 
 ```powershell
 node --test tools/agent-bench/*.test.mjs
-node tools/benchmark-agent-tasks.mjs --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json --dry-run
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json --dry-run
 ```
 
 Expected: tests PASS; dry run prints one task, candidate three repetitions,

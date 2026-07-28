@@ -93,7 +93,7 @@ of all six modules.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --repetitions 3 `
   --seed 20260725 `
@@ -110,7 +110,7 @@ Run:
 ```powershell
 $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --engine goldeneye-ack `
   --prepare-snapshot
@@ -124,7 +124,7 @@ Codex process.
 Run:
 
 ```powershell
-node tools/benchmark-agent-tasks.mjs `
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
   --verify-only
 ```

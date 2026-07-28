@@ -105,7 +105,7 @@ Entrypoint arguments and environment variables remain defined by each runner and
 
 ## Production boundary
 
-Goldeneye production builds use Cargo packages under `crates/`. Removing `tools/agent-bench/` removes benchmark runtime tooling without changing the Cargo package graph. Legacy paths `tools/benchmark-agent-tasks.mjs` and `tools/benchmark-competitors.mjs` no longer exist.
+Goldeneye production builds use Cargo packages under `crates/`. Removing `tools/agent-bench/` removes benchmark runtime tooling without changing the Cargo package graph. Legacy paths `tools/agent-bench/bin/benchmark-agent-tasks.mjs` and `tools/agent-bench/bin/benchmark-competitors.mjs` no longer exist.
 ```
 
 - [ ] **Step 5: Verify GREEN**

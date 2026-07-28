@@ -5,7 +5,7 @@
 **Files:**
 - Create: `tools/agent-bench/qualification.mjs`
 - Create: `tools/agent-bench/qualification.test.mjs`
-- Modify: `tools/benchmark-agent-tasks.mjs`
+- Modify: `tools/agent-bench/bin/benchmark-agent-tasks.mjs`
 - Modify: `tools/agent-bench/core.test.mjs`
 
 - [ ] **Step 1: Write failing qualification tests**
@@ -184,6 +184,6 @@ Expected: all tests PASS.
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add -- tools/agent-bench/qualification.mjs tools/agent-bench/qualification.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/benchmark-agent-tasks.mjs
+git add -- tools/agent-bench/qualification.mjs tools/agent-bench/qualification.test.mjs tools/agent-bench/core.mjs tools/agent-bench/core.test.mjs tools/agent-bench/bin/benchmark-agent-tasks.mjs
 git commit -m "bench: add vanilla token qualification"
 ```
