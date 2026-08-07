@@ -25,6 +25,23 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs <arguments>
 node tools/agent-bench/bin/benchmark-competitors.mjs <arguments>
 ```
 
+### Fast one-shot run
+
+Use `--one-shot` for one task, one engine, one cache mode, one Codex invocation, and one held-out grader invocation:
+
+```powershell
+node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
+  --config tools/agent-bench/configs/spring-sensitive-value-redaction-level0.json `
+  --one-shot `
+  --task spring-sensitive-value-redaction-level0 `
+  --engine goldeneye-ack `
+  --cache-modes warm `
+  --repetitions 1 `
+  --model gpt-5.6-luna
+```
+
+One-shot attempts are standalone and unqualified. They skip agent-side build, compile, test, lint, and check commands; ACK discovery calls remain unlimited. A missing or stale warm ACK snapshot is refreshed locally without a smoke/model run. By default, output is isolated at `target/agent-bench/<task-id>/one-shot/<attempt-id>/report.json`; use `--attempt-id <id>` for a stable name or `--out <path>` for an explicit report. Canonical scored reports are never read or merged.
+
 ## Layout
 
 - `bin/`: benchmark entrypoints

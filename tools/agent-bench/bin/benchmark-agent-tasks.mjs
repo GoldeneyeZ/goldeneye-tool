@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   createWriteStream,
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -21,6 +22,7 @@ import {
   codexSandboxArgs,
   emptyTelemetry,
   expandTokens,
+  isAckDaemonProcessCommand,
   loadConfig,
   protocolViolationsForEngine,
   resolveRepositoryGate,
@@ -28,6 +30,7 @@ import {
   sanitizeId,
   selectRunEngines,
   shouldPrimeIndex,
+  snapshotAckEnvironment,
   summarizeRuns,
   tomlInlineTable,
   tomlString,
@@ -50,9 +53,10 @@ import {
 } from "../snapshot.mjs";
 import {
   closeWritableStream,
+  createAgentCompletionController,
+  isAgentProtocolCompletionLine,
   scoreRunDurations,
   spawnWithTimer,
-  stopTimerAtClose,
 } from "../timing.mjs";
 import {
   captureRepositoryProvenance,
@@ -66,6 +70,14 @@ import {
   renderMarkdownReport,
 } from "../report.mjs";
 import { evaluateCalibrationRun } from "../qualification.mjs";
+import {
+  agentVerificationPolicy,
+  analyzeAgentVerificationCalls,
+  applyAgentVerificationPolicy,
+  resolveOneShotAttemptId,
+  resolveOneShotOutput,
+  validateOneShotOptions,
+} from "../one-shot.mjs";
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const flags = parseFlags(process.argv.slice(2));
@@ -86,6 +98,9 @@ Options:
   --seed <n>                deterministic random run order
   --timeout-ms <n>          per-agent timeout
   --out <path>              report JSON
+  --one-shot               run one standalone, unqualified benchmark attempt
+  --skip-agent-verification forbid agent-side build/test/lint/check commands
+  --attempt-id <id>         one-shot artifact attempt identifier
   --skip-build              use the existing Goldeneye release binary
   --dry-run                 validate and print the matrix only
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
@@ -112,7 +127,8 @@ config.reasoning = flags.get("--reasoning") ?? config.reasoning;
 config.repetitions = positiveInteger(flags.get("--repetitions") ?? config.repetitions ?? 1, "repetitions");
 config.seed = integer(flags.get("--seed") ?? config.seed ?? 20260718, "seed");
 config.timeout_ms = positiveInteger(flags.get("--timeout-ms") ?? config.timeout_ms ?? 1_800_000, "timeout-ms");
-config.output = resolve(flags.get("--out") ?? config.output ?? join(workspace, "target", "agent-bench", "report.json"));
+const explicitOutput = flags.get("--out");
+config.output = resolve(explicitOutput ?? config.output ?? join(workspace, "target", "agent-bench", "report.json"));
 config.cache_modes = String(flags.get("--cache-modes") ?? config.cache_modes ?? "cold,warm")
   .split(",")
   .map((value) => value.trim())
@@ -122,6 +138,40 @@ if (config.cache_modes.some((mode) => !["cold", "warm"].includes(mode))) {
 }
 config.tasks = select(config.tasks, flags.get("--task"), "task");
 const runEngines = selectRunEngines(config, flags.get("--engine"));
+const matrix = buildRunMatrix({
+  tasks: config.tasks,
+  engines: runEngines,
+  cacheModes: config.cache_modes,
+  repetitions: config.repetitions,
+  seed: config.seed,
+});
+const oneShot = validateOneShotOptions({
+  enabled: flags.has("--one-shot"),
+  tasks: config.tasks,
+  engines: runEngines,
+  cacheModes: config.cache_modes,
+  repetitions: config.repetitions,
+  activeWorkflowFlags: [
+    "--prepare-snapshot",
+    "--verify-only",
+    "--smoke",
+    "--calibration",
+    "--audit-report",
+  ].filter((flag) => flags.has(flag)),
+  attemptId: flags.get("--attempt-id"),
+  skipAgentVerification: flags.has("--skip-agent-verification"),
+});
+const oneShotAttemptId = oneShot.enabled
+  ? resolveOneShotAttemptId(flags.get("--attempt-id"))
+  : null;
+if (oneShot.enabled) {
+  config.output = resolveOneShotOutput({
+    workspace,
+    taskId: config.tasks[0].id,
+    attemptId: oneShotAttemptId,
+    explicitOutput,
+  });
+}
 if (flags.has("--calibration")) {
   if (runEngines.length !== 1 || runEngines[0].kind !== "vanilla") {
     fail("--calibration requires --engine <vanilla-id>");
@@ -136,22 +186,11 @@ const calibrationId = flags.has("--calibration")
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
 const shortRunId = `${baseCommit.slice(0, 8)}-${Date.now().toString(36)}`;
-const runRoot = resolve(
-  config.run_root ??
-    dirname(config.output),
-);
+const runRoot = resolve(oneShot.enabled ? dirname(config.output) : config.run_root ?? dirname(config.output));
 const worktreeRoot = resolve(
   config.worktree_root ?? join(dirname(config.repo), ".gab", shortRunId),
 );
 const cacheRoot = resolve(config.cache_root ?? join(dirname(config.repo), ".gab-cache", shortRunId));
-const matrix = buildRunMatrix({
-  tasks: config.tasks,
-  engines: runEngines,
-  cacheModes: config.cache_modes,
-  repetitions: config.repetitions,
-  seed: config.seed,
-});
-
 if (flags.has("--dry-run")) {
   console.log(
     JSON.stringify(
@@ -162,6 +201,8 @@ if (flags.has("--dry-run")) {
         run_root: runRoot,
         worktree_root: worktreeRoot,
         cache_root: cacheRoot,
+        mode: oneShot.enabled ? "one-shot" : "canonical",
+        attempt_id: oneShotAttemptId,
         runs: matrix.map(({ id, task, engine, cacheMode, repetition }) => ({
           id,
           task: task.id,
@@ -216,7 +257,7 @@ if (flags.has("--audit-report")) {
   process.exit(0);
 }
 
-if (!flags.has("--skip-build") && runEngines.some((engine) => engine.id === "goldeneye")) {
+if (!oneShot.enabled && !flags.has("--skip-build") && runEngines.some((engine) => engine.id === "goldeneye")) {
   console.log("Building Goldeneye release binary...");
   const fullGrammarPack = join(workspace, "target", "goldeneye-grammars");
   if (!process.env.GOLDENEYE_GRAMMAR_PACK_DIR && existsSync(fullGrammarPack)) {
@@ -305,6 +346,80 @@ if (flags.has("--calibration")) {
   });
   console.log(`Calibration ${qualification.qualified ? "QUALIFIED" : "NOT QUALIFIED"}: ${calibrationRoot}`);
   process.exit(qualification.qualified ? 0 : 1);
+}
+
+if (oneShot.enabled) {
+  if (existsSync(config.output)) {
+    fail(`One-shot attempt output already exists: ${config.output}`);
+  }
+  mkdirSync(runRoot, { recursive: true });
+  const selectedRun = {
+    ...matrix[0],
+    id: `${matrix[0].id}-${oneShotAttemptId}`,
+  };
+  const preparationState = await resolveOneShotPreparation({
+    baseCommit,
+    config,
+    engine: selectedRun.engine,
+    repoName,
+  });
+  const result = await executeRun(selectedRun, {
+    baseCommit,
+    cacheRoot,
+    config,
+    mode: "one-shot",
+    repoName,
+    runRoot,
+    skipAgentVerification: true,
+    worktreeRoot,
+  });
+  result.pre_run_verification = preparationState.verification;
+  result.discovery = analyzeDiscoveryTrace(join(result.artifact_dir, "codex.jsonl"));
+  result.hashes = runHashes({
+    candidate: preparationState.preparation?.provenance?.candidate ?? null,
+    configPath,
+    run: selectedRun,
+    runDir: result.artifact_dir,
+    snapshot: preparationState.verification?.snapshot ?? result.snapshot,
+  });
+  const completedAt = new Date().toISOString();
+  const report = {
+    schema_version: 1,
+    mode: "one-shot",
+    attempt_id: oneShotAttemptId,
+    generated_at: completedAt,
+    completed_at: completedAt,
+    config: configPath,
+    repository: config.repo,
+    repository_name: repoName,
+    base_commit: baseCommit,
+    qualified: false,
+    qualification: "skipped",
+    qualification_reason: "One-shot attempts skip canonical repetition and smoke qualification gates.",
+    snapshot_refreshed: preparationState.snapshotRefreshed,
+    agent_verification_policy: "skip",
+    agent_verification_policy_text: agentVerificationPolicy(),
+    settings: {
+      model: config.model ?? null,
+      reasoning: config.reasoning ?? null,
+      repetitions: 1,
+      cache_modes: config.cache_modes,
+      timeout_ms: config.timeout_ms,
+      agent_verification_policy: agentVerificationPolicy(),
+      ack_call_limit: null,
+    },
+    model_invocations: result.model_invocations,
+    grader_invocations: result.grader_invocations,
+    agent_verification_calls: result.agent_verification_calls,
+    one_shot_compliant: result.one_shot_compliant,
+    success: result.success,
+    run_roots: [runRoot],
+    runs: [result],
+    summary: summarizeRuns([result]),
+  };
+  persistNewReport(config.output, report);
+  console.log(`One-shot benchmark artifact: ${config.output}`);
+  process.exit(result.success ? 0 : 1);
 }
 
 mkdirSync(runRoot, { recursive: true });
@@ -802,6 +917,50 @@ async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repo
   };
 }
 
+async function resolveOneShotPreparation({ baseCommit, config, engine, repoName }) {
+  if (engine.kind !== "ack") {
+    return { preparation: null, snapshotRefreshed: false, verification: null };
+  }
+
+  const artifacts = resolvePreparationArtifacts(config);
+  try {
+    const preparation = readPreparation(artifacts.preparation);
+    const verification = await verifyPreparedSnapshot({
+      baseCommit,
+      config,
+      expectedCandidate: preparation.provenance?.candidate ?? null,
+    });
+    return { preparation, snapshotRefreshed: false, verification };
+  } catch {
+    let preparation;
+    try {
+      preparation = await prepareReadySnapshot({ baseCommit, config, repoName });
+      preparation.eligible_for_scoring = false;
+      preparation.completed_at = new Date().toISOString();
+      if (preparation.provenance) persistReport(artifacts.provenance, preparation.provenance);
+      persistReport(artifacts.preparation, preparation);
+    } catch (error) {
+      preparation = error.preparation ?? {
+        schema_version: 1,
+        gates: [],
+        provenance: null,
+        snapshot: null,
+      };
+      preparation.eligible_for_scoring = false;
+      preparation.error = errorMessage(error);
+      preparation.completed_at = new Date().toISOString();
+      persistReport(artifacts.preparation, preparation);
+      throw error;
+    }
+    const verification = await verifyPreparedSnapshot({
+      baseCommit,
+      config,
+      expectedCandidate: preparation.provenance?.candidate ?? null,
+    });
+    return { preparation, snapshotRefreshed: true, verification };
+  }
+}
+
 async function executeRun(run, context) {
   const runDir = join(context.runRoot, run.engine.id, run.id);
   const laneKey = createHash("sha256").update(run.id).digest("hex").slice(0, 12);
@@ -837,6 +996,8 @@ async function executeRun(run, context) {
   let cacheBytes = 0;
   let engine = null;
   let engineMetrics = {};
+  let modelInvocations = 0;
+  let graderInvocations = 0;
   try {
     removeWorktreeIfRegistered(context.config.repo, worktree, worktreeRoot);
     mkdirSync(dirname(worktree), { recursive: true });
@@ -880,9 +1041,12 @@ async function executeRun(run, context) {
       preindexMs = performance.now() - started;
     }
 
-    const prompt = composePrompt(run.task, run.cacheMode, engine);
+    const prompt = composePrompt(run.task, run.cacheMode, engine, {
+      skipAgentVerification: context.skipAgentVerification ?? oneShot.skipAgentVerification,
+    });
     writeFileSync(join(runDir, "prompt.txt"), prompt);
     maintenanceMs = performance.now() - maintenanceStarted;
+    modelInvocations += 1;
     agentResult = await runCodex({
       cacheMode: run.cacheMode,
       config: context.config,
@@ -899,6 +1063,7 @@ async function executeRun(run, context) {
     writeFileSync(join(runDir, "patch.diff"), diff);
     writeFileSync(join(runDir, "status.txt"), status);
 
+    graderInvocations += 1;
     graderResult = runGrader(run.task, {
       repo: context.config.repo,
       runDir,
@@ -919,6 +1084,7 @@ async function executeRun(run, context) {
           ? statSync(engine.goldeneyeDb).size
           : 0,
       };
+      engineMetrics.daemon_shutdown_verified = await shutdownAckDaemon(engine.ackHome);
     }
     if (worktreeAdded && !flags.has("--keep-worktrees")) {
       removeWorktreeIfRegistered(context.config.repo, worktree, worktreeRoot);
@@ -929,6 +1095,7 @@ async function executeRun(run, context) {
   }
 
   const telemetry = agentResult.telemetry ?? emptyTelemetry();
+  const compliance = analyzeAgentVerificationCalls(telemetry.command_events);
   const protocolViolations = protocolViolationsForEngine(
     telemetry.protocol_violations,
     run.engine.kind,
@@ -996,6 +1163,12 @@ async function executeRun(run, context) {
     ack_calls: telemetry.ack_calls,
     ack_failures: telemetry.ack_failures,
     command_calls: telemetry.command_calls,
+    ...(context.mode === "one-shot" ? {
+      model_invocations: modelInvocations,
+      grader_invocations: graderInvocations,
+      agent_verification_calls: compliance.agent_verification_calls,
+      one_shot_compliant: compliance.one_shot_compliant,
+    } : {}),
     event_bytes: telemetry.jsonl_bytes,
     cache_bytes: cacheBytes,
     durations,
@@ -1019,7 +1192,7 @@ async function executeRun(run, context) {
   };
 }
 
-function composePrompt(task, cacheMode, engine) {
+function composePrompt(task, cacheMode, engine, { skipAgentVerification = false } = {}) {
   const taskPrompt = readFileSync(task.prompt_file, "utf8").trim();
   const sourceLanguage = task.source_language ?? "TypeScript, TSX, or Rust";
   const sourceExtensions = (task.source_extensions ?? [".ts", ".tsx", ".rs"]).join(", ");
@@ -1041,7 +1214,7 @@ function composePrompt(task, cacheMode, engine) {
     engine.kind === "ack"
       ? "- Use one ACK command path per discovery need; stop discovery once enough evidence exists."
       : "- Do not invoke the ack CLI; it is not part of this benchmark lane.";
-  return `${task.common_prompt ?? ""}
+  const prompt = `${task.common_prompt ?? ""}
 
 You are participating in a controlled code-maintenance benchmark.
 - Work directly in the current repository and complete the task.
@@ -1056,6 +1229,7 @@ ${cacheInstructions}
 Task:
 ${taskPrompt}
 `.trimStart();
+  return applyAgentVerificationPolicy(prompt, skipAgentVerification);
 }
 
 function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
@@ -1227,32 +1401,22 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     }),
   );
   const child = measured.child;
+  const completion = createAgentCompletionController({
+    child,
+    timeoutMs: config.timeout_ms,
+    elapsedMs: measured.elapsedMs,
+    terminate: killProcessTree,
+  });
   child.stderr.pipe(stderrStream);
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
   lines.on("line", (line) => {
     jsonlStream.write(`${line}\n`);
     accumulateCodexLine(telemetry, line);
+    if (isAgentProtocolCompletionLine(line)) completion.markProtocolCompleted();
   });
   child.stdin.end(prompt);
 
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    killProcessTree(child.pid);
-  }, config.timeout_ms);
-  const outcome = await new Promise((resolveOutcome) => {
-    child.on("error", (error) => resolveOutcome({
-      durationMs: stopTimerAtClose(measured),
-      exitCode: null,
-      error,
-    }));
-    child.on("close", (exitCode) => resolveOutcome({
-      durationMs: stopTimerAtClose(measured),
-      exitCode,
-      error: null,
-    }));
-  });
-  clearTimeout(timer);
+  const outcome = await completion.outcome;
   lines.close();
   await Promise.all([closeWritableStream(jsonlStream), closeWritableStream(stderrStream)]);
   return {
@@ -1260,7 +1424,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     error: outcome.error ? errorMessage(outcome.error) : null,
     exit_code: outcome.exitCode,
     telemetry,
-    timed_out: timedOut,
+    timed_out: outcome.timedOut,
   };
 }
 
@@ -1268,7 +1432,7 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
   const startedAt = performance.now();
   const child = spawn(engine.command, [...engine.args, "init", worktree], {
     cwd: worktree,
-    env: processEnvironment(engine),
+    env: snapshotAckEnvironment(processEnvironment(engine)),
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -1660,6 +1824,49 @@ function killProcessTree(pid) {
   }
 }
 
+async function shutdownAckDaemon(ackHome) {
+  const pids = ackDaemonProcessIds(ackHome);
+  for (const pid of pids) killProcessTree(pid);
+  return waitForProcessIdsExit(pids, 5_000);
+}
+
+function ackDaemonProcessIds(ackHome) {
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match 'daemonMain\\.js' } | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    if (result.status !== 0 || !result.stdout.trim()) return [];
+    const parsed = JSON.parse(result.stdout);
+    const processes = Array.isArray(parsed) ? parsed : [parsed];
+    return processes
+      .filter((entry) =>
+        isAckDaemonProcessCommand(entry.CommandLine, ackHome, process.platform),
+      )
+      .map((entry) => Number(entry.ProcessId))
+      .filter(Number.isInteger);
+  }
+
+  const result = spawnSync("ps", ["-eo", "pid=,args="], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s*(\d+)\s+(.*)$/))
+    .filter(
+      (match) =>
+        match && isAckDaemonProcessCommand(match[2], ackHome, process.platform),
+    )
+    .map((match) => Number(match[1]));
+}
+
 function waitForExit(child, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
   return new Promise((resolveWait) => {
@@ -1791,11 +1998,13 @@ function mergeUnique(existing, additions) {
 }
 
 function runHashes({ candidate, configPath: resolvedConfigPath, run, runDir, snapshot }) {
-  const graderPath = run.task.grader.args.find(
+  const graderPath = (run.task.grader.args ?? []).find(
     (value) => typeof value === "string" && existsSync(value) && statSync(value).isFile(),
   );
   return {
-    prompt_sha256: hashFile(join(runDir, "prompt.txt")),
+    prompt_sha256: existsSync(join(runDir, "prompt.txt"))
+      ? hashFile(join(runDir, "prompt.txt"))
+      : null,
     config_sha256: hashFile(resolvedConfigPath),
     task_sha256: hashFile(run.task.prompt_file),
     grader_sha256: graderPath ? hashFile(graderPath) : null,
@@ -1806,6 +2015,7 @@ function runHashes({ candidate, configPath: resolvedConfigPath, run, runDir, sna
 
 function analyzeDiscoveryTrace(path) {
   const commands = [];
+  if (!existsSync(path)) return summarizeDiscoveryCommands(commands);
   for (const line of readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)) {
     let event;
     try {
@@ -1833,6 +2043,21 @@ function analyzeDiscoveryTrace(path) {
       payload_cardinality: output.split(/\r?\n/).filter(Boolean).length,
     });
   }
+  return summarizeDiscoveryCommands(commands);
+}
+
+function persistNewReport(path, report) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx" });
+    linkSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+function summarizeDiscoveryCommands(commands) {
   return {
     first_selection: commands.find((command) => command.action !== "status") ?? commands[0] ?? null,
     ordering: commands.map(({ order, action, exit_code }) => ({ order, action, exit_code })),

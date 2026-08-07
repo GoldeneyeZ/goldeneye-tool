@@ -92,9 +92,35 @@ export function emptyTelemetry() {
     ack_calls: 0,
     ack_failures: 0,
     command_calls: 0,
+    command_events: [],
     protocol_violations: [],
     event_types: {},
   };
+}
+
+export function snapshotAckEnvironment(environment) {
+  return {
+    ...environment,
+    ACK_DAEMON: "off",
+  };
+}
+
+export function isAckDaemonProcessCommand(
+  commandLine,
+  ackHome,
+  platform = process.platform,
+) {
+  const normalize = (value) => {
+    const rendered = String(value ?? "").replaceAll("\\", "/");
+    return platform === "win32" ? rendered.toLowerCase() : rendered;
+  };
+  const command = normalize(commandLine);
+  const home = normalize(resolve(ackHome));
+  return (
+    command.includes("daemonmain.js") &&
+    command.includes("--ack-home") &&
+    command.includes(home)
+  );
 }
 
 const SOURCE_FILE_PATTERN = /\.(?:java|ts|tsx|rs)(?:\b|["'`])/i;
@@ -195,6 +221,14 @@ export function accumulateCodexLine(telemetry, line) {
     }
     const command = object.command ?? object.cmd;
     const rendered = Array.isArray(command) ? command.join(" ") : String(command ?? "");
+    if (countToolCalls && rendered && (command !== undefined || kind.includes("command"))) {
+      const rawExitCode = object.exit_code ?? object.exitCode;
+      const exitCode = Number(rawExitCode);
+      telemetry.command_events.push({
+        command: rendered.slice(0, 2_000),
+        exit_code: Number.isFinite(exitCode) ? exitCode : null,
+      });
+    }
     const isAckCommand = /(?:^|[^A-Za-z0-9_.-])ack(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(rendered);
     if (countToolCalls && isAckCommand) {
       telemetry.ack_calls += 1;

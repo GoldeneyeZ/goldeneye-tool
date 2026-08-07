@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildRunMatrix,
   codexSandboxArgs,
+  isAckDaemonProcessCommand,
   isDirectSourceReadCommand,
   loadConfig,
   parseCodexJsonl,
@@ -18,6 +19,7 @@ import {
   sanitizeId,
   selectRunEngines,
   shouldPrimeIndex,
+  snapshotAckEnvironment,
   summarizeRuns,
   tomlInlineTable,
 } from "./core.mjs";
@@ -233,6 +235,41 @@ test("ACK lanes allow ACK commands while preserving direct source-read violation
     protocolViolationsForEngine(telemetry.protocol_violations, "ack").map((item) => item.type),
     ["direct_source_read"],
   );
+});
+
+test("snapshot ACK initialization disables daemon reuse without dropping engine env", () => {
+  assert.deepEqual(
+    snapshotAckEnvironment({
+      ACK_BACKEND: "goldeneye",
+      ACK_DAEMON: "on",
+      ACK_DAEMON_IDLE: "10m",
+      GOLDENEYE_DB_PATH: "snapshot.db",
+    }),
+    {
+      ACK_BACKEND: "goldeneye",
+      ACK_DAEMON: "off",
+      ACK_DAEMON_IDLE: "10m",
+      GOLDENEYE_DB_PATH: "snapshot.db",
+    },
+  );
+});
+
+test("ACK daemon process matching is scoped to the exact ACK home", () => {
+  const ackHome = "D:\\Dev\\IdeaProjects\\.gab-cache\\ssrb5-live\\ack-state";
+  const matching =
+    `"C:\\nvm4w\\nodejs\\node.exe" C:\\ack\\dist\\daemonMain.js ` +
+    `--endpoint \\\\.\\pipe\\ack-123 --ack-home ${ackHome} --idle-ms 600000`;
+
+  assert.equal(isAckDaemonProcessCommand(matching, ackHome, "win32"), true);
+  assert.equal(
+    isAckDaemonProcessCommand(
+      matching,
+      "D:\\Dev\\IdeaProjects\\.gab-cache\\other\\ack-state",
+      "win32",
+    ),
+    false,
+  );
+  assert.equal(isAckDaemonProcessCommand("goldeneye mcp --stdio", ackHome, "win32"), false);
 });
 
 test("summarizeRuns never rewards failed runs with fast timings", () => {
