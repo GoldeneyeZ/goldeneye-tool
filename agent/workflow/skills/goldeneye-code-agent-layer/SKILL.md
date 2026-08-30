@@ -1,20 +1,22 @@
 ---
 name: goldeneye-code-agent-layer
-description: Use GCAL over Goldeneye for project initialization, compact code discovery, exact source retrieval, call tracing, architecture checks, and index status.
+description: Use GCAL over Goldeneye for project initialization, compact code discovery, bounded multi-hop workflows, exact source retrieval, call tracing, architecture checks, and index status.
 ---
 
 # Goldeneye Code Agent Layer
 
 ## Choose One Route
 
-| Need                                         | Route                                                                                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Need                                         | Route                                                                                                                |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Exact qualified name and source needed       | Run `gcal get <qualified-name>` directly.                                                                            |
 | Multiple exact sources needed                | Run one `gcal get <qualified-name...>`.                                                                              |
-| Unknown symbol and source needed             | Run one `gcal search ... --limit 5` or `gcal symbol ... --limit 5`, select one result, then run `gcal get`.            |
+| Unknown symbol and source needed             | Run `gcal workflow "<query>" --source`; use `--rank <n>` only when a non-first candidate is intended.                |
 | Multiple unknown symbols                     | Run one `gcal search <query-1> --query <query-2> ... --snippets <n>`, then fetch only selected results needing more. |
 | Metadata determines whether source is needed | Run `gcal inspect` directly. Do not run `search` before `inspect`; broad inspect already searches.                   |
-| Relationship or impact evidence              | Run `gcal callers` or `gcal callees` with `--depth 1 --limit 20`.                                                     |
+| Relationship or impact evidence              | Run `gcal callers` or `gcal callees` with `--depth 1 --limit 20`.                                                    |
+| Unknown symbol plus relationship evidence    | Run `gcal workflow "<query>" --callers`, `--callees`, or both.                                                       |
+| Exact symbol plus source and relationships   | Run `gcal workflow <qualified-name> --exact --all`.                                                                  |
 | High-level project shape                     | Run `gcal arch` once.                                                                                                |
 | Project not registered                       | Run `gcal init` once from the project root.                                                                          |
 
@@ -26,14 +28,28 @@ Batching is allowed, not required. Prefer the smallest batch that directly advan
 the task. Keep batches at five items or fewer. Exceed five only when every item is
 directly relevant to the current task; never pad a batch with speculative work.
 
-A normal source lookup uses at most two GCAL invocations: one discovery invocation
-and one source invocation. Combine relevant queries or qualified names before
-calling GCAL. Relationship and architecture lookups normally use one invocation.
+A normal unknown-source lookup uses one `gcal workflow` invocation. Combine
+dependent source and relationship needs into that workflow when known upfront.
+Combine independent queries or qualified names before calling GCAL. Relationship
+and architecture lookups normally use one invocation.
 Do not run `gcal status` or `gcal --help` unless blocked by project state or syntax.
 
 Batch `gcal get <qualified-name...>` and `gcal search --snippets` already use bounded
 direct chunks. Do not repeat those results with separate unflagged `gcal get` calls
 unless the task earns more source.
+
+## Bounded Multi-Hop Workflow
+
+`gcal workflow` resolves a query, selects one candidate, then runs requested
+source, caller, and callee hops concurrently in the same invocation. It is a
+deterministic pipeline, not autonomous election. Use `--exact` for known qualified
+names, `--rank <n>` for an explicitly chosen search result, or `--all` when all
+three evidence types are already needed.
+
+Keep defaults unless the task requires more: five search candidates, depth one,
+20 rows per trace, one 8 KiB source chunk. Maximums are 20 candidates, depth four,
+and 50 rows per trace. A failed hop does not discard successful sections; GCAL
+prints partial evidence and exits nonzero. Do not repeat successful sections.
 
 ## Bounded Source Retrieval
 

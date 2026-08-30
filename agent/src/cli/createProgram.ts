@@ -7,6 +7,7 @@ import {
   formatCandidateBlockText,
   formatCandidatesText,
   formatHydratedSearchText,
+  formatMultiHopWorkflowText,
   formatSelectedMetadataText,
   formatSnippetManifestText,
   formatSourceText,
@@ -29,6 +30,10 @@ import {
   MAX_SEARCH_CANDIDATES,
   searchSymbols,
 } from "../workflows/searchSymbols.js";
+import {
+  MultiHopWorkflowFailedError,
+  runMultiHopWorkflow,
+} from "../workflows/runMultiHopWorkflow.js";
 import { writeLine, type WriteFn } from "./output.js";
 
 export interface ProgramDeps {
@@ -59,6 +64,18 @@ interface InspectCommandOptions {
 interface GetCommandOptions {
   chunk?: number;
   expectedSourceSha?: string;
+}
+
+interface WorkflowCommandOptions {
+  all?: boolean;
+  callees?: boolean;
+  callers?: boolean;
+  depth: number;
+  exact?: boolean;
+  limit: number;
+  rank: number;
+  source?: boolean;
+  traceLimit: number;
 }
 
 function numberOption(value: string): number {
@@ -103,10 +120,14 @@ function writeBoundedTrace(
 
 export function createProgram(deps: ProgramDeps): Command {
   const program = new Command();
-  program.name("gcal").description("Goldeneye Code Agent Layer").showHelpAfterError().configureOutput({
-    writeOut: deps.writeOut,
-    writeErr: deps.writeErr,
-  });
+  program
+    .name("gcal")
+    .description("Goldeneye Code Agent Layer")
+    .showHelpAfterError()
+    .configureOutput({
+      writeOut: deps.writeOut,
+      writeErr: deps.writeErr,
+    });
 
   program
     .command("search")
@@ -309,6 +330,44 @@ export function createProgram(deps: ProgramDeps): Command {
       writeBoundedTrace(deps, "callees", trace, options.limit);
     });
 
+  program
+    .command("workflow")
+    .description("run bounded dependent discovery hops in one invocation")
+    .argument("<queryOrQualifiedName>")
+    .option("--source", "include one bounded source chunk")
+    .option("--callers", "include inbound relationships")
+    .option("--callees", "include outbound relationships")
+    .option("--all", "include source, callers, and callees")
+    .option("--exact", "skip search and use the argument as an exact qualified name")
+    .option("--rank <n>", "select 1-based search result", positiveNumberOption, 1)
+    .option("--limit <n>", "candidate search limit", positiveNumberOption, 5)
+    .option("--depth <n>", "relationship depth", positiveNumberOption, 1)
+    .option("--trace-limit <n>", "maximum rows per relationship hop", positiveNumberOption, 20)
+    .action(async (queryOrQualifiedName: string, options: WorkflowCommandOptions) => {
+      const all = options.all === true;
+      const result = await runMultiHopWorkflow(deps.client, queryOrQualifiedName, {
+        exact: options.exact === true || looksLikeQualifiedName(queryOrQualifiedName),
+        rank: options.rank,
+        searchLimit: options.limit,
+        source: all || options.source === true,
+        callers: all || options.callers === true,
+        callees: all || options.callees === true,
+        depth: options.depth,
+        traceLimit: options.traceLimit,
+      });
+
+      writeLine(deps.writeOut, formatMultiHopWorkflowText(result));
+      writeWorkflowTraceTruncation(deps, "callers", result.inboundTotal, options.traceLimit);
+      writeWorkflowTraceTruncation(deps, "callees", result.outboundTotal, options.traceLimit);
+      for (const failure of result.failures) {
+        writeLine(deps.writeErr, `gcal: workflow ${failure.hop} failed: ${failure.message}`);
+      }
+
+      if (result.failures.length > 0) {
+        throw new MultiHopWorkflowFailedError(result.failures.length);
+      }
+    });
+
   program.command("arch").action(async () => {
     writeLine(deps.writeOut, formatCompactJson(await deps.client.arch()));
   });
@@ -343,10 +402,22 @@ export function createProgram(deps: ProgramDeps): Command {
   return program;
 }
 
-function validateGetChunkOptions(
-  qualifiedNames: string[],
-  options: GetCommandOptions,
+function looksLikeQualifiedName(value: string): boolean {
+  return !/\s/.test(value) && (value.includes(".") || value.includes("::"));
+}
+
+function writeWorkflowTraceTruncation(
+  deps: ProgramDeps,
+  hop: "callers" | "callees",
+  total: number | undefined,
+  limit: number,
 ): void {
+  if (total !== undefined && total > limit) {
+    writeLine(deps.writeErr, `gcal: workflow ${hop} truncated to ${limit} of ${total} rows`);
+  }
+}
+
+function validateGetChunkOptions(qualifiedNames: string[], options: GetCommandOptions): void {
   if (options.expectedSourceSha !== undefined) {
     if (options.chunk === undefined) {
       throw new Error("gcal get --expected-source-sha requires --chunk");

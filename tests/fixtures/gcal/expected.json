@@ -4,24 +4,24 @@
     "deleted_files": 0,
     "diagnostics": 0,
     "discovered_files": 3,
-    "edges": 16,
+    "edges": 18,
     "files": 3,
     "generation": 1,
     "new_files": 3,
-    "nodes": 14,
+    "nodes": 16,
     "parsed_files": 3,
     "project": "<project>",
     "reused_files": 0,
     "root_path": "<root>",
     "status": "indexed",
     "unchanged_files": 0,
-    "warnings": []
+    "warnings": ["git_history: unavailable in isolated acceptance environment"]
   },
   "status": {
-    "edges": 16,
+    "edges": 18,
     "files": 3,
     "generation": 1,
-    "nodes": 14,
+    "nodes": 16,
     "project": "<project>",
     "query_only": true,
     "root_path": "<root>",
@@ -35,8 +35,8 @@
   "callees": "<project>.src.lib.helper\t1\tsrc/lib.rs\t4",
   "architecture": {
     "project": "<project>",
-    "total_nodes": 14,
-    "total_edges": 16,
+    "total_nodes": 16,
+    "total_edges": 18,
     "languages": [
       {
         "count": 3,
@@ -45,6 +45,12 @@
     ],
     "packages": [
       {
+        "defined_symbols": 4,
+        "file_path": "src/lib.rs",
+        "name": "lib",
+        "qualified_name": "<project>.src.lib"
+      },
+      {
         "defined_symbols": 2,
         "file_path": "src/billing.rs",
         "name": "billing",
@@ -52,15 +58,21 @@
       },
       {
         "defined_symbols": 2,
-        "file_path": "src/lib.rs",
-        "name": "lib",
-        "qualified_name": "<project>.src.lib"
-      },
-      {
-        "defined_symbols": 2,
         "file_path": "src/shipping.rs",
         "name": "shipping",
         "qualified_name": "<project>.src.shipping"
+      },
+      {
+        "defined_symbols": 0,
+        "file_path": "src/lib.rs",
+        "name": "billing",
+        "qualified_name": "<project>.src.lib.billing"
+      },
+      {
+        "defined_symbols": 0,
+        "file_path": "src/lib.rs",
+        "name": "shipping",
+        "qualified_name": "<project>.src.lib.shipping"
       }
     ],
     "entry_points": [],
@@ -72,5 +84,5 @@
   "ambiguity_error": "MCP tool error: symbol is ambiguous: duplicate; candidates: <project>.src.billing.duplicate, <project>.src.shipping.duplicate",
   "suggestion_error": "MCP tool error: symbol was not found: helpe; suggestions: <project>.src.lib.helper",
   "missing_project_error": "MCP tool error: project not found or not indexed: missing-project",
-  "unselected_project_error": "GCAL_PROJECT is required for codebase-memory commands"
+  "unselected_project_error": "No GCAL project registered for <cwd>; run 'gcal init' in the project root"
 }

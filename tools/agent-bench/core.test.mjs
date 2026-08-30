@@ -213,7 +213,7 @@ test("GCAL lanes allow GCAL commands while preserving direct source-read violati
         type: "item.completed",
         item: {
           type: "command_execution",
-          command: `pwsh.exe -Command 'gcal search SecurityConfig'`,
+          command: `pwsh.exe -Command 'gcal workflow SecurityConfig --source --callers'`,
           exit_code: 0,
         },
       },

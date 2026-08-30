@@ -23,18 +23,26 @@ describe("workflow files", () => {
     expect(goldeneyeGcalSkillMd).toContain("Stop discovery once the task has enough evidence");
     expect(goldeneyeGcalSkillMd).toContain("Run one `gcal get <qualified-name...>`");
     expect(goldeneyeGcalSkillMd).toContain("--query <query-2> ... --snippets <n>");
+    expect(goldeneyeGcalSkillMd).toContain('gcal workflow "<query>" --source');
+    expect(goldeneyeGcalSkillMd).toContain("--exact --all");
+    expect(goldeneyeGcalSkillMd).toContain("runs requested");
+    expect(goldeneyeGcalSkillMd).toContain("hops concurrently");
     expect(goldeneyeGcalSkillMd).toContain("Keep batches at five items or fewer");
     expect(goldeneyeGcalSkillMd).toContain("Exceed five only when every item is");
     expect(goldeneyeGcalSkillMd).toContain("directly relevant to the current task");
     expect(goldeneyeGcalSkillMd).toContain(
-      "A normal source lookup uses at most two GCAL invocations",
+      "A normal unknown-source lookup uses one `gcal workflow` invocation",
     );
-    expect(goldeneyeGcalSkillMd).toContain("Do not run `gcal status` or `gcal --help` unless blocked");
+    expect(goldeneyeGcalSkillMd).toContain(
+      "Do not run `gcal status` or `gcal --help` unless blocked",
+    );
     expect(goldeneyeGcalSkillMd).toContain("Run `gcal init` once from the project root");
     expect(goldeneyeGcalSkillMd).toContain("$HOME/.gcal/projects.json");
     expect(goldeneyeGcalSkillMd).toContain("most specific registered ancestor");
     expect(goldeneyeGcalSkillMd).toContain("`GCAL_PROJECT` is an optional explicit override");
-    expect(goldeneyeGcalSkillMd).toContain("Set `GCAL_HOME` to an isolated absolute state directory");
+    expect(goldeneyeGcalSkillMd).toContain(
+      "Set `GCAL_HOME` to an isolated absolute state directory",
+    );
     expect(goldeneyeGcalSkillMd).toContain("`gcal index` only indexes");
     expect(goldeneyeGcalSkillMd).toContain("on-demand local GCAL daemon");
     expect(goldeneyeGcalSkillMd).toContain("one backend");

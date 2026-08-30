@@ -122,6 +122,17 @@ try {
     projectEnvironment,
     project,
   );
+  const workflow = runGcal(
+    "workflow",
+    ["workflow", qualifiedHelper, "--exact", "--all"],
+    projectEnvironment,
+  );
+  assert.equal(workflow.status, 0, commandFailure("gcal workflow", workflow));
+  assert.match(workflow.stdout, /^# selected\n/m);
+  assert.match(workflow.stdout, /^# source\n/m);
+  assert.match(workflow.stdout, /^# inbound\n/m);
+  assert.match(workflow.stdout, /^# outbound\n/m);
+  assert.ok(workflow.stdout.includes(expected.source.trimEnd()));
   expectJson(
     "arch",
     ["arch"],
@@ -154,13 +165,17 @@ try {
 
   const unselected = runGcal("unselected project", ["status"], isolatedEnvironment);
   assert.equal(unselected.status, 2, commandFailure("gcal status without project", unselected));
-  assert.equal(unselected.stderr.trimEnd(), expected.unselected_project_error);
+  assert.equal(
+    unselected.stderr.trimEnd().split(workspace).join("<cwd>"),
+    expected.unselected_project_error,
+  );
 
   const help = runGcal("help", ["--help"], isolatedEnvironment);
   assert.equal(help.status, 0, commandFailure("gcal --help", help));
   assert.doesNotMatch(help.stdout, /\belect\b/);
   assert.match(help.stdout, /\bstatus\b/);
   assert.match(help.stdout, /\barch\b/);
+  assert.match(help.stdout, /\bworkflow\b/);
 
   for (const item of results) {
     console.log(`PASS ${item.name} exit=${item.exitCode} bytes=${item.bytes}`);
@@ -258,7 +273,12 @@ function normalizeValue(value, project, canonicalRoot) {
     return normalizeText(value, project).split(canonicalRoot).join("<root>");
   }
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeValue(item, project, canonicalRoot));
+    return value.map((item) => {
+      if (typeof item === "string" && item.startsWith("git_history:")) {
+        return "git_history: unavailable in isolated acceptance environment";
+      }
+      return normalizeValue(item, project, canonicalRoot);
+    });
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(

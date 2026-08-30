@@ -1,5 +1,6 @@
 import type {
   HydratedSymbolCandidate,
+  MultiHopWorkflowResult,
   SelectedSymbol,
   SnippetManifest,
   SymbolCandidate,
@@ -92,6 +93,22 @@ export function formatTraceRowsText(trace: TraceEdge[]): string {
 
 export function formatSourceText(selected: SelectedSymbol): string {
   return formatBoundedSourceText(selected);
+}
+
+export const WORKFLOW_MAX_SOURCE_BYTES = 12 * 1024;
+
+export function formatMultiHopWorkflowText(result: MultiHopWorkflowResult): string {
+  const sections = [
+    result.candidates.length > 0 ? formatCandidateBlockText(result.candidates) : "",
+    ["# selected", `qualified_name=${result.selectedQualifiedName}`].join("\n"),
+    result.source === undefined
+      ? ""
+      : ["# source", formatBoundedSourceText(result.source, WORKFLOW_MAX_SOURCE_BYTES)].join("\n"),
+    result.inbound === undefined ? "" : formatTraceSectionText("inbound", result.inbound),
+    result.outbound === undefined ? "" : formatTraceSectionText("outbound", result.outbound),
+  ].filter((section) => section.length > 0);
+
+  return sections.join("\n\n");
 }
 
 export function formatSnippetManifestText(manifest: SnippetManifest): string {

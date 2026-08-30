@@ -105,3 +105,32 @@ export interface IndexedProject {
   name: string;
   rootPath: string;
 }
+
+export type WorkflowHop = "source" | "callers" | "callees";
+
+export interface MultiHopWorkflowOptions {
+  exact: boolean;
+  rank: number;
+  searchLimit: number;
+  source: boolean;
+  callers: boolean;
+  callees: boolean;
+  depth: number;
+  traceLimit: number;
+}
+
+export interface WorkflowFailure {
+  hop: WorkflowHop;
+  message: string;
+}
+
+export interface MultiHopWorkflowResult {
+  candidates: SymbolCandidate[];
+  selectedQualifiedName: string;
+  source?: SelectedSymbol;
+  inbound?: TraceEdge[];
+  inboundTotal?: number;
+  outbound?: TraceEdge[];
+  outboundTotal?: number;
+  failures: WorkflowFailure[];
+}

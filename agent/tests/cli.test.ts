@@ -195,9 +195,7 @@ describe("GCAL CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(createClient).not.toHaveBeenCalled();
-    expect(errors.join("")).toBe(
-      "GCAL_MCP_COMMAND is required when GCAL_BACKEND=benchmark\n",
-    );
+    expect(errors.join("")).toBe("GCAL_MCP_COMMAND is required when GCAL_BACKEND=benchmark\n");
   });
 
   it("awaits an optional client close after command execution", async () => {
@@ -468,11 +466,9 @@ describe("GCAL CLI", () => {
     const get = vi
       .fn()
       .mockRejectedValue(
-        new GcalBackendError(
-          "MCP tool error: snippet exceeds bounds",
-          "SnippetTooLarge",
-          { actual_lines: 900 },
-        ),
+        new GcalBackendError("MCP tool error: snippet exceeds bounds", "SnippetTooLarge", {
+          actual_lines: 900,
+        }),
       );
     const getSnippetChunk = vi.fn();
     const getSnippetManifest = vi.fn().mockResolvedValue({
@@ -543,8 +539,7 @@ describe("GCAL CLI", () => {
   it.each([
     {
       args: ["--chunk", "1", "--expected-source-sha", "A".repeat(64)],
-      message:
-        "gcal get --expected-source-sha must be exactly 64 lowercase hexadecimal characters",
+      message: "gcal get --expected-source-sha must be exactly 64 lowercase hexadecimal characters",
     },
     {
       args: ["--expected-source-sha", "a".repeat(64)],
@@ -576,11 +571,9 @@ describe("GCAL CLI", () => {
     const getSnippetChunk = vi
       .fn()
       .mockRejectedValue(
-        new GcalBackendError(
-          "MCP tool error: snippet source changed",
-          "StaleSnippetSource",
-          { expected_source_sha256: sha },
-        ),
+        new GcalBackendError("MCP tool error: snippet source changed", "StaleSnippetSource", {
+          expected_source_sha256: sha,
+        }),
       );
     const writes: string[] = [];
     const errors: string[] = [];
@@ -981,6 +974,53 @@ describe("GCAL CLI", () => {
     );
   });
 
+  it("runs search, source, caller, and callee workflow hops in one invocation", async () => {
+    const selected = normalizeSelectedSymbol(methodSnippetResponse);
+    const candidates = normalizeSearchResponse(searchGraphResponse);
+    const search = vi.fn().mockResolvedValue(candidates);
+    const get = vi.fn().mockResolvedValue(selected);
+    const callers = vi.fn().mockResolvedValue(inboundTrace);
+    const callees = vi.fn().mockResolvedValue(outboundTrace);
+    const { program, writes } = createTestProgram(fakeClient({ search, get, callers, callees }));
+
+    await program.parseAsync(["node", "gcal", "workflow", "BookingService", "--all"]);
+
+    expect(search).toHaveBeenCalledWith("BookingService", { limit: 5 });
+    expect(get).toHaveBeenCalledWith(candidates[0].qualifiedName);
+    expect(callers).toHaveBeenCalledWith(candidates[0].qualifiedName, { depth: 1 });
+    expect(callees).toHaveBeenCalledWith(candidates[0].qualifiedName, { depth: 1 });
+    expect(writes.join("")).toContain("# candidates");
+    expect(writes.join("")).toContain("# source");
+    expect(writes.join("")).toContain("# inbound");
+    expect(writes.join("")).toContain("# outbound");
+  });
+
+  it("returns partial workflow evidence with exit status 1 when one hop fails", async () => {
+    const writes: string[] = [];
+    const errors: string[] = [];
+    const callers = vi.fn().mockRejectedValue(new Error("caller graph unavailable"));
+    const callees = vi.fn().mockResolvedValue(outboundTrace);
+
+    const exitCode = await runCli({
+      argv: [
+        "node",
+        "gcal",
+        "workflow",
+        "com.example.booking.BookingService.cancelBooking",
+        "--callers",
+        "--callees",
+      ],
+      env: { GCAL_PROJECT: "example-project" },
+      createClient: () => fakeClient({ callers, callees }),
+      writeOut: (text) => writes.push(text),
+      writeErr: (text) => errors.push(text),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(writes.join("")).toContain("# outbound");
+    expect(errors.join("")).toBe("gcal: workflow callers failed: caller graph unavailable\n");
+  });
+
   it("registers GCAL commands including init", () => {
     const { program } = createTestProgram(fakeClient());
 
@@ -995,6 +1035,7 @@ describe("GCAL CLI", () => {
       "search",
       "status",
       "symbol",
+      "workflow",
     ]);
   });
 });

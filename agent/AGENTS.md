@@ -12,6 +12,7 @@ Phase 1 commands are:
 - `gcal get`
 - `gcal callers`
 - `gcal callees`
+- `gcal workflow`
 - `gcal arch`
 - `gcal status`
 - `gcal index`

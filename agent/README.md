@@ -125,6 +125,10 @@ gcal get "com.example.LargeService.run" --chunk 2 --expected-source-sha "<64-low
 gcal callers "com.example.BookingService.cancelBooking" --depth 1 --limit 20
 gcal callees "com.example.BookingService.cancelBooking" --depth 1 --limit 20
 
+gcal workflow "BookingService cancel" --source
+gcal workflow "BookingService cancel" --callers --callees
+gcal workflow "com.example.BookingService.cancelBooking" --exact --all
+
 gcal arch
 gcal status
 gcal index .
@@ -159,13 +163,22 @@ status `1`.
 
 The commands intentionally produce compact agent-facing output. Candidate output from `search` and `symbol` defaults to 5 candidates. Relationship output from `callers` and `callees` defaults to depth 1 and 20 rows; use `--depth` and `--limit` to override those bounds. Each relationship row contains the related qualified name, hop, file, and line as four tab-separated fields.
 
+`workflow` performs bounded dependent discovery in one CLI invocation. A broad
+argument first searches up to five candidates and selects rank one by default;
+`--rank <n>` selects another displayed candidate. `--exact` skips search. Requested
+`--source`, `--callers`, and `--callees` hops run concurrently after selection;
+`--all` requests all three. Source uses one 8 KiB chunk, relationship output defaults
+to depth one and 20 rows per hop, and hard bounds prevent fan-out beyond 20 search
+candidates, depth four, or 50 rows per trace. Successful sections survive a failed
+hop, but partial workflows exit with status `1`.
+
 `search` treats input as literal-safe by default instead of exposing backend FTS grammar. Pipe-separated alternatives are searched independently, merged in stable branch order, deduplicated by qualified name, and bounded by one global limit. A leading Java annotation marker such as `@SpringBootTest` is normalized to its literal name. A leading wildcard such as `*Test` routes to an escaped suffix symbol match; use `symbol` for other regex searches.
 
 `arch` projects high-signal architecture sections to bounded JSON and omits the full file tree. Use `inspect` when metadata determines whether source is necessary. When an exact-source task already requires the source body, skip `inspect` and call `get` directly.
 
 ## Phase 1 Boundary
 
-GCAL does not implement `gcal elect` yet. Its deterministic primitives cover project initialization, search, symbol lookup, inspect, exact source retrieval, call tracing, architecture, status, and indexing.
+GCAL does not implement `gcal elect` yet. Its deterministic primitives cover project initialization, search, symbol lookup, inspect, bounded multi-hop workflows, exact source retrieval, call tracing, architecture, status, and indexing.
 
 ## Workflow Kit
 
