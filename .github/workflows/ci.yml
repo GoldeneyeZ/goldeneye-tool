@@ -10,6 +10,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Build embedded UI
+        working-directory: ui
+        run: npm run build
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: rustfmt, clippy

@@ -12,7 +12,7 @@ not embedded into Goldeneye binaries.
 - `code_vectors.bin` SHA-256:
   `c76bba4c5032323ded6202053af5afdbbac12f6d920c691b3b3b4cd708f99e83`
 - `code_tokens.txt` SHA-256:
-  `b2d1cc1524bc934c157d9b64afa1d45cf0739c5d9db7e8806ddce7ed48232819`
+  `c928f5e2f9dd85f2294a50a05dd9f2f8bc95192727579aa16b062ff8ef301d25`
 
 The loader rejects either asset if its checksum, shape, byte length, token
 count, UTF-8 encoding, or non-empty token uniqueness differs from this audited

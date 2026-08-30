@@ -55,11 +55,15 @@ fn workflow_jobs(workflow: &str) -> (&str, &str) {
 fn default_matrix_remains_core_only_and_cache_free() {
     let workflow = tracked_text(".github/workflows/ci.yml");
     let (default_job, full_job) = workflow_jobs(&workflow);
+    let bootstrap_manifest = tracked_text("crates/delivery/goldeneye-bootstrap/Cargo.toml");
 
     require(
         default_job,
         "matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]",
     );
+    for command in ["npm ci", "npm run build"] {
+        require(default_job, command);
+    }
     for command in [
         "cargo fmt --check",
         "cargo clippy --workspace --all-targets -- -D warnings",
@@ -78,6 +82,16 @@ fn default_matrix_remains_core_only_and_cache_free() {
             "default matrix must remain core-only and cache-free: {forbidden}"
         );
     }
+    require(
+        &bootstrap_manifest,
+        "full-grammar-pack = [\"goldeneye-syntax/full-grammar-pack\"]",
+    );
+    assert!(
+        !bootstrap_manifest.contains(
+            "goldeneye-syntax = { path = \"../../adapters/goldeneye-syntax\", features = [\"full-grammar-pack\"] }"
+        ),
+        "bootstrap dependency must not force the opt-in full grammar pack"
+    );
     require(full_job, "needs: rust");
 }
 

@@ -263,7 +263,11 @@ if (!oneShot.enabled && !flags.has("--skip-build") && runEngines.some((engine) =
   if (!process.env.GOLDENEYE_GRAMMAR_PACK_DIR && existsSync(fullGrammarPack)) {
     process.env.GOLDENEYE_GRAMMAR_PACK_DIR = fullGrammarPack;
   }
-  runChecked("cargo", ["build", "--release", "-p", "goldeneye"], workspace);
+  const buildArguments = ["build", "--release", "-p", "goldeneye"];
+  if (process.env.GOLDENEYE_GRAMMAR_PACK_DIR) {
+    buildArguments.push("--features", "full-grammar-pack");
+  }
+  runChecked("cargo", buildArguments, workspace);
 }
 
 if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("--smoke")) {
