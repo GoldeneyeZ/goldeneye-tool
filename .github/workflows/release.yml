@@ -30,7 +30,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       publish: ${{ steps.release.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: release
         name: Resolve and validate release version
         shell: bash
@@ -97,8 +97,8 @@ jobs:
             extension: zip
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -180,7 +180,7 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download native archives
         uses: actions/download-artifact@v4
         with:

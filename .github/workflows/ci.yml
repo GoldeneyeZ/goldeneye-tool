@@ -10,8 +10,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -35,9 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out Goldeneye
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Check out the audited upstream
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: DeusData/codebase-memory-mcp
           ref: 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c
