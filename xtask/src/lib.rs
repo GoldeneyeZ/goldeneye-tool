@@ -1063,11 +1063,12 @@ mod tests {
     #[test]
     fn failed_publish_cleanup_uses_in_memory_ownership_after_marker_removal() {
         let parent = tempfile::tempdir().unwrap();
-        let temporary = parent.path().join(".pack.goldeneye-tmp-owned");
+        let parent_root = parent.path().canonicalize().unwrap();
+        let temporary = parent_root.join(".pack.goldeneye-tmp-owned");
         fs::create_dir(&temporary).unwrap();
         fs::write(temporary.join("partially-built"), b"owned").unwrap();
 
-        remove_just_built_temp_path(&temporary, parent.path(), "pack").unwrap();
+        remove_just_built_temp_path(&temporary, &parent_root, "pack").unwrap();
 
         assert!(!temporary.exists());
     }
