@@ -61,6 +61,7 @@ fn default_matrix_remains_core_only_and_cache_free() {
         default_job,
         "matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]",
     );
+    require(default_job, "fail-fast: false");
     for command in ["npm ci", "npm run build"] {
         require(default_job, command);
     }

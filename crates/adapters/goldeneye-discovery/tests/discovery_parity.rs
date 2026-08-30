@@ -110,7 +110,7 @@ fn discovery_preserves_unicode_spaces_and_empty_files() {
     assert_eq!(report.files[0].byte_len, 0);
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn discovery_preserves_non_utf8_paths_without_lossy_conversion() {
     use std::ffi::OsString;
