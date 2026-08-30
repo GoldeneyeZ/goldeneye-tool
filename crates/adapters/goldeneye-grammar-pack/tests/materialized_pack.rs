@@ -23,8 +23,9 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let temporary = tempfile::tempdir().unwrap();
-        let lock_path = temporary.path().join("full-pack.toml");
-        let root = temporary.path().join("materialized");
+        let temporary_root = fs::canonicalize(temporary.path()).unwrap();
+        let lock_path = temporary_root.join("full-pack.toml");
+        let root = temporary_root.join("materialized");
         let grammar_root = root.join("alpha");
         fs::create_dir_all(&grammar_root).unwrap();
 
@@ -72,8 +73,9 @@ fn exact_state_layout_and_hash_match_is_verified() {
 #[test]
 fn native_support_assets_are_domain_separated_verified_and_counted() {
     let temporary = tempfile::tempdir().unwrap();
-    let lock_path = temporary.path().join("full-pack.toml");
-    let root = temporary.path().join("materialized");
+    let temporary_root = fs::canonicalize(temporary.path()).unwrap();
+    let lock_path = temporary_root.join("full-pack.toml");
+    let root = temporary_root.join("materialized");
     fs::create_dir_all(root.join("alpha")).unwrap();
     fs::create_dir_all(root.join("common/tree_sitter")).unwrap();
 
