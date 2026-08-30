@@ -55,7 +55,9 @@ fn syntax_reexport_is_the_pack_crate_type() {
 #[test]
 fn load_with_hash_hashes_the_exact_bytes_it_parses() {
     let temporary = tempfile::tempdir().unwrap();
-    let path = temporary.path().join("lock.toml");
+    let path = std::fs::canonicalize(temporary.path())
+        .unwrap()
+        .join("lock.toml");
     std::fs::write(&path, MINIMAL_LOCK).unwrap();
 
     let (lock, parsed_hash) = GrammarPackLock::load_with_hash(&path).unwrap();

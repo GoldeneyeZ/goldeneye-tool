@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use goldeneye_grammar_pack::{GrammarPackLock, LanguageBindingStatus, lock_file_hash};
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 use xtask::{
     GenerationOutcome, generate_notices, generate_provider, render_notices, render_provider,
 };
@@ -18,6 +18,10 @@ fn workspace_root() -> PathBuf {
 
 fn lock_path() -> PathBuf {
     workspace_root().join("grammars/full-pack.toml")
+}
+
+fn temporary_root(temporary: &TempDir) -> PathBuf {
+    fs::canonicalize(temporary.path()).unwrap()
 }
 
 fn language_line<'a>(source: &'a str, language_id: &str) -> &'a str {
@@ -269,7 +273,7 @@ fn provider_registry_is_exact_deterministic_and_order_independent() {
     }
 
     let temporary = tempdir().unwrap();
-    let reordered_path = temporary.path().join("reordered.toml");
+    let reordered_path = temporary_root(&temporary).join("reordered.toml");
     let original = fs::read_to_string(&path).unwrap();
     fs::write(&reordered_path, reverse_lock_tables(&original)).unwrap();
     let reordered = render_provider(&reordered_path).unwrap();
@@ -296,7 +300,7 @@ fn provider_renderer_escapes_lock_controlled_rust_strings() {
         r#"reason = "quote \" slash \\ newline \n tab \t""#,
     );
     let temporary = tempdir().unwrap();
-    let path = temporary.path().join("escaped.toml");
+    let path = temporary_root(&temporary).join("escaped.toml");
     fs::write(&path, escaped).unwrap();
 
     let generated = render_provider(&path).unwrap();
@@ -313,10 +317,11 @@ fn provider_renderer_escapes_lock_controlled_rust_strings() {
 #[test]
 fn generated_outputs_support_non_mutating_check_mode() {
     let temporary = tempdir().unwrap();
-    let provider = temporary.path().join("generated.rs");
-    let notices = temporary.path().join("notices.md");
-    let missing_provider = temporary.path().join("missing-generated.rs");
-    let missing_notices = temporary.path().join("missing-notices.md");
+    let root = temporary_root(&temporary);
+    let provider = root.join("generated.rs");
+    let notices = root.join("notices.md");
+    let missing_provider = root.join("missing-generated.rs");
+    let missing_notices = root.join("missing-notices.md");
 
     assert!(
         generate_provider(lock_path(), &missing_provider, true)
@@ -501,7 +506,7 @@ fn license_ledger_has_exact_sorted_provenance_rows() {
     assert!(first.contains("<code>objectscript_udl</code>"));
 
     let temporary = tempdir().unwrap();
-    let reordered_path = temporary.path().join("reordered.toml");
+    let reordered_path = temporary_root(&temporary).join("reordered.toml");
     let original = fs::read_to_string(&path).unwrap();
     fs::write(&reordered_path, reverse_lock_tables(&original)).unwrap();
     let reordered = render_notices(&reordered_path).unwrap();
@@ -577,7 +582,7 @@ fn notice_renderer_escapes_markdown_controlled_repository_and_revision() {
         r#"commit = "revision | <tag> & \"quote\"\nline\rreturn""#,
     );
     let temporary = tempdir().unwrap();
-    let path = temporary.path().join("escaped-notices.toml");
+    let path = temporary_root(&temporary).join("escaped-notices.toml");
     fs::write(&path, source).unwrap();
 
     let notices = render_notices(&path).unwrap();
@@ -613,8 +618,9 @@ fn notice_renderer_escapes_markdown_controlled_repository_and_revision() {
 #[test]
 fn cli_generates_and_checks_provider_and_notices() {
     let temporary = tempdir().unwrap();
-    let provider = temporary.path().join("generated.rs");
-    let notices = temporary.path().join("notices.md");
+    let root = temporary_root(&temporary);
+    let provider = root.join("generated.rs");
+    let notices = root.join("notices.md");
     let binary = env!("CARGO_BIN_EXE_xtask");
 
     for (command, output) in [
