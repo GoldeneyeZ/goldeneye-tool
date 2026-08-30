@@ -19,7 +19,7 @@ The benchmark qualifies when a clean vanilla calibration run:
 - changes only task-appropriate Spring Framework files.
 
 After qualification, freeze every input and run three fresh vanilla repetitions
-and three fresh Goldeneye+ACK repetitions in one deterministic randomized serial
+and three fresh Goldeneye+GCAL repetitions in one deterministic randomized serial
 matrix. The final vanilla median must satisfy the same token gates; a qualifying
 pilot alone is not completion evidence.
 
@@ -58,7 +58,7 @@ synthetic prompt padding and bulk search-and-replace work.
 - Reasoning effort: `high`
 
 Benchmark-only harness commits may follow the initial candidate commit.
-Executable Goldeneye and ACK fingerprints must be frozen separately from
+Executable Goldeneye and GCAL fingerprints must be frozen separately from
 benchmark task, grader, and documentation fingerprints.
 
 ## Production Task
@@ -168,7 +168,7 @@ after redaction.
 
 Calibration uses a predeclared ladder. Each level has a versioned task and
 grader. A level is selected only by the numeric gates below, never by
-ACK-versus-vanilla outcome.
+GCAL-versus-vanilla outcome.
 
 ### Level 1: Binding pipeline
 
@@ -248,9 +248,9 @@ This benchmark requires:
 Harness tests must cover every new policy and preserve previous 3+1 report
 behavior.
 
-## ACK Snapshot
+## GCAL Snapshot
 
-Create one immutable warm ACK snapshot over the six allowed Spring modules.
+Create one immutable warm GCAL snapshot over the six allowed Spring modules.
 
 Snapshot gates:
 
@@ -259,10 +259,10 @@ Snapshot gates:
 - canonical project root equals stable worktree path;
 - no WAL, SHM, lock, or writer process at copy time;
 - sorted manifest and SHA-256;
-- copy-only restore before every ACK run;
+- copy-only restore before every GCAL run;
 - identical manifest before and after all runs.
 
-The vanilla lane receives no ACK or Goldeneye tool.
+The vanilla lane receives no GCAL or Goldeneye tool.
 
 ## Clean-Agent Protocol
 
@@ -315,7 +315,7 @@ After qualification:
 
 1. freeze candidate, task, grader, config, response schema, and snapshot hashes;
 2. dry-run a six-run randomized matrix;
-3. execute three vanilla and three warm ACK runs serially;
+3. execute three vanilla and three warm GCAL runs serially;
 4. abort on any provenance, snapshot, source, or contamination gate failure;
 5. independently audit all six raw artifact directories;
 6. retain invalid runs without silently replacing them.
@@ -327,7 +327,7 @@ Per run:
 - correctness and exit status;
 - wall, grader, completion, and verified end-to-end time;
 - input, cached input, uncached input, output, reasoning, and total tokens;
-- tool, command, ACK, backend, and failed-call counts;
+- tool, command, GCAL, backend, and failed-call counts;
 - discovery ordering and payload size;
 - patch and dirty-path statistics;
 - every frozen hash and pre-run verification result.
@@ -363,7 +363,7 @@ Benchmark is complete only when:
 - candidate and Spring source remain clean at frozen commits;
 - snapshot hash remains unchanged;
 - no benchmark process or temporary scored worktree remains;
-- final report explicitly distinguishes provider caching from ACK snapshot
+- final report explicitly distinguishes provider caching from GCAL snapshot
   caching;
 - raw reports and the corrected user-facing analysis are retained.
 

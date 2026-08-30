@@ -26,4 +26,4 @@ The files above are starting points only. Inspect any additional files needed to
   passed all 4 cases. `node --test tools/agent-bench/*.test.mjs` passed 44/44.
   `git diff --cached --check` passed before the task commit. Fixture APIs and
   web test infrastructure were checked against the pinned Spring target with
-  ACK; its worktree remained clean.
+  GCAL; its worktree remained clean.

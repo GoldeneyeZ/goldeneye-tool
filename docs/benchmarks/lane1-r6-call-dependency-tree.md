@@ -2,8 +2,8 @@
 
 Source:
 
-- Run: `lane1-r6-direct-ack-c-fc6d181-20260727/L0`
-- Trace: `smoke/2026-07-27T15-55-19-569Z/goldeneye-ack/smoke-spring-sensitive-value-redaction-level0-goldeneye-ack/codex.jsonl`
+- Run: `lane1-r6-direct-gcal-c-fc6d181-20260727/L0`
+- Trace: `smoke/2026-07-27T15-55-19-569Z/goldeneye-code-agent-layer/smoke-spring-sensitive-value-redaction-level0-goldeneye-code-agent-layer/codex.jsonl`
 - Result: `PASS`; 50 command executions, 4 patch operations, 5 agent messages
 
 This is a dependency DAG, not only a chronological sequence. It shows whether a call consumed data or state produced by an earlier call.
@@ -22,7 +22,7 @@ This is a dependency DAG, not only a chronological sequence. It shows whether a 
 ```mermaid
 flowchart TD
   subgraph S0["Setup and validation flow"]
-    E02["E02 ack status"]
+    E02["E02 gcal status"]
     E03["E03 search DataBinder<br/>limit 20"]
     E04["E04 get DataBinder.applyPropertyValues"]
     E05["E05 search binding/error classes"]
@@ -166,8 +166,8 @@ flowchart TD
 
 | Consumer class | Calls | Prior-response use |
 |---|---:|---|
-| `ack get` / `ack inspect` | 23 | 22 exact QN matches; E54 semantic |
-| `ack search` | 21 | 15 derived/refined/retry searches; 6 independent roots |
+| `gcal get` / `gcal inspect` | 23 | 22 exact QN matches; E54 semantic |
+| `gcal search` | 21 | 15 derived/refined/retry searches; 6 independent roots |
 | Patch operations | 4 | All depend on retrieved source, diff, or test failure |
 | Verification/diagnostics | 5 | Patches → tests; failed test → XML/search repair; passing test → final diff |
 

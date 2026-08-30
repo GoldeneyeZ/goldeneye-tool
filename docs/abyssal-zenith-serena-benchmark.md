@@ -61,7 +61,7 @@ The raw JSON says Goldeneye cold succeeded 2/3. One additional cold run actually
 
 There was one genuine failure: `abyssal-public-endpoints-warm-goldeneye-3` made no patch and failed the grader after 36.9 seconds. Failed runs are excluded from timing medians so a fast failure cannot improve a lane's performance score.
 
-Goldeneye's successful runs still had a median of two MCP failures, while Serena had none. These were recoverable API-usage errors, but they are a concrete ACK/tool-guidance optimization opportunity.
+Goldeneye's successful runs still had a median of two MCP failures, while Serena had none. These were recoverable API-usage errors, but they are a concrete GCAL/tool-guidance optimization opportunity.
 
 ## Java indexing prerequisite discovered
 
@@ -109,7 +109,7 @@ The runner uses detached temporary worktrees and removed all benchmark worktrees
 
 ## Next optimization targets
 
-1. Make ACK/tool instructions prevent invalid `index_repository` argument sequences; recovered failures still cost turns and tokens.
+1. Make GCAL/tool instructions prevent invalid `index_repository` argument sequences; recovered failures still cost turns and tokens.
 2. Diagnose the one run where the Goldeneye MCP surface was not used and add a deterministic startup/readiness check before agent launch.
 3. Improve Goldeneye result ranking and response compactness. Even warm Goldeneye used about 1.92x vanilla's tokens.
 4. Add at least two more Java/Spring tasks and increase repetitions before treating the measured gaps as general rather than task-specific.

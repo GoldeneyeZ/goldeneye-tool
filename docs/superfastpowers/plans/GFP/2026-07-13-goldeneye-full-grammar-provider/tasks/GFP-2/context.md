@@ -40,7 +40,7 @@ Python exporter tests and real-lock `--check`; provider and notice generator `--
 
 The lock remains `schema_version = 1` by controller decision. This is an atomic pre-release v1 evolution: the exporter, Rust reader, generated outputs, and fixtures move together, with no compatibility promise for an older v1 reader that predates `exported_symbol`. `load_with_hash` hashes the exact byte buffer it parses.
 
-ACK reported a ready index but did not yet contain the new uncommitted generator symbols, so weak graph results were followed by Context Mode exploration as permitted by the project routing rules.
+GCAL reported a ready index but did not yet contain the new uncommitted generator symbols, so weak graph results were followed by Context Mode exploration as permitted by the project routing rules.
 
 One pre-existing follow-up remains outside GFP-2: the two direct `verify_source` symlink tests in `goldeneye-syntax` can return early when link-fixture creation fails. Mandatory materialized-pack symlink coverage passes, but direct-API coverage should be moved into mandatory pack tests in a separate cleanup.
 

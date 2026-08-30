@@ -34,7 +34,7 @@ passed the dirty-path policy.
 
 ## Final paired result
 
-| Metric | Vanilla | Goldeneye/ACK | ACK delta |
+| Metric | Vanilla | Goldeneye/GCAL | GCAL delta |
 |---|---:|---:|---:|
 | Grader | PASS | PASS | — |
 | Input tokens | 993,518 | 984,009 | -9,509 (-0.96%) |
@@ -47,7 +47,7 @@ passed the dirty-path policy.
 | Wall time | 5.29 min | 7.16 min | +35.50% |
 | Protocol violations | 0 | 0 | 0 |
 
-ACK reduced final total tokens by 0.98%, but required 2.2× the tool calls and
+GCAL reduced final total tokens by 0.98%, but required 2.2× the tool calls and
 35.50% more wall time. At `n = 1`, this is directional evidence only.
 
 ## Workload ladder
@@ -66,15 +66,15 @@ grader.
 Level 0 nested/indexed produced the best uncached result inside the total-input
 band: 87,415 uncached at 1,158,007 total input.
 
-## Cross-level ACK comparison
+## Cross-level GCAL comparison
 
-| Workload | Vanilla input | ACK input | ACK input delta | Vanilla wall | ACK wall |
+| Workload | Vanilla input | GCAL input | GCAL input delta | Vanilla wall | GCAL wall |
 |---|---:|---:|---:|---:|---:|
 | Level 2 | 4,840,885 | 5,367,988 | +10.89% | 16.11 min | 28.57 min |
 | Level 1 | 4,475,886 | 3,850,540 | -13.97% | 18.31 min | 20.34 min |
 | Level 0 final | 993,518 | 984,009 | -0.96% | 5.29 min | 7.16 min |
 
-ACK was slower in every observed pair. Its input-token effect changed sign
+GCAL was slower in every observed pair. Its input-token effect changed sign
 across workloads, from a 10.89% regression to a 13.97% reduction.
 
 ## Interpretation
@@ -82,12 +82,12 @@ across workloads, from a 10.89% regression to a 13.97% reduction.
 Provider caching dominated input:
 
 - Level 2 vanilla: 97.40% cached.
-- Level 2 ACK: 97.66% cached.
+- Level 2 GCAL: 97.66% cached.
 - Final Level 0 vanilla: 93.69% cached.
-- Final Level 0 ACK: 95.06% cached.
+- Final Level 0 GCAL: 95.06% cached.
 
-Level 2 ACK and vanilla consumed nearly identical uncached input (125,876
-versus 125,621). ACK's additional 527,103 input tokens came almost entirely
+Level 2 GCAL and vanilla consumed nearly identical uncached input (125,876
+versus 125,621). GCAL's additional 527,103 input tokens came almost entirely
 from repeated cached prefixes. It made 79 tool calls versus vanilla's 36.
 
 The dominant cost driver was round-trip count and repeated growing context,
@@ -98,7 +98,7 @@ final Level 0 reduced cumulative input by 79.48%, while uncached input fell by
 ## Limitations
 
 - One run per lane; no variance estimate.
-- ACK lane was the mandatory unscored smoke, paired with vanilla calibration.
+- GCAL lane was the mandatory unscored smoke, paired with vanilla calibration.
 - Provider cache behavior affects raw-token interpretation.
 - Raw `target/agent-bench/**` artifacts remain local and are intentionally not
   committed.
@@ -107,7 +107,7 @@ final Level 0 reduced cumulative input by 79.48%, while uncached input fell by
 ## Verification
 
 - Harness tests: 46 passed, 0 failed.
-- Final ACK grader: PASS.
+- Final GCAL grader: PASS.
 - Final vanilla grader: PASS.
 - Candidate repository: clean after benchmark.
 - Spring repository: clean at pinned commit.

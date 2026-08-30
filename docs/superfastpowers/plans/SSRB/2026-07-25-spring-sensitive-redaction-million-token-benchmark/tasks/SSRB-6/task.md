@@ -25,7 +25,7 @@ Expected: all tests PASS; whitespace check empty.
 Run:
 
 ```powershell
-cargo test -p goldeneye-ack
+cargo test -p goldeneye-code-agent-layer
 cargo build --release -p goldeneye
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
@@ -55,7 +55,7 @@ The preparation/provenance artifacts must include:
 {
   "candidate_commit": "value produced by git rev-parse HEAD",
   "candidate_executable_sha256": "value produced by provenance.mjs",
-  "ack_bundle_sha256": "value produced by provenance.mjs",
+  "gcal_bundle_sha256": "value produced by provenance.mjs",
   "task_sha256": "value produced by provenance.mjs",
   "grader_sha256": "value produced by provenance.mjs over grader and fixture manifest",
   "config_sha256": "value produced by provenance.mjs",

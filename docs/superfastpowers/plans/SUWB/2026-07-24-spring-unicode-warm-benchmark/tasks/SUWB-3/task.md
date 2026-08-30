@@ -162,11 +162,11 @@ Create configuration containing:
   },
   "engines": [
     {
-      "id": "goldeneye-ack",
-      "kind": "ack",
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "cache_modes": ["warm"]

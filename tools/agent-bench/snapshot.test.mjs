@@ -12,8 +12,8 @@ async function makeFixture(t) {
   const allowedSnapshotRoot = path.join(root, "allowed-snapshots");
   const liveCache = path.join(allowedCacheRoot, "live-cache");
   const snapshotRoot = path.join(allowedSnapshotRoot, "ready-snapshot");
-  await mkdir(path.join(liveCache, "ack-state"), { recursive: true });
-  await writeFile(path.join(liveCache, "ack-state", "goldeneye.db"), "database-bytes");
+  await mkdir(path.join(liveCache, "gcal-state"), { recursive: true });
+  await writeFile(path.join(liveCache, "gcal-state", "goldeneye.db"), "database-bytes");
   await writeFile(path.join(liveCache, "config.json"), "{\"cache\":true}\n");
   t.after(() => rm(root, { recursive: true, force: true }));
   return {
@@ -125,7 +125,7 @@ test("createReadySnapshot copies sorted bytes and writes a stable manifest", asy
     byte_count: Buffer.byteLength("database-bytes") + Buffer.byteLength("{\"cache\":true}\n"),
     files: [
       {
-        path: "ack-state/goldeneye.db",
+        path: "gcal-state/goldeneye.db",
         bytes: Buffer.byteLength("database-bytes"),
         sha256: "f04766726302b22889d791aa0fe6e41e7342dc71b62ec234dafdc1364d559027",
       },

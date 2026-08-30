@@ -21,7 +21,7 @@ export function renderLimitations({ candidateCount, vanillaCount, randomized }) 
   return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
     `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
     "the sample is too small for inferential significance. Provider prefix caching is " +
-    "reported separately from ACK snapshot caching.";
+    "reported separately from GCAL snapshot caching.";
 }
 
 export function renderMarkdownReport(report, { candidateEngine, vanillaEngine }) {
@@ -34,22 +34,22 @@ export function renderMarkdownReport(report, { candidateEngine, vanillaEngine })
     "",
     "## Scored runs",
     "",
-    "| Run | Engine | Rep | Correct | Wall ms | Grader ms | Tokens | ACK calls | Failed ACK | Patch files | Artifact |",
+    "| Run | Engine | Rep | Correct | Wall ms | Grader ms | Tokens | GCAL calls | Failed GCAL | Patch files | Artifact |",
     "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
   for (const run of runs) {
     lines.push(
-      `| ${run.id} | ${run.engine} | ${run.repetition} | ${run.success ? "PASS" : "FAIL"} | ${number(run.wall_ms)} | ${number(run.grader_ms)} | ${number(run.total_tokens)} | ${number(run.ack_calls)} | ${number(run.ack_failures)} | ${number(run.patch_files)} | \`${run.artifact_dir}\` |`,
+      `| ${run.id} | ${run.engine} | ${run.repetition} | ${run.success ? "PASS" : "FAIL"} | ${number(run.wall_ms)} | ${number(run.grader_ms)} | ${number(run.total_tokens)} | ${number(run.gcal_calls)} | ${number(run.gcal_failures)} | ${number(run.patch_files)} | \`${run.artifact_dir}\` |`,
     );
   }
   lines.push(
     "",
     "## Candidate summary",
     "",
-    `Goldeneye+ACK: ${candidate.length} serial runs; correctness ${candidate.filter((run) => run.success).length}/${candidate.length}.`,
+    `Goldeneye+GCAL: ${candidate.length} serial runs; correctness ${candidate.filter((run) => run.success).length}/${candidate.length}.`,
     metricSummary("wall_ms", candidate),
     metricSummary("total_tokens", candidate),
-    metricSummary("ack_calls", candidate),
+    metricSummary("gcal_calls", candidate),
     `Raw candidate values remain in \`report.json\`; medians and ranges are descriptive only (n=${candidate.length}).`,
     "",
     "## Vanilla comparison",

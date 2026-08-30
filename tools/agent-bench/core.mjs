@@ -89,8 +89,8 @@ export function emptyTelemetry() {
     mcp_calls_by_server: {},
     mcp_failures: 0,
     index_failures: 0,
-    ack_calls: 0,
-    ack_failures: 0,
+    gcal_calls: 0,
+    gcal_failures: 0,
     command_calls: 0,
     command_events: [],
     protocol_violations: [],
@@ -98,16 +98,16 @@ export function emptyTelemetry() {
   };
 }
 
-export function snapshotAckEnvironment(environment) {
+export function snapshotGcalEnvironment(environment) {
   return {
     ...environment,
-    ACK_DAEMON: "off",
+    GCAL_DAEMON: "off",
   };
 }
 
-export function isAckDaemonProcessCommand(
+export function isGcalDaemonProcessCommand(
   commandLine,
-  ackHome,
+  gcalHome,
   platform = process.platform,
 ) {
   const normalize = (value) => {
@@ -115,10 +115,10 @@ export function isAckDaemonProcessCommand(
     return platform === "win32" ? rendered.toLowerCase() : rendered;
   };
   const command = normalize(commandLine);
-  const home = normalize(resolve(ackHome));
+  const home = normalize(resolve(gcalHome));
   return (
     command.includes("daemonmain.js") &&
-    command.includes("--ack-home") &&
+    command.includes("--gcal-home") &&
     command.includes(home)
   );
 }
@@ -149,8 +149,8 @@ export function protocolViolationsForEngine(violations, engineKind) {
   if (engineKind === "vanilla") {
     return violations.filter((violation) => violation.type !== "direct_source_read");
   }
-  if (engineKind === "ack") {
-    return violations.filter((violation) => violation.type !== "ack_cli");
+  if (engineKind === "gcal") {
+    return violations.filter((violation) => violation.type !== "gcal_cli");
   }
   return violations;
 }
@@ -229,14 +229,14 @@ export function accumulateCodexLine(telemetry, line) {
         exit_code: Number.isFinite(exitCode) ? exitCode : null,
       });
     }
-    const isAckCommand = /(?:^|[^A-Za-z0-9_.-])ack(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(rendered);
-    if (countToolCalls && isAckCommand) {
-      telemetry.ack_calls += 1;
+    const isGcalCommand = /(?:^|[^A-Za-z0-9_.-])gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(rendered);
+    if (countToolCalls && isGcalCommand) {
+      telemetry.gcal_calls += 1;
       const exitCode = object.exit_code ?? object.exitCode;
       if (object.status === "failed" || (Number.isFinite(exitCode) && exitCode !== 0)) {
-        telemetry.ack_failures += 1;
+        telemetry.gcal_failures += 1;
       }
-      telemetry.protocol_violations.push({ type: "ack_cli", command: rendered.slice(0, 500) });
+      telemetry.protocol_violations.push({ type: "gcal_cli", command: rendered.slice(0, 500) });
     }
     if (countToolCalls && isDirectSourceReadCommand(rendered)) {
       telemetry.protocol_violations.push({
@@ -341,8 +341,8 @@ const SUMMARY_METRICS = [
   "preindex_ms",
   "completion_ms",
   "mcp_calls",
-  "ack_calls",
-  "ack_failures",
+  "gcal_calls",
+  "gcal_failures",
   "cache_bytes",
   "patch_bytes",
 ];
@@ -471,7 +471,7 @@ export function normalizeReadySnapshot(config, configPath) {
 }
 
 export function resolveRunLayout({ kind, readySnapshot, runId, worktreeRoot, cacheRoot }) {
-  if (kind === "ack" && readySnapshot) {
+  if (kind === "gcal" && readySnapshot) {
     return {
       worktree: readySnapshot.worktree,
       cacheDir: readySnapshot.live_cache,
@@ -486,7 +486,7 @@ export function resolveRunLayout({ kind, readySnapshot, runId, worktreeRoot, cac
 }
 
 export function shouldPrimeIndex({ kind, usesReadySnapshot }) {
-  return kind === "ack" && !usesReadySnapshot;
+  return kind === "gcal" && !usesReadySnapshot;
 }
 
 export function resolveRepositoryGate({ sourceRepository, worktree, usesReadySnapshot }) {
@@ -518,15 +518,15 @@ export function loadConfig(configPath) {
   }
   for (const engine of config.engines) {
     engine.kind ??= "mcp";
-    if (!["ack", "mcp", "serena", "vanilla"].includes(engine.kind)) {
+    if (!["gcal", "mcp", "serena", "vanilla"].includes(engine.kind)) {
       throw new Error(`Unknown engine kind for ${engine.id}: ${engine.kind}`);
     }
     if (engine.kind !== "vanilla" && !engine.command) {
       throw new Error(`Engine ${engine.id} needs a command`);
     }
     engine.command = resolveRelative(base, engine.command);
-    if (engine.kind === "ack") {
-      if (!engine.backend_command) throw new Error(`ACK engine ${engine.id} needs backend_command`);
+    if (engine.kind === "gcal") {
+      if (!engine.backend_command) throw new Error(`GCAL engine ${engine.id} needs backend_command`);
       engine.backend_command = resolveRelative(base, engine.backend_command);
     }
   }

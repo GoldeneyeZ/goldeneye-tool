@@ -1,0 +1,88 @@
+---
+name: goldeneye-code-agent-layer
+description: Use GCAL over Goldeneye for project initialization, compact code discovery, exact source retrieval, call tracing, architecture checks, and index status.
+---
+
+# Goldeneye Code Agent Layer
+
+## Choose One Route
+
+| Need                                         | Route                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Exact qualified name and source needed       | Run `gcal get <qualified-name>` directly.                                                                            |
+| Multiple exact sources needed                | Run one `gcal get <qualified-name...>`.                                                                              |
+| Unknown symbol and source needed             | Run one `gcal search ... --limit 5` or `gcal symbol ... --limit 5`, select one result, then run `gcal get`.            |
+| Multiple unknown symbols                     | Run one `gcal search <query-1> --query <query-2> ... --snippets <n>`, then fetch only selected results needing more. |
+| Metadata determines whether source is needed | Run `gcal inspect` directly. Do not run `search` before `inspect`; broad inspect already searches.                   |
+| Relationship or impact evidence              | Run `gcal callers` or `gcal callees` with `--depth 1 --limit 20`.                                                     |
+| High-level project shape                     | Run `gcal arch` once.                                                                                                |
+| Project not registered                       | Run `gcal init` once from the project root.                                                                          |
+
+Do not run `inspect` and then `get` when the task already requires source. Stop discovery once the task has enough evidence.
+
+## Batch and Call Budget
+
+Batching is allowed, not required. Prefer the smallest batch that directly advances
+the task. Keep batches at five items or fewer. Exceed five only when every item is
+directly relevant to the current task; never pad a batch with speculative work.
+
+A normal source lookup uses at most two GCAL invocations: one discovery invocation
+and one source invocation. Combine relevant queries or qualified names before
+calling GCAL. Relationship and architecture lookups normally use one invocation.
+Do not run `gcal status` or `gcal --help` unless blocked by project state or syntax.
+
+Batch `gcal get <qualified-name...>` and `gcal search --snippets` already use bounded
+direct chunks. Do not repeat those results with separate unflagged `gcal get` calls
+unless the task earns more source.
+
+## Bounded Source Retrieval
+
+Small single-symbol `gcal get <qualified-name>` returns exact source. If GCAL
+returns a `snippet-too-large` manifest instead, use its exact continuation
+command:
+
+```bash
+gcal get <qualified-name> --chunk 1 --expected-source-sha <source-sha256>
+```
+
+Continue with increasing 1-based `--chunk` values while the returned metadata
+shows another chunk. Keep the same manifest SHA for every chunk so Goldeneye
+fails closed if indexed source changes. Never omit or invent the SHA after a
+manifest supplies one.
+
+## Project Selection
+
+Run `gcal init` once from a project root to index it and register its Goldeneye project name in `$HOME/.gcal/projects.json`.
+
+For project-backed commands, GCAL resolves the current directory against the most specific registered ancestor. `GCAL_PROJECT` is an optional explicit override for CI, scripts, or commands outside a registered project.
+
+GCAL stores state in `$HOME/.gcal` by default. Set `GCAL_HOME` to an isolated absolute state directory for benchmarks or tests.
+
+Use `gcal init [repoPath]` when GCAL reports no registered project. `gcal index` only indexes and does not update the local registry. Never invent or derive a Goldeneye project name from a path.
+
+## Daemon Reuse
+
+Normal Goldeneye calls use an on-demand local GCAL daemon and reuse one backend
+session per active project. The daemon exits after 10 minutes idle by default.
+Set `GCAL_DAEMON_IDLE=10m` or configure `daemon.idleTimeout` in
+`$HOME/.gcal/config.json`. Set `GCAL_DAEMON=off` only when direct per-command
+Goldeneye startup is required. Benchmark mode always bypasses the daemon.
+
+Daemon reuse removes repeated Goldeneye startup but not agent or CLI round trips.
+Keep using relevant batches and the call budget above.
+
+## Backend Selection
+
+Goldeneye is GCAL's default backend. Normal use leaves `GCAL_BACKEND` unset or sets it to `goldeneye`. `GCAL_GOLDENEYE_COMMAND` may contain a full Goldeneye executable path when `goldeneye` is not on `PATH`.
+
+Use `GCAL_BACKEND=benchmark` only for explicit compatibility measurements. Benchmark mode requires `GCAL_MCP_COMMAND` and may use `GCAL_MCP_URL`. Never let benchmark configuration leak into normal Goldeneye use.
+
+## Literal-safe Search
+
+`gcal search` treats input as literal-safe. Use `A|B` for alternatives; GCAL merges branches stably, deduplicates by qualified name, and applies one global limit. Java annotations such as `@SpringBootTest` are normalized. A leading wildcard such as `*Test` routes to an escaped suffix symbol match; use `gcal symbol` for other regex searches.
+
+## Raw Text Search
+
+Use raw text search when the target is a literal, configuration value, non-code file, generated asset, or documentation text, or when GCAL is unavailable, fails, or returns clearly weak results.
+
+Do not implement or rely on `gcal elect` in Phase 1.

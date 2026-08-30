@@ -42,7 +42,7 @@ Implemented exact `exported_symbol` extraction and validation, reproduced the pi
 - `schema_version` intentionally remains 1. GFP-2 is an atomic pre-release v1 schema evolution; old readers that predate required `exported_symbol` are not promised compatibility. The exporter, Rust reader, fixtures, and generated artifacts advance together.
 - `syn` is an xtask dev dependency solely to syntax-validate generated Rust. Existing direct `GrammarRecord` fixtures were updated because `exported_symbol` is now required.
 - The exact-command Python harness adds the repository root to `sys.path`; this makes the plan's `python tools/test_export_grammar_lock.py` invocation work without changing production import behavior.
-- ACK's ready graph lacked the new uncommitted symbols, so implementation discovery fell back through Context Mode after weak graph results.
+- GCAL's ready graph lacked the new uncommitted symbols, so implementation discovery fell back through Context Mode after weak graph results.
 - Out-of-scope follow-up: the two pre-existing `goldeneye-syntax` direct symlink tests silently return when fixture creation fails. Mandatory materialized-pack link tests are green, but direct `verify_source` assertions should move into mandatory pack tests separately.
 
 ## Formal Review Request

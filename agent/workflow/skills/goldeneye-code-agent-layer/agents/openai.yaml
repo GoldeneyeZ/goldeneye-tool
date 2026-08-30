@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goldeneye Code Agent Layer"
+  short_description: "Choose one compact GCAL route over Goldeneye"
+  default_prompt: "Use $goldeneye-code-agent-layer to choose one GCAL route. Do not repeat the query through direct Goldeneye MCP tools."

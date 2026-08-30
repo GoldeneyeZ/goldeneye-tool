@@ -94,11 +94,11 @@ test("bench package is private ESM with stable commands", async () => {
   });
 });
 
-test("ACK benchmark runs select the explicit benchmark backend", async () => {
+test("GCAL benchmark runs select the explicit benchmark backend", async () => {
   const source = await readFile(NEW_ENTRYPOINTS[0], "utf8");
 
   assert.match(
     source,
-    /ACK_BACKEND:\s*"benchmark",\s*\r?\n\s*ACK_MCP_COMMAND:/,
+    /GCAL_BACKEND:\s*"benchmark",\s*\r?\n\s*GCAL_MCP_COMMAND:/,
   );
 });

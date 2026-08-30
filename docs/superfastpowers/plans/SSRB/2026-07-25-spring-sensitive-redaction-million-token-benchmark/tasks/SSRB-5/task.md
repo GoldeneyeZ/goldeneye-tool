@@ -81,7 +81,7 @@ Key values:
 }
 ```
 
-Configure the task, grader, ACK engine, vanilla engine, Java home, Gradle home,
+Configure the task, grader, GCAL engine, vanilla engine, Java home, Gradle home,
 stable worktree, live cache, and snapshot roots exactly as the prior Spring
 config, using new unique paths.
 
@@ -100,7 +100,7 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --dry-run
 ```
 
-Expected: six unique runs, three `goldeneye-ack/warm` and three
+Expected: six unique runs, three `goldeneye-code-agent-layer/warm` and three
 `vanilla/none`.
 
 - [ ] **Step 5: Prepare immutable snapshot**
@@ -112,7 +112,7 @@ $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --prepare-snapshot
 ```
 

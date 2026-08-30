@@ -21,7 +21,7 @@ Files above are starting points only. Inspect any additional files needed to com
 - Files created: `crates/goldeneye-mcp/Cargo.toml`; `crates/goldeneye-mcp/src/lib.rs`; `crates/goldeneye-mcp/src/protocol.rs`; task-local handoff/review evidence.
 - Files modified: `Cargo.lock`; this `context.md`; GF-2 section of `plan-progression.md`.
 - Additional relevant files: `.upstream/codebase-memory-mcp/tests/test_mcp.c` confirms upstream string request IDs are preserved (`jsonrpc_parse_string_id_issue253`); `crates/goldeneye-domain/src/lib.rs` supplied local documentation/lint style.
-- Review discovery note: post-commit ACK `index_repository(mode="fast")` returned `Pipeline failed`; spec/quality reviews used the mandated Context Mode fallback to inspect committed metadata and exact source from `ed58e05`.
+- Review discovery note: post-commit GCAL `index_repository(mode="fast")` returned `Pipeline failed`; spec/quality reviews used the mandated Context Mode fallback to inspect committed metadata and exact source from `ed58e05`.
 - Verification commands/results:
   - RED: `cargo test -p goldeneye-mcp protocol` -> exit 101; unresolved imports `Request`, `RequestId`, and `Response`.
   - First GREEN: `cargo test -p goldeneye-mcp protocol` -> exit 0; 4 passed, 0 failed.

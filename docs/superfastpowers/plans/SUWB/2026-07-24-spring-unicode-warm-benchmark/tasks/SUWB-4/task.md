@@ -68,7 +68,7 @@ Goldeneye:
   `crates/application/goldeneye-query/src/engine/search.rs`;
 - SHA-256 and byte size of `target/release/goldeneye.exe`.
 
-ACK:
+GCAL:
 
 - repository HEAD;
 - SHA-256 of `git diff --binary`;
@@ -114,7 +114,7 @@ $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --prepare-snapshot
 ```
 
@@ -137,7 +137,7 @@ Restore snapshot once and run the task with an explicit smoke flag:
 ```powershell
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --repetitions 1 `
   --smoke
 ```
@@ -145,7 +145,7 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
 Smoke acceptance:
 
 - snapshot restore and verification pass;
-- Codex can invoke ACK;
+- Codex can invoke GCAL;
 - held-out grader passes;
 - `wall_ms` begins at Codex spawn;
 - post-run live-cache mutation does not change snapshot manifest;

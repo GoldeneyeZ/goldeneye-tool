@@ -4,11 +4,11 @@
 
 **Goal:** Build and execute an audited Spring Framework benchmark whose clean vanilla lane has a three-run median of `800,000–1,200,000` cumulative input tokens and at least `100,000` uncached input tokens.
 
-**Architecture:** Extend the existing agent harness with reusable dirty-path policies, variable lane-count audits, sample variability statistics, and non-scored calibration gates. Add a versioned Spring sensitive-value redaction task with hidden multi-module tests, build an immutable six-module ACK snapshot, calibrate through a predeclared complexity ladder, then freeze and run one randomized clean `3 + 3` comparison.
+**Architecture:** Extend the existing agent harness with reusable dirty-path policies, variable lane-count audits, sample variability statistics, and non-scored calibration gates. Add a versioned Spring sensitive-value redaction task with hidden multi-module tests, build an immutable six-module GCAL snapshot, calibrate through a predeclared complexity ladder, then freeze and run one randomized clean `3 + 3` comparison.
 **Plan Acronym:** SSRB
 
 
-**Tech Stack:** Node.js 24 ESM, `node:test`, PowerShell 7, Rust/Goldeneye release CLI, ACK, Codex CLI, Java 17, Gradle 8, Spring Framework
+**Tech Stack:** Node.js 24 ESM, `node:test`, PowerShell 7, Rust/Goldeneye release CLI, GCAL, Codex CLI, Java 17, Gradle 8, Spring Framework
 
 ---
 
@@ -67,10 +67,10 @@
 
 - Create
   `tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json`:
-  pinned repo, six-module ACK snapshot, lane policy, token gates, and grader.
+  pinned repo, six-module GCAL snapshot, lane policy, token gates, and grader.
 - Generate
   `target/agent-bench/snapshots/spring-sensitive-value-redaction-level2/**`:
-  immutable ACK snapshot.
+  immutable GCAL snapshot.
 - Generate
   `target/agent-bench/spring-sensitive-value-redaction-level2/calibration/**`:
   versioned non-scored vanilla pilots.
@@ -308,9 +308,9 @@ test("audits a randomized three by three report", () => {
     expectedVanillaRuns: 3,
     dirtyPathPolicy: compileDirtyPathPolicy({ prefixes: ["spring-context/"] }),
     artifactExists: () => true,
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     markdown: renderMarkdownReport(report, {
-      candidateEngine: "goldeneye-ack",
+      candidateEngine: "goldeneye-code-agent-layer",
       vanillaEngine: "vanilla",
     }),
     readArtifact: () => " M spring-context/src/main/java/A.java\n",
@@ -375,7 +375,7 @@ export function renderLimitations({ candidateCount, vanillaCount, randomized }) 
   return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
     `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
     "the sample is too small for inferential significance. Provider prefix caching is " +
-    "reported separately from ACK snapshot caching.";
+    "reported separately from GCAL snapshot caching.";
 }
 ```
 
@@ -906,7 +906,7 @@ Key values:
 }
 ```
 
-Configure the task, grader, ACK engine, vanilla engine, Java home, Gradle home,
+Configure the task, grader, GCAL engine, vanilla engine, Java home, Gradle home,
 stable worktree, live cache, and snapshot roots exactly as the prior Spring
 config, using new unique paths.
 
@@ -925,7 +925,7 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --dry-run
 ```
 
-Expected: six unique runs, three `goldeneye-ack/warm` and three
+Expected: six unique runs, three `goldeneye-code-agent-layer/warm` and three
 `vanilla/none`.
 
 - [ ] **Step 5: Prepare immutable snapshot**
@@ -937,7 +937,7 @@ $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --prepare-snapshot
 ```
 
@@ -1003,7 +1003,7 @@ Expected: all tests PASS; whitespace check empty.
 Run:
 
 ```powershell
-cargo test -p goldeneye-ack
+cargo test -p goldeneye-code-agent-layer
 cargo build --release -p goldeneye
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level2.json `
@@ -1033,7 +1033,7 @@ The preparation/provenance artifacts must include:
 {
   "candidate_commit": "value produced by git rev-parse HEAD",
   "candidate_executable_sha256": "value produced by provenance.mjs",
-  "ack_bundle_sha256": "value produced by provenance.mjs",
+  "gcal_bundle_sha256": "value produced by provenance.mjs",
   "task_sha256": "value produced by provenance.mjs",
   "grader_sha256": "value produced by provenance.mjs over grader and fixture manifest",
   "config_sha256": "value produced by provenance.mjs",
@@ -1143,7 +1143,7 @@ On the Level-3 branch, write the same fields with level `3`, calibration ID
 
 <TASK-ID>SSRB-8</TASK-ID>
 
-Execute exactly three vanilla and three warm ACK runs after qualification.
+Execute exactly three vanilla and three warm GCAL runs after qualification.
 
 **Files:**
 - Generate:
@@ -1264,13 +1264,13 @@ Report:
 - median, range, sample SD, and CV%;
 - correctness;
 - cached and uncached tokens separately;
-- ACK call/failure/discovery counts;
+- GCAL call/failure/discovery counts;
 - patch statistics;
 - qualification evidence;
 - built-in and independent audit evidence;
 - limitations at `n = 3`.
 
-State whether ACK improved or regressed each metric. Do not claim statistical
+State whether GCAL improved or regressed each metric. Do not claim statistical
 significance.
 
 - [ ] **Step 8: Commit final benchmark documentation only**

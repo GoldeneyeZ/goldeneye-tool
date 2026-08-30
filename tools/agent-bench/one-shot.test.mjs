@@ -23,7 +23,7 @@ const LEVEL0_CONFIG = join(BENCH_ROOT, "configs", "spring-sensitive-value-redact
 const SINGLE = {
   enabled: true,
   tasks: [{ id: "redact-level0" }],
-  engines: [{ id: "ack", kind: "ack" }],
+  engines: [{ id: "gcal", kind: "gcal" }],
   cacheModes: ["warm"],
   repetitions: 1,
   activeWorkflowFlags: [],
@@ -116,7 +116,7 @@ test("one-shot output defaults to task and attempt isolation", () => {
   );
 });
 
-test("verification policy has final, explicit prohibitions without limiting ACK", () => {
+test("verification policy has final, explicit prohibitions without limiting GCAL", () => {
   const policy = agentVerificationPolicy();
   assert.match(policy, /Do not run/i);
   assert.match(policy, /build/i);
@@ -124,7 +124,7 @@ test("verification policy has final, explicit prohibitions without limiting ACK"
   assert.match(policy, /test/i);
   assert.match(policy, /lint/i);
   assert.match(policy, /check/i);
-  assert.match(policy, /ACK discovery calls are not limited/i);
+  assert.match(policy, /GCAL discovery calls are not limited/i);
 });
 
 test("verification policy is the final prompt block only when requested", () => {
@@ -158,8 +158,8 @@ test("verification classifier finds clear agent-side verification commands", () 
   }
 
   for (const command of [
-    "ack status",
-    "ack search SensitiveValue",
+    "gcal status",
+    "gcal search SensitiveValue",
     "git status --short",
     "git diff",
     "node tools/edit-file.mjs",
@@ -172,7 +172,7 @@ test("verification classifier finds clear agent-side verification commands", () 
 test("verification analysis preserves command and exit status", () => {
   assert.deepEqual(
     analyzeAgentVerificationCalls([
-      { command: "ack status", exit_code: 0 },
+      { command: "gcal status", exit_code: 0 },
       { command: ["npm", "test"], exitCode: 1 },
     ]),
     {
@@ -180,13 +180,13 @@ test("verification analysis preserves command and exit status", () => {
       one_shot_compliant: false,
     },
   );
-  assert.deepEqual(analyzeAgentVerificationCalls([{ command: "ack inspect Foo", exit_code: 0 }]), {
+  assert.deepEqual(analyzeAgentVerificationCalls([{ command: "gcal inspect Foo", exit_code: 0 }]), {
     agent_verification_calls: [],
     one_shot_compliant: true,
   });
   assert.deepEqual(
     analyzeAgentVerificationCalls(
-      Array.from({ length: 100 }, (_, index) => ({ command: `ack get Symbol${index}`, exit_code: 0 })),
+      Array.from({ length: 100 }, (_, index) => ({ command: `gcal get Symbol${index}`, exit_code: 0 })),
     ),
     { agent_verification_calls: [], one_shot_compliant: true },
   );
@@ -445,10 +445,10 @@ process.stdin.on("end", () => {
   }
 });
 
-test("ACK one-shot auto-refresh failure stops before Codex", () => {
-  const directory = mkdtempSync(join(tmpdir(), "agent-bench-one-shot-ack-"));
+test("GCAL one-shot auto-refresh failure stops before Codex", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-bench-one-shot-gcal-"));
   const repo = join(directory, "source");
-  const fakeAck = join(repo, "dist", "main.js");
+  const fakeGcal = join(repo, "dist", "main.js");
   const configPath = join(directory, "config.json");
   const codexMarker = join(directory, "codex-spawned");
   const output = join(directory, "attempt", "report.json");
@@ -462,10 +462,10 @@ test("ACK one-shot auto-refresh failure stops before Codex", () => {
   };
   try {
     spawnSync("git", ["init", repo], { encoding: "utf8" });
-    mkdirSync(dirname(fakeAck), { recursive: true });
+    mkdirSync(dirname(fakeGcal), { recursive: true });
     writeFileSync(join(repo, "TASK.md"), "No-op task.\n");
     writeFileSync(join(repo, "package-lock.json"), '{"lockfileVersion":3}\n');
-    writeFileSync(fakeAck, 'process.stderr.write("intentional ACK refresh failure"); process.exit(5);\n');
+    writeFileSync(fakeGcal, 'process.stderr.write("intentional GCAL refresh failure"); process.exit(5);\n');
     spawnSync("git", ["-C", repo, "add", "."], { encoding: "utf8" });
     const commit = spawnSync(
       "git",
@@ -488,10 +488,10 @@ test("ACK one-shot auto-refresh failure stops before Codex", () => {
           grader: { command: process.execPath },
         }],
         engines: [{
-          id: "ack",
-          kind: "ack",
+          id: "gcal",
+          kind: "gcal",
           command: process.execPath,
-          args: [fakeAck],
+          args: [fakeGcal],
           backend_command: process.execPath,
           cache_modes: ["warm"],
         }],
@@ -516,7 +516,7 @@ test("ACK one-shot auto-refresh failure stops before Codex", () => {
         configPath,
         "--one-shot",
         "--engine",
-        "ack",
+        "gcal",
         "--cache-modes",
         "warm",
         "--repetitions",
@@ -529,12 +529,12 @@ test("ACK one-shot auto-refresh failure stops before Codex", () => {
       { cwd: resolve(BENCH_ROOT, "../.."), encoding: "utf8", timeout: 30_000 },
     );
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /intentional ACK refresh failure/);
+    assert.match(result.stderr, /intentional GCAL refresh failure/);
     assert.equal(existsSync(codexMarker), false);
     assert.equal(existsSync(output), false);
     const preparation = JSON.parse(readFileSync(join(dirname(output), "preparation.json"), "utf8"));
     assert.equal(preparation.eligible_for_scoring, false);
-    assert.match(preparation.error, /intentional ACK refresh failure/);
+    assert.match(preparation.error, /intentional GCAL refresh failure/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

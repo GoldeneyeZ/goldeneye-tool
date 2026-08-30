@@ -39,9 +39,9 @@ test("audits a randomized three by three report", () => {
     expectedVanillaRuns: 3,
     dirtyPathPolicy: compileDirtyPathPolicy({ prefixes: ["spring-context/"] }),
     artifactExists: () => true,
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     markdown: renderMarkdownReport(report, {
-      candidateEngine: "goldeneye-ack",
+      candidateEngine: "goldeneye-code-agent-layer",
       vanillaEngine: "vanilla",
     }),
     readArtifact: () => " M spring-context/src/main/java/A.java\n",
@@ -106,7 +106,7 @@ export function renderLimitations({ candidateCount, vanillaCount, randomized }) 
   return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
     `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
     "the sample is too small for inferential significance. Provider prefix caching is " +
-    "reported separately from ACK snapshot caching.";
+    "reported separately from GCAL snapshot caching.";
 }
 ```
 

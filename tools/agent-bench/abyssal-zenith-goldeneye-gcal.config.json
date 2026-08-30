@@ -1,0 +1,43 @@
+{
+  "repo": "C:\\Users\\Zacha\\IdeaProjects\\abyssal-zenith",
+  "base_ref": "92060daeb601f397020e665722bc5cfefd7f44a4",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "cache_modes": "cold,warm",
+  "seed": 20260722,
+  "timeout_ms": 900000,
+  "preindex_timeout_ms": 600000,
+  "output": "../../target/agent-bench/abyssal-zenith-goldeneye-code-agent-layer.json",
+  "engines": [
+    {
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+      ],
+      "backend_command": "../../target/release/goldeneye.exe"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "abyssal-public-endpoints",
+      "source_language": "Java",
+      "source_extensions": [
+        ".java"
+      ],
+      "prompt_file": "./tasks/abyssal-public-endpoints.md",
+      "grader": {
+        "command": "node",
+        "args": [
+          "./graders/abyssal-public-endpoints.mjs",
+          "{worktree}",
+          "{repo}"
+        ],
+        "timeout_ms": 300000
+      }
+    }
+  ]
+}

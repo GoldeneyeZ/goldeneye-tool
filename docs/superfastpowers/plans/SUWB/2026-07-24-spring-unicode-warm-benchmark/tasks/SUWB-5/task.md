@@ -5,7 +5,7 @@
 **Files:**
 
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/vanilla/**`
-- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/goldeneye-ack/**`
+- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/gcal/**`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.md`
 
@@ -54,7 +54,7 @@ attempt.
 ```powershell
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --repetitions 3
 ```
 
@@ -96,7 +96,7 @@ Report per run:
 - `maintenance_ms`, `wall_ms`, `grader_ms`, `completion_ms`,
   `verified_e2e_ms`;
 - total, uncached input, cached input, output, and reasoning tokens;
-- tool calls, ACK calls, Goldeneye/backend calls, failed calls;
+- tool calls, GCAL calls, Goldeneye/backend calls, failed calls;
 - result payload bytes and cardinality;
 - command failures and classified causes;
 - first discovery/search selection, ordering, failed discovery commands, and
@@ -121,7 +121,7 @@ Vanilla comparison:
 Required limitations text:
 
 ```markdown
-This benchmark contains three serial Goldeneye+ACK candidate repetitions and one
+This benchmark contains three serial Goldeneye+GCAL candidate repetitions and one
 vanilla comparison run. The vanilla result is descriptive reuse evidence, not a
 paired or randomized control. Reported differences do not establish causality
 or statistical significance. Query latency alone is not interpreted as agent

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildRunMatrix,
   codexSandboxArgs,
-  isAckDaemonProcessCommand,
+  isGcalDaemonProcessCommand,
   isDirectSourceReadCommand,
   loadConfig,
   parseCodexJsonl,
@@ -19,7 +19,7 @@ import {
   sanitizeId,
   selectRunEngines,
   shouldPrimeIndex,
-  snapshotAckEnvironment,
+  snapshotGcalEnvironment,
   summarizeRuns,
   tomlInlineTable,
 } from "./core.mjs";
@@ -77,14 +77,14 @@ test("buildRunMatrix runs vanilla once without cold/warm duplication", () => {
   assert.deepEqual(new Set(vanilla.map((run) => run.cacheMode)), new Set(["none"]));
 });
 
-test("selectRunEngines preserves the ACK provenance engine when selecting vanilla", () => {
-  const ack = { id: "goldeneye-ack", kind: "ack" };
+test("selectRunEngines preserves the GCAL provenance engine when selecting vanilla", () => {
+  const gcal = { id: "goldeneye-code-agent-layer", kind: "gcal" };
   const vanilla = { id: "vanilla", kind: "vanilla" };
-  const config = { engines: [ack, vanilla] };
+  const config = { engines: [gcal, vanilla] };
 
   assert.deepEqual(selectRunEngines(config, "vanilla"), [vanilla]);
-  assert.deepEqual(config.engines, [ack, vanilla]);
-  assert.equal(config.engines.find((engine) => engine.kind === "ack"), ack);
+  assert.deepEqual(config.engines, [gcal, vanilla]);
+  assert.equal(config.engines.find((engine) => engine.kind === "gcal"), gcal);
 });
 
 test("calibration mode validates its vanilla-only single-run contract before repository access", () => {
@@ -96,7 +96,7 @@ test("calibration mode validates its vanilla-only single-run contract before rep
     repetitions: 2,
     tasks: [{ id: "task", prompt_file: "task.md", grader: { command: "grader.mjs" } }],
     engines: [
-      { id: "ack", kind: "ack", command: "ack", backend_command: "goldeneye" },
+      { id: "gcal", kind: "gcal", command: "gcal", backend_command: "goldeneye" },
       { id: "vanilla", kind: "vanilla" },
     ],
   }));
@@ -129,7 +129,7 @@ test("parseCodexJsonl extracts cumulative usage, tool calls, bytes, and violatio
     }),
     JSON.stringify({
       type: "item.completed",
-      item: { type: "command_execution", command: "ack search Foo" },
+      item: { type: "command_execution", command: "gcal search Foo" },
     }),
     JSON.stringify({
       type: "turn.completed",
@@ -163,8 +163,8 @@ test("parseCodexJsonl extracts cumulative usage, tool calls, bytes, and violatio
   assert.deepEqual(telemetry.mcp_calls_by_server, { codebase_memory_mcp: 2 });
   assert.equal(telemetry.mcp_failures, 1);
   assert.equal(telemetry.index_failures, 1);
-  assert.equal(telemetry.ack_calls, 1);
-  assert.equal(telemetry.ack_failures, 0);
+  assert.equal(telemetry.gcal_calls, 1);
+  assert.equal(telemetry.gcal_failures, 0);
   assert.equal(telemetry.command_calls, 1);
   assert.equal(telemetry.protocol_violations.length, 1);
   assert.ok(telemetry.jsonl_bytes > 0);
@@ -206,20 +206,20 @@ test("direct Java, TypeScript, and Rust reads are protocol violations for MCP la
   assert.equal(protocolViolationsForEngine(telemetry.protocol_violations, "vanilla").length, 0);
 });
 
-test("ACK lanes allow ACK commands while preserving direct source-read violations", () => {
+test("GCAL lanes allow GCAL commands while preserving direct source-read violations", () => {
   const telemetry = parseCodexJsonl(
     [
       {
         type: "item.completed",
         item: {
           type: "command_execution",
-          command: `pwsh.exe -Command 'ack search SecurityConfig'`,
+          command: `pwsh.exe -Command 'gcal search SecurityConfig'`,
           exit_code: 0,
         },
       },
       {
         type: "item.completed",
-        item: { type: "command_execution", command: "ack get Missing", exit_code: 1 },
+        item: { type: "command_execution", command: "gcal get Missing", exit_code: 1 },
       },
       {
         type: "item.completed",
@@ -229,47 +229,47 @@ test("ACK lanes allow ACK commands while preserving direct source-read violation
       .map(JSON.stringify)
       .join("\n"),
   );
-  assert.equal(telemetry.ack_calls, 2);
-  assert.equal(telemetry.ack_failures, 1);
+  assert.equal(telemetry.gcal_calls, 2);
+  assert.equal(telemetry.gcal_failures, 1);
   assert.deepEqual(
-    protocolViolationsForEngine(telemetry.protocol_violations, "ack").map((item) => item.type),
+    protocolViolationsForEngine(telemetry.protocol_violations, "gcal").map((item) => item.type),
     ["direct_source_read"],
   );
 });
 
-test("snapshot ACK initialization disables daemon reuse without dropping engine env", () => {
+test("snapshot GCAL initialization disables daemon reuse without dropping engine env", () => {
   assert.deepEqual(
-    snapshotAckEnvironment({
-      ACK_BACKEND: "goldeneye",
-      ACK_DAEMON: "on",
-      ACK_DAEMON_IDLE: "10m",
+    snapshotGcalEnvironment({
+      GCAL_BACKEND: "goldeneye",
+      GCAL_DAEMON: "on",
+      GCAL_DAEMON_IDLE: "10m",
       GOLDENEYE_DB_PATH: "snapshot.db",
     }),
     {
-      ACK_BACKEND: "goldeneye",
-      ACK_DAEMON: "off",
-      ACK_DAEMON_IDLE: "10m",
+      GCAL_BACKEND: "goldeneye",
+      GCAL_DAEMON: "off",
+      GCAL_DAEMON_IDLE: "10m",
       GOLDENEYE_DB_PATH: "snapshot.db",
     },
   );
 });
 
-test("ACK daemon process matching is scoped to the exact ACK home", () => {
-  const ackHome = "D:\\Dev\\IdeaProjects\\.gab-cache\\ssrb5-live\\ack-state";
+test("GCAL daemon process matching is scoped to the exact GCAL home", () => {
+  const gcalHome = "D:\\Dev\\IdeaProjects\\.gab-cache\\ssrb5-live\\gcal-state";
   const matching =
-    `"C:\\nvm4w\\nodejs\\node.exe" C:\\ack\\dist\\daemonMain.js ` +
-    `--endpoint \\\\.\\pipe\\ack-123 --ack-home ${ackHome} --idle-ms 600000`;
+    `"C:\\nvm4w\\nodejs\\node.exe" C:\\gcal\\dist\\daemonMain.js ` +
+    `--endpoint \\\\.\\pipe\\gcal-123 --gcal-home ${gcalHome} --idle-ms 600000`;
 
-  assert.equal(isAckDaemonProcessCommand(matching, ackHome, "win32"), true);
+  assert.equal(isGcalDaemonProcessCommand(matching, gcalHome, "win32"), true);
   assert.equal(
-    isAckDaemonProcessCommand(
+    isGcalDaemonProcessCommand(
       matching,
-      "D:\\Dev\\IdeaProjects\\.gab-cache\\other\\ack-state",
+      "D:\\Dev\\IdeaProjects\\.gab-cache\\other\\gcal-state",
       "win32",
     ),
     false,
   );
-  assert.equal(isAckDaemonProcessCommand("goldeneye mcp --stdio", ackHome, "win32"), false);
+  assert.equal(isGcalDaemonProcessCommand("goldeneye mcp --stdio", gcalHome, "win32"), false);
 });
 
 test("summarizeRuns never rewards failed runs with fast timings", () => {
@@ -365,7 +365,7 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
     repo: "../spring-framework",
     output: "out/report.json",
     tasks: [{ id: "task", prompt_file: "task.md", grader: { command: "grader.mjs" } }],
-    engines: [{ id: "ack", kind: "ack", command: "ack", backend_command: "goldeneye" }],
+    engines: [{ id: "gcal", kind: "gcal", command: "gcal", backend_command: "goldeneye" }],
     ready_snapshot: {
       root: "../../target/agent-bench/snapshots/spring-stringutils",
       worktree: "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
@@ -430,21 +430,21 @@ test("Level-2 Spring config declares the million-token qualification and audit p
   assert.deepEqual(config.tasks[0].source_extensions, [".java"]);
 });
 
-test("ready snapshots use stable ACK paths and skip priming", () => {
+test("ready snapshots use stable GCAL paths and skip priming", () => {
   const readySnapshot = {
     root: "D:\\Dev\\IdeaProjects\\goldeneye-tool\\target\\agent-bench\\snapshots\\spring-stringutils",
     worktree: "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
     live_cache: "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
   };
   assert.deepEqual(
-    resolveRunLayout({ kind: "ack", readySnapshot, runId: "candidate-1" }),
+    resolveRunLayout({ kind: "gcal", readySnapshot, runId: "candidate-1" }),
     {
       worktree: readySnapshot.worktree,
       cacheDir: readySnapshot.live_cache,
       usesReadySnapshot: true,
     },
   );
-  assert.equal(shouldPrimeIndex({ kind: "ack", usesReadySnapshot: true }), false);
+  assert.equal(shouldPrimeIndex({ kind: "gcal", usesReadySnapshot: true }), false);
 
   const vanilla = resolveRunLayout({
     kind: "vanilla",
@@ -473,7 +473,7 @@ test("ready snapshots use stable ACK paths and skip priming", () => {
 test("prepare-snapshot exits before spawning Codex", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-bench-prepare-"));
   const repo = join(directory, "source");
-  const fakeAck = join(repo, "dist", "main.js");
+  const fakeGcal = join(repo, "dist", "main.js");
   const fakeBackend = join(repo, "dist", "backend.mjs");
   const configPath = join(directory, "config.json");
   const codexMarker = join(directory, "codex-spawned");
@@ -497,8 +497,8 @@ test("prepare-snapshot exits before spawning Codex", () => {
     writeFileSync(join(repo, "package-lock.json"), "{\"lockfileVersion\":3}\n");
     mkdirSync(join(repo, "dist"), { recursive: true });
     writeFileSync(
-      fakeAck,
-      `import { spawn } from "node:child_process";\nimport { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nconst child = spawn(process.execPath, [fileURLToPath(new URL("./backend.mjs", import.meta.url))], { detached: true, env: process.env, stdio: "ignore", windowsHide: true });\nchild.unref();\nawait new Promise((resolveDelay) => setTimeout(resolveDelay, 1_500));\n`,
+      fakeGcal,
+      `import { spawn } from "node:child_process";\nimport { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\nmkdirSync(process.env.GCAL_HOME, { recursive: true });\nwriteFileSync(join(process.env.GCAL_HOME, "projects.json"), "{}");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nconst child = spawn(process.execPath, [fileURLToPath(new URL("./backend.mjs", import.meta.url))], { detached: true, env: process.env, stdio: "ignore", windowsHide: true });\nchild.unref();\nawait new Promise((resolveDelay) => setTimeout(resolveDelay, 1_500));\n`,
     );
     writeFileSync(
       fakeBackend,
@@ -521,10 +521,10 @@ test("prepare-snapshot exits before spawning Codex", () => {
         codex_command: codexMarker,
         tasks: [{ id: "task", prompt_file: join(repo, "README.md"), grader: { command: process.execPath } }],
         engines: [{
-          id: "ack",
-          kind: "ack",
+          id: "gcal",
+          kind: "gcal",
           command: process.execPath,
-          args: [fakeAck],
+          args: [fakeGcal],
           backend_command: process.execPath,
         }],
         ready_snapshot: ready,
@@ -560,13 +560,13 @@ test("prepare-snapshot exits before spawning Codex", () => {
     assert.deepEqual(successfulPreparation.recovery_evidence, recoveryEvidence);
 
     writeFileSync(
-      fakeAck,
-      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.ACK_HOME, { recursive: true });\nwriteFileSync(join(process.env.ACK_HOME, "projects.json"), "partial-config");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "partial-db");\nprocess.stdout.write('partial stdout');\nprocess.stderr.write('intentional ACK failure');\nprocess.exit(5);\n`,
+      fakeGcal,
+      `import { mkdirSync, writeFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nmkdirSync(process.env.GCAL_HOME, { recursive: true });\nwriteFileSync(join(process.env.GCAL_HOME, "projects.json"), "partial-config");\nmkdirSync(dirname(process.env.GOLDENEYE_DB_PATH), { recursive: true });\nwriteFileSync(process.env.GOLDENEYE_DB_PATH, "partial-db");\nprocess.stdout.write('partial stdout');\nprocess.stderr.write('intentional GCAL failure');\nprocess.exit(5);\n`,
     );
     spawnSync("git", ["-C", repo, "add", "dist/main.js"], { encoding: "utf8" });
     spawnSync(
       "git",
-      ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fail ack"],
+      ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fail gcal"],
       { encoding: "utf8" },
     );
     const stable = spawnSync(
@@ -584,7 +584,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
       { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000 },
     );
     assert.notEqual(failure.status, 0);
-    assert.match(failure.stderr, /intentional ACK failure/);
+    assert.match(failure.stderr, /intentional GCAL failure/);
     const preparation = JSON.parse(readFileSync(join(directory, "preparation.json"), "utf8"));
     assert.equal(preparation.eligible_for_scoring, false);
     assert.ok(preparation.provenance);
@@ -602,7 +602,7 @@ test("prepare-snapshot exits before spawning Codex", () => {
       assert.equal(existsSync(entry.path), true, entry.path);
       assert.match(entry.sha256, /^[a-f0-9]{64}$/);
     }
-    assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "ack-state", "projects.json")), true);
+    assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "gcal-state", "projects.json")), true);
     assert.equal(existsSync(join(preparation.failure_evidence.live_cache.path, "goldeneye.db")), true);
     assert.equal(existsSync(join(ready.root, "failure")), false);
     assert.equal(existsSync(ready.worktree), true);

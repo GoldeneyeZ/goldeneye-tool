@@ -84,7 +84,7 @@ export function scoreRunDurations({ maintenanceMs, wallMs, graderMs }) {
 
 Integrate `spawnWithTimer()` inside `runCodex()` so the callback contains the
 actual `spawn(codexCommand, codexArgs, options)` call. Stop timing only in the
-child `close` handler. Do not start ACK or Goldeneye in a pre-spawn scored timer.
+child `close` handler. Do not start GCAL or Goldeneye in a pre-spawn scored timer.
 Any process started because Codex invokes MCP occurs after `codex exec` spawn and
 is therefore included.
 
@@ -161,7 +161,7 @@ Refactor pure lifecycle decisions into exported helpers and test:
 
 ```js
 assert.deepEqual(
-  resolveRunLayout({ kind: "ack", readySnapshot, runId: "candidate-1" }),
+  resolveRunLayout({ kind: "gcal", readySnapshot, runId: "candidate-1" }),
   {
     worktree: readySnapshot.worktree,
     cacheDir: readySnapshot.live_cache,
@@ -170,13 +170,13 @@ assert.deepEqual(
 );
 
 assert.equal(
-  shouldPrimeIndex({ kind: "ack", usesReadySnapshot: true }),
+  shouldPrimeIndex({ kind: "gcal", usesReadySnapshot: true }),
   false,
 );
 ```
 
 Also assert vanilla retains unique per-run worktree behavior and never restores
-the ACK snapshot.
+the GCAL snapshot.
 
 Run:
 
@@ -201,14 +201,14 @@ Preparation path:
 3. remove any registered stable worktree only after exact path validation;
 4. create detached worktree at `base_ref`;
 5. clear/recreate live cache;
-6. set isolated `ACK_HOME`, `GOLDENEYE_DB_PATH`, `CBM_CACHE_DIR`, and project root;
-7. run ACK `init` once;
+6. set isolated `GCAL_HOME`, `GOLDENEYE_DB_PATH`, `CBM_CACHE_DIR`, and project root;
+7. run GCAL `init` once;
 8. wait for initializer exit;
-9. fail if any ACK/Goldeneye process launched by initializer remains or any DB WAL/SHM/lock file exists;
+9. fail if any GCAL/Goldeneye process launched by initializer remains or any DB WAL/SHM/lock file exists;
 10. create and verify immutable snapshot;
 11. write preparation metrics and provenance; exit without a scored run.
 
-Scored ACK path:
+Scored GCAL path:
 
 1. start maintenance timer;
 2. verify candidate fingerprints;

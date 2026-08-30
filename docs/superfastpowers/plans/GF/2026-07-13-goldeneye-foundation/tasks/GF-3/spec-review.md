@@ -7,7 +7,7 @@
 
 - Independently inspected committed changed-file scope, `server.rs`, and `lib.rs` from `2d0c962`.
 - Compared every GF-3 route, response field, error code, notification rule, and required test against the implementation-plan section.
-- Confirmed upstream initialize evidence through ACK exact snippets: protocol `2025-11-25`, identity `codebase-memory-mcp`, and `capabilities.tools.listChanged=false`.
+- Confirmed upstream initialize evidence through GCAL exact snippets: protocol `2025-11-25`, identity `codebase-memory-mcp`, and `capabilities.tools.listChanged=false`.
 - Verification evidence: format and Clippy gates exited 0; eight crate tests and ten workspace tests passed with zero failures.
 
 ## Compliance Notes

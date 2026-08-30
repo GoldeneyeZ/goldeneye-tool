@@ -244,7 +244,7 @@ goldeneye-tool/
 |   |   |   |   |-- tools.rs
 |   |   |   |   `-- transport.rs
 |   |   |   |-- tests/
-|   |   |   |   |-- ack_tools.rs
+|   |   |   |   |-- gcal_tools.rs
 |   |   |   |   |-- adr_traces.rs
 |   |   |   |   `-- git_changes.rs
 |   |   |   `-- Cargo.toml
@@ -461,8 +461,8 @@ goldeneye-tool/
 |   |   `-- specs/
 |   |       |-- 2026-07-13-goldeneye-full-grammar-provider-design.md
 |   |       `-- 2026-07-13-goldeneye-rust-port-design.md
-|   |-- ack-acceptance.md
-|   |-- ack-feature-handoff.md
+|   |-- gcal-acceptance.md
+|   |-- gcal-feature-handoff.md
 |   |-- architecture.md
 |   `-- full-grammar-pack.md
 |-- grammars/
@@ -520,7 +520,7 @@ goldeneye-tool/
 |       `-- README.md
 |-- tests/
 |   `-- fixtures/
-|       |-- ack/
+|       |-- gcal/
 |       |   |-- rust-project/
 |       |   |   |-- src/
 |       |   |   |   |-- billing.rs
@@ -537,8 +537,8 @@ goldeneye-tool/
 |           |-- foundation.expected.jsonl
 |           `-- foundation.jsonl
 |-- tools/
-|   |-- ack-acceptance.mjs
-|   |-- ack-acceptance.ps1
+|   |-- gcal-acceptance.mjs
+|   |-- gcal-acceptance.ps1
 |   |-- benchmark-competitors.mjs
 |   |-- edit-acceptance.mjs
 |   |-- edit-acceptance.ps1

@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superfastpowers:goal-driven-development with `goal-driven-bypass` (recommended) to execute this plan task by task. Use superfastpowers:test-driven-development for implementation tasks and superfastpowers:verification-before-completion before claiming completion.
 
-**Goal:** Implement and execute an auditable warm-only Goldeneye+ACK benchmark for the Spring Framework `StringUtils.truncate(CharSequence, int)` Unicode surrogate-boundary task, with one vanilla comparison run and three serial candidate repetitions.
+**Goal:** Implement and execute an auditable warm-only Goldeneye+GCAL benchmark for the Spring Framework `StringUtils.truncate(CharSequence, int)` Unicode surrogate-boundary task, with one vanilla comparison run and three serial candidate repetitions.
 
-**Architecture:** Add fail-closed snapshot and timing primitives to the existing Node benchmark harness. Prepare one immutable ACK/Goldeneye ready-cache snapshot bound to one stable absolute Spring worktree path. Restore a byte-identical live copy before every scored candidate repetition. Keep all preparation outside scored time; start `wall_ms` immediately before `codex exec` process spawn and stop it on process exit. Grade every run with a held-out Spring test, preserve raw artifacts and frozen candidate provenance, then generate a descriptive comparison report.
+**Architecture:** Add fail-closed snapshot and timing primitives to the existing Node benchmark harness. Prepare one immutable GCAL/Goldeneye ready-cache snapshot bound to one stable absolute Spring worktree path. Restore a byte-identical live copy before every scored candidate repetition. Keep all preparation outside scored time; start `wall_ms` immediately before `codex exec` process spawn and stop it on process exit. Grade every run with a held-out Spring test, preserve raw artifacts and frozen candidate provenance, then generate a descriptive comparison report.
 
 **Plan Acronym:** SUWB
 
-**Tech Stack:** Node.js ESM, `node:test`, PowerShell, Git worktrees, ACK CLI, Goldeneye MCP backend, Codex CLI JSONL, Java 17, Gradle Wrapper, Spring Framework 6.2.x, Markdown/JSON artifacts
+**Tech Stack:** Node.js ESM, `node:test`, PowerShell, Git worktrees, GCAL CLI, Goldeneye MCP backend, Codex CLI JSONL, Java 17, Gradle Wrapper, Spring Framework 6.2.x, Markdown/JSON artifacts
 
 ---
 
@@ -24,23 +24,23 @@
 - Allowed cache root: `D:\Dev\IdeaProjects\.gab-cache`
 - Immutable snapshot: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots\spring-stringutils`
 - Allowed snapshot root: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots`
-- ACK repository: `D:\Dev\IdeaProjects\agent-context-kernel`
-- ACK entrypoint: `D:\Dev\IdeaProjects\agent-context-kernel\dist\main.js`
+- GCAL repository: `D:\Dev\IdeaProjects\goldeneye-tool\agent`
+- GCAL entrypoint: `D:\Dev\IdeaProjects\goldeneye-tool\agent\dist\main.js`
 - Goldeneye binary: `D:\Dev\IdeaProjects\goldeneye-tool\target\release\goldeneye.exe`
 - Java 17 home: `C:\Users\Zacha\.jdks\openjdk-17.0.2`
 - Persistent Gradle home: `D:\Dev\Caches\gradle-spring-framework-6.2`
 - Model: `gpt-5.6-terra`
 - Reasoning: `high`
-- Candidate condition: Goldeneye+ACK, warm only, three serial repetitions
+- Candidate condition: Goldeneye+GCAL, warm only, three serial repetitions
 - Comparison condition: vanilla, one run only because no valid cached Spring baseline exists
 - No `clean`; use Gradle daemon and local build cache
 - Candidate repositories and binaries stay frozen during harness implementation and scoring
-- Existing unrelated dirty files in `goldeneye-tool` and `agent-context-kernel` are never staged, reverted, or modified
+- Existing unrelated dirty files in `goldeneye-tool` and `goldeneye-code-agent-layer` are never staged, reverted, or modified
 
 ## Metric Contract
 
 - `maintenance_ms`: work completed before `codex exec` spawn, including worktree reset, snapshot restore, manifest verification, candidate verification, and engine setup.
-- `wall_ms`: elapsed monotonic time beginning immediately before the `codex exec` spawn call and ending when that process exits. Any ACK, Goldeneye, MCP, or other child startup performed lazily after spawn is included.
+- `wall_ms`: elapsed monotonic time beginning immediately before the `codex exec` spawn call and ending when that process exits. Any GCAL, Goldeneye, MCP, or other child startup performed lazily after spawn is included.
 - `grader_ms`: held-out grader duration after agent exit.
 - `completion_ms`: exactly `wall_ms`; never includes maintenance.
 - `verified_e2e_ms`: `wall_ms + grader_ms`.
@@ -150,7 +150,7 @@ Use this manifest schema:
   "byte_count": 123,
   "files": [
     {
-      "path": "ack-state/goldeneye.db",
+      "path": "gcal-state/goldeneye.db",
       "bytes": 123,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
@@ -329,7 +329,7 @@ export function scoreRunDurations({ maintenanceMs, wallMs, graderMs }) {
 
 Integrate `spawnWithTimer()` inside `runCodex()` so the callback contains the
 actual `spawn(codexCommand, codexArgs, options)` call. Stop timing only in the
-child `close` handler. Do not start ACK or Goldeneye in a pre-spawn scored timer.
+child `close` handler. Do not start GCAL or Goldeneye in a pre-spawn scored timer.
 Any process started because Codex invokes MCP occurs after `codex exec` spawn and
 is therefore included.
 
@@ -406,7 +406,7 @@ Refactor pure lifecycle decisions into exported helpers and test:
 
 ```js
 assert.deepEqual(
-  resolveRunLayout({ kind: "ack", readySnapshot, runId: "candidate-1" }),
+  resolveRunLayout({ kind: "gcal", readySnapshot, runId: "candidate-1" }),
   {
     worktree: readySnapshot.worktree,
     cacheDir: readySnapshot.live_cache,
@@ -415,13 +415,13 @@ assert.deepEqual(
 );
 
 assert.equal(
-  shouldPrimeIndex({ kind: "ack", usesReadySnapshot: true }),
+  shouldPrimeIndex({ kind: "gcal", usesReadySnapshot: true }),
   false,
 );
 ```
 
 Also assert vanilla retains unique per-run worktree behavior and never restores
-the ACK snapshot.
+the GCAL snapshot.
 
 Run:
 
@@ -446,14 +446,14 @@ Preparation path:
 3. remove any registered stable worktree only after exact path validation;
 4. create detached worktree at `base_ref`;
 5. clear/recreate live cache;
-6. set isolated `ACK_HOME`, `GOLDENEYE_DB_PATH`, `CBM_CACHE_DIR`, and project root;
-7. run ACK `init` once;
+6. set isolated `GCAL_HOME`, `GOLDENEYE_DB_PATH`, `CBM_CACHE_DIR`, and project root;
+7. run GCAL `init` once;
 8. wait for initializer exit;
-9. fail if any ACK/Goldeneye process launched by initializer remains or any DB WAL/SHM/lock file exists;
+9. fail if any GCAL/Goldeneye process launched by initializer remains or any DB WAL/SHM/lock file exists;
 10. create and verify immutable snapshot;
 11. write preparation metrics and provenance; exit without a scored run.
 
-Scored ACK path:
+Scored GCAL path:
 
 1. start maintenance timer;
 2. verify candidate fingerprints;
@@ -673,11 +673,11 @@ Create configuration containing:
   },
   "engines": [
     {
-      "id": "goldeneye-ack",
-      "kind": "ack",
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "cache_modes": ["warm"]
@@ -807,7 +807,7 @@ Goldeneye:
   `crates/application/goldeneye-query/src/engine/search.rs`;
 - SHA-256 and byte size of `target/release/goldeneye.exe`.
 
-ACK:
+GCAL:
 
 - repository HEAD;
 - SHA-256 of `git diff --binary`;
@@ -853,7 +853,7 @@ $env:JAVA_HOME='C:\Users\Zacha\.jdks\openjdk-17.0.2'
 $env:GRADLE_USER_HOME='D:\Dev\Caches\gradle-spring-framework-6.2'
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --prepare-snapshot
 ```
 
@@ -876,7 +876,7 @@ Restore snapshot once and run the task with an explicit smoke flag:
 ```powershell
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --repetitions 1 `
   --smoke
 ```
@@ -884,7 +884,7 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
 Smoke acceptance:
 
 - snapshot restore and verification pass;
-- Codex can invoke ACK;
+- Codex can invoke GCAL;
 - held-out grader passes;
 - `wall_ms` begins at Codex spawn;
 - post-run live-cache mutation does not change snapshot manifest;
@@ -918,7 +918,7 @@ Expected: `eligible_for_scoring: true`.
 **Files:**
 
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/vanilla/**`
-- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/goldeneye-ack/**`
+- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/gcal/**`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.md`
 
@@ -967,7 +967,7 @@ attempt.
 ```powershell
 node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-stringutils-unicode-truncate.json `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --repetitions 3
 ```
 
@@ -1009,7 +1009,7 @@ Report per run:
 - `maintenance_ms`, `wall_ms`, `grader_ms`, `completion_ms`,
   `verified_e2e_ms`;
 - total, uncached input, cached input, output, and reasoning tokens;
-- tool calls, ACK calls, Goldeneye/backend calls, failed calls;
+- tool calls, GCAL calls, Goldeneye/backend calls, failed calls;
 - result payload bytes and cardinality;
 - command failures and classified causes;
 - first discovery/search selection, ordering, failed discovery commands, and
@@ -1034,7 +1034,7 @@ Vanilla comparison:
 Required limitations text:
 
 ```markdown
-This benchmark contains three serial Goldeneye+ACK candidate repetitions and one
+This benchmark contains three serial Goldeneye+GCAL candidate repetitions and one
 vanilla comparison run. The vanilla result is descriptive reuse evidence, not a
 paired or randomized control. Reported differences do not establish causality
 or statistical significance. Query latency alone is not interpreted as agent
@@ -1092,7 +1092,7 @@ Expected:
   manifest, restore verification, contamination, and tamper gates covered.
 - `wall_ms` executable boundary tested at actual spawn; lazy post-spawn startup
   included; maintenance separated.
-- Goldeneye, ACK, benchmark, task, grader, prompt, config, and environment
+- Goldeneye, GCAL, benchmark, task, grader, prompt, config, and environment
   provenance covered before, during, and after scoring.
 - One vanilla run and three serial candidate repetitions covered.
 - Smoke excluded from scored summary.

@@ -9,7 +9,7 @@ vanilla registers no MCP server and uses ordinary shell/file discovery.
 
 The runner uses detached Git worktrees and executes runs sequentially in a
 seeded random order. It disables the user's Codex configuration and repository
-rules, then supplies a common benchmark prompt. Invoking the global `ack` CLI is
+rules, then supplies a common benchmark prompt. Invoking the global `gcal` CLI is
 forbidden and recorded as a protocol violation so it cannot silently route both
 lanes through the same backend. MCP lanes must also use their assigned graph
 engine to discover and read `.ts`, `.tsx`, and `.rs` source. Direct source reads

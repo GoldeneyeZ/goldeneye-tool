@@ -18,9 +18,9 @@ The files above are starting points only. Inspect any additional files needed to
 
 ## Completion Updates
 
-- Clean ACK smoke and clean vanilla calibration both passed the same held-out
+- Clean GCAL smoke and clean vanilla calibration both passed the same held-out
   grader on the final frozen task and snapshot.
-- Final pair: ACK 984,009 input / 7.16 min; vanilla 993,518 input / 5.29 min.
+- Final pair: GCAL 984,009 input / 7.16 min; vanilla 993,518 input / 5.29 min.
 - User explicitly waived the randomized 3×3 matrix after accepting the final
   clean `n = 1` result.
 - Sample SD and CV remain undefined; no statistical-significance claim.

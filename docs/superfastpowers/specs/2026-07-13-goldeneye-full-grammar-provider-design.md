@@ -279,7 +279,7 @@ The full provider is not advertised as a publishable release artifact until Phas
 
 ## Non-Goals
 
-- Porting graph extraction, SQLite storage, ACK query tools, or structural edits in this phase.
+- Porting graph extraction, SQLite storage, GCAL query tools, or structural edits in this phase.
 - Dynamically loading grammar libraries at runtime.
 - Downloading grammars from a Cargo build script.
 - Treating prebuilt native archives as authoritative inputs.

@@ -227,7 +227,7 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_ack_reads() {
+fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_gcal_reads() {
     let temp = TempDir::new().expect("temp directory");
     let repo = temp.path().join("fixture");
     fixture(&repo);

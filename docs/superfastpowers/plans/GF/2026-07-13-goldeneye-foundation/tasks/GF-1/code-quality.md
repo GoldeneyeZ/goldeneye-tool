@@ -17,4 +17,4 @@
 - Tests use real API, name behavior clearly, and assert both error and successful value preservation.
 - Constructor error documentation keeps pedantic lint strict without suppressions.
 - Commit contains no unrelated refactor or extra production behavior.
-- Root ignore files prevent generated/reference trees from polluting Git or ACK; committed lockfile makes dependency resolution reproducible.
+- Root ignore files prevent generated/reference trees from polluting Git or GCAL; committed lockfile makes dependency resolution reproducible.
