@@ -410,7 +410,9 @@ if (oneShot.enabled) {
       cache_modes: config.cache_modes,
       timeout_ms: config.timeout_ms,
       agent_verification_policy: agentVerificationPolicy(),
-      gcal_call_limit: null,
+      gcal_discovery_strategy: selectedRun.engine.gcal_discovery_strategy ?? null,
+      gcal_call_limit:
+        selectedRun.engine.gcal_discovery_strategy === "single-dossier" ? 4 : null,
     },
     model_invocations: result.model_invocations,
     grader_invocations: result.grader_invocations,
@@ -1104,6 +1106,9 @@ async function executeRun(run, context) {
     telemetry.protocol_violations,
     run.engine.kind,
   );
+  protocolViolations.push(
+    ...gcalStrategyViolations(telemetry.command_events, run.engine),
+  );
   const dirtyFileNames = status
     .split(/\r?\n/)
     .filter(Boolean)
@@ -1216,7 +1221,13 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
         : `- Cache condition: ${cacheMode}. Do not make assumptions about whether the repository is indexed; check through MCP when useful.`;
   const gcalInstruction =
     engine.kind === "gcal"
-      ? "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
+      ? engine.gcalDiscoveryStrategy === "single-dossier"
+        ? [
+            "- GCAL strategy: single dossier workflow.",
+            "- Your first code-discovery command must be exactly one gcal workflow --js/--file invocation. Build one structured implementation dossier inside it: ranked production symbols and exact source, propagation path, analogous tests, docs/help/locales, platform variants, and unresolved gaps. Loop over dependent results and parallelize independent reads with Promise.all.",
+            "- After that workflow, use at most three additional GCAL CLI invocations, only for exact missing evidence. Never invoke gcal workflow a second time. Stop discovery once the dossier supports edits.",
+          ].join("\n")
+        : "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}
 
@@ -1255,6 +1266,7 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
     return {
       command,
       args: engine.args ?? [],
+      gcalDiscoveryStrategy: engine.gcal_discovery_strategy ?? "adaptive",
       gcalHome,
       cbmDecoy,
       environment: {
@@ -2035,7 +2047,7 @@ function analyzeDiscoveryTrace(path) {
     ) {
       continue;
     }
-    const action = item.command.match(/\back\s+(status|search|symbol|inspect|get|callers|callees|arch)\b/i)?.[1]
+    const action = item.command.match(/\bgcal\s+(status|search|symbol|inspect|get|callers|callees|arch|workflow)\b/i)?.[1]
       ?.toLowerCase() ?? "other";
     const output = String(item.aggregated_output ?? "");
     commands.push({
@@ -2048,6 +2060,35 @@ function analyzeDiscoveryTrace(path) {
     });
   }
   return summarizeDiscoveryCommands(commands);
+}
+
+function gcalStrategyViolations(commandEvents, engine) {
+  if (engine.kind !== "gcal" || engine.gcal_discovery_strategy !== "single-dossier") return [];
+  const gcalCommands = commandEvents.filter(({ command }) =>
+    /(?:^|[^A-Za-z0-9_.-])gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(command),
+  );
+  const workflows = gcalCommands.filter(({ command }) =>
+    /\bgcal(?:\.(?:exe|cmd|ps1))?\s+workflow\b/i.test(command),
+  );
+  const violations = [];
+  if (workflows.length !== 1) {
+    violations.push({
+      type: "gcal_workflow_budget",
+      expected: 1,
+      actual: workflows.length,
+    });
+  }
+  if (gcalCommands.length > 4) {
+    violations.push({
+      type: "gcal_call_budget",
+      expected_maximum: 4,
+      actual: gcalCommands.length,
+    });
+  }
+  if (gcalCommands.length > 0 && gcalCommands[0] !== workflows[0]) {
+    violations.push({ type: "gcal_workflow_not_first" });
+  }
+  return violations;
 }
 
 function persistNewReport(path, report) {
