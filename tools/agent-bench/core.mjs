@@ -386,7 +386,7 @@ export function codexSandboxArgs({ fullAccess, worktree }) {
       "-c",
       'approval_policy="never"',
       "-c",
-      "features.code_mode_host=false",
+      "features.code_mode_host=true",
     ];
   }
   return [
@@ -397,7 +397,7 @@ export function codexSandboxArgs({ fullAccess, worktree }) {
     "-c",
     'approval_policy="never"',
     "-c",
-    "features.code_mode_host=false",
+    "features.code_mode_host=true",
   ];
 }
 
