@@ -1225,6 +1225,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
         ? [
             "- GCAL strategy: single dossier workflow.",
             "- Your first code-discovery command must be exactly one gcal workflow --js/--file invocation. Build one structured implementation dossier inside it: ranked production symbols and exact source, propagation path, analogous tests, docs/help/locales, platform variants, and unresolved gaps. Loop over dependent results and parallelize independent reads with Promise.all.",
+            "- Keep that workflow within its 32-call backend guard: use at most six targeted searches, retain at most three hits per search, deduplicate, and fetch at most eighteen exact sources. Do not fetch every hit.",
             "- After that workflow, use at most three additional GCAL CLI invocations, only for exact missing evidence. Never invoke gcal workflow a second time. Stop discovery once the dossier supports edits.",
           ].join("\n")
         : "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
