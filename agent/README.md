@@ -125,9 +125,9 @@ gcal get "com.example.LargeService.run" --chunk 2 --expected-source-sha "<64-low
 gcal callers "com.example.BookingService.cancelBooking" --depth 1 --limit 20
 gcal callees "com.example.BookingService.cancelBooking" --depth 1 --limit 20
 
-gcal workflow "BookingService cancel" --source
-gcal workflow "BookingService cancel" --callers --callees
-gcal workflow "com.example.BookingService.cancelBooking" --exact --all
+gcal workflow --js 'const hits = await gcal.search("BookingService cancel"); return gcal.select(hits);'
+gcal workflow --file ./investigate.js
+gcal workflow --file ./investigate.js --max-calls 64 --timeout-ms 60000
 
 gcal arch
 gcal status
@@ -163,14 +163,38 @@ status `1`.
 
 The commands intentionally produce compact agent-facing output. Candidate output from `search` and `symbol` defaults to 5 candidates. Relationship output from `callers` and `callees` defaults to depth 1 and 20 rows; use `--depth` and `--limit` to override those bounds. Each relationship row contains the related qualified name, hop, file, and line as four tab-separated fields.
 
-`workflow` performs bounded dependent discovery in one CLI invocation. A broad
-argument first searches up to five candidates and selects rank one by default;
-`--rank <n>` selects another displayed candidate. `--exact` skips search. Requested
-`--source`, `--callers`, and `--callees` hops run concurrently after selection;
-`--all` requests all three. Source uses one 8 KiB chunk, relationship output defaults
-to depth one and 20 rows per hop, and hard bounds prevent fan-out beyond 20 search
-candidates, depth four, or 50 rows per trace. Successful sections survive a failed
-hop, but partial workflows exit with status `1`.
+`workflow` runs true JavaScript so one CLI invocation can loop, branch, select search
+results, and decide later calls from earlier evidence. Supply exactly one of `--js`
+or `--file`. The async body receives `gcal.search`, `gcal.select`, `gcal.source`
+(`gcal.get` is an alias), `gcal.callers`, and `gcal.callees`; return a JSON-serializable
+value for stdout. JavaScript can use normal control flow and `Promise.all`:
+
+```js
+const hits = await gcal.search("authentication", { limit: 10 });
+const evidence = [];
+
+for (const hit of hits) {
+  const source = await gcal.source(hit.qualifiedName);
+  if (!source.source.includes("token")) continue;
+
+  const [callers, callees] = await Promise.all([
+    gcal.callers(hit.qualifiedName, { depth: 1, limit: 20 }),
+    gcal.callees(hit.qualifiedName, { depth: 1, limit: 20 }),
+  ]);
+  evidence.push({ hit, source, callers, callees });
+}
+
+return evidence;
+```
+
+Defaults allow 32 backend calls and 30 seconds; flags can raise these to hard caps
+of 128 calls and 120 seconds. Per-operation bounds remain 20 search candidates,
+one 8 KiB source chunk, trace depth four, and 50 trace rows. Returned stdout is
+capped at 48 KiB and captured console output at 8 KiB.
+
+Workflow code is trusted Node.js, not a security sandbox. The worker timeout and
+call budget protect process liveness; they do not prevent filesystem, network,
+environment, or secret access. Run only code you trust.
 
 `search` treats input as literal-safe by default instead of exposing backend FTS grammar. Pipe-separated alternatives are searched independently, merged in stable branch order, deduplicated by qualified name, and bounded by one global limit. A leading Java annotation marker such as `@SpringBootTest` is normalized to its literal name. A leading wildcard such as `*Test` routes to an escaped suffix symbol match; use `symbol` for other regex searches.
 
@@ -178,7 +202,7 @@ hop, but partial workflows exit with status `1`.
 
 ## Phase 1 Boundary
 
-GCAL does not implement `gcal elect` yet. Its deterministic primitives cover project initialization, search, symbol lookup, inspect, bounded multi-hop workflows, exact source retrieval, call tracing, architecture, status, and indexing.
+GCAL does not implement `gcal elect` yet. Its primitives cover project initialization, search, symbol lookup, inspect, trusted JavaScript workflows, exact source retrieval, call tracing, architecture, status, and indexing.
 
 ## Workflow Kit
 

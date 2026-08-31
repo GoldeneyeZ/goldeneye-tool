@@ -6,7 +6,6 @@ import {
   BATCH_GET_MAX_SOURCE_BYTES,
   formatBatchSourcesText,
   formatHydratedSearchText,
-  formatMultiHopWorkflowText,
   formatSourceText,
   HYDRATED_SEARCH_MAX_OUTPUT_BYTES,
   HYDRATED_SEARCH_MAX_SNIPPET_BYTES,
@@ -175,37 +174,5 @@ describe("formatHydratedSearchText", () => {
     for (const snippet of snippets) {
       expect(output).toContain(`# snippet\t${snippet.candidate.qualifiedName}\n`);
     }
-  });
-});
-
-describe("formatMultiHopWorkflowText", () => {
-  it("prints deterministic selected, source, inbound, and outbound sections", () => {
-    const symbol = selected("example.Service.run", "run(): void {}");
-    const trace = {
-      sourceQualifiedName: "example.Caller.run",
-      targetQualifiedName: symbol.qualifiedName,
-      relatedQualifiedName: "example.Caller.run",
-      hop: 1,
-      filePath: "src/Caller.ts",
-      line: 4,
-    };
-
-    expect(
-      formatMultiHopWorkflowText({
-        candidates: [],
-        selectedQualifiedName: symbol.qualifiedName,
-        source: symbol,
-        inbound: [trace],
-        inboundTotal: 1,
-        outbound: [{ ...trace, relatedQualifiedName: "example.Dependency.run" }],
-        outboundTotal: 1,
-        failures: [],
-      }),
-    ).toBe(
-      "# selected\nqualified_name=example.Service.run\n\n" +
-        "# source\nrun(): void {}\n\n" +
-        "# inbound\nexample.Caller.run\t1\tsrc/Caller.ts\t4\n\n" +
-        "# outbound\nexample.Dependency.run\t1\tsrc/Caller.ts\t4",
-    );
   });
 });

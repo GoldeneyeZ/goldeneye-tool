@@ -6,7 +6,6 @@ import type { GcalBackendClient } from "../domain/GcalBackendClient.js";
 import { initializeProject } from "../workflows/initializeProject.js";
 import { BatchGetFailedError } from "../workflows/getSymbols.js";
 import { EnhancedSearchFailedError } from "../workflows/searchSymbols.js";
-import { MultiHopWorkflowFailedError } from "../workflows/runMultiHopWorkflow.js";
 import { createProgram } from "./createProgram.js";
 import type { WriteFn } from "./output.js";
 
@@ -108,11 +107,7 @@ export async function runCli(options: RunCliOptions): Promise<number> {
       return error.exitCode;
     }
 
-    if (
-      error instanceof BatchGetFailedError ||
-      error instanceof EnhancedSearchFailedError ||
-      error instanceof MultiHopWorkflowFailedError
-    ) {
+    if (error instanceof BatchGetFailedError || error instanceof EnhancedSearchFailedError) {
       return 1;
     }
 

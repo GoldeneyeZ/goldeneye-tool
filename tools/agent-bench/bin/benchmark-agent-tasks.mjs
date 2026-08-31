@@ -1204,7 +1204,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
     engine.kind === "vanilla"
       ? "- No code-memory MCP is available. Use ordinary local shell and file tools for discovery."
       : engine.kind === "gcal"
-        ? `- Use only the gcal CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use gcal search/symbol/get/inspect/workflow/callers/callees/arch/status instead. Prefer one gcal workflow invocation when a query must feed source or relationship hops. git status, git diff, edits, and build/test commands remain allowed.`
+        ? `- Use only the gcal CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use gcal search/symbol/get/inspect/workflow/callers/callees/arch/status instead. Prefer one gcal workflow --js/--file invocation when later discovery depends on earlier results. git status, git diff, edits, and build/test commands remain allowed.`
         : `- Use only the assigned ${engine.id} MCP tools to discover and read ${sourceLanguage} source.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Use the assigned MCP's semantic search and source tools instead. git status, git diff, edits, and build/test commands remain allowed.`;
   const cacheInstructions =
     cacheMode === "none"
@@ -1216,7 +1216,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
         : `- Cache condition: ${cacheMode}. Do not make assumptions about whether the repository is indexed; check through MCP when useful.`;
   const gcalInstruction =
     engine.kind === "gcal"
-      ? "- Use one GCAL command path per discovery need; combine known dependent hops with gcal workflow; stop discovery once enough evidence exists."
+      ? "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}
 

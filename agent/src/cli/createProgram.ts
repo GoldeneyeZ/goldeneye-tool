@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { Command, InvalidArgumentError } from "commander";
 import type { RegisteredProject } from "../config/projectRegistry.js";
 import { GcalBackendError, type GcalBackendClient } from "../domain/GcalBackendClient.js";
@@ -7,7 +8,6 @@ import {
   formatCandidateBlockText,
   formatCandidatesText,
   formatHydratedSearchText,
-  formatMultiHopWorkflowText,
   formatSelectedMetadataText,
   formatSnippetManifestText,
   formatSourceText,
@@ -31,9 +31,11 @@ import {
   searchSymbols,
 } from "../workflows/searchSymbols.js";
 import {
-  MultiHopWorkflowFailedError,
-  runMultiHopWorkflow,
-} from "../workflows/runMultiHopWorkflow.js";
+  DEFAULT_JS_WORKFLOW_MAX_CALLS,
+  DEFAULT_JS_WORKFLOW_TIMEOUT_MS,
+  formatJavaScriptWorkflowValue,
+  runJavaScriptWorkflow,
+} from "../workflows/runJavaScriptWorkflow.js";
 import { writeLine, type WriteFn } from "./output.js";
 
 export interface ProgramDeps {
@@ -67,15 +69,10 @@ interface GetCommandOptions {
 }
 
 interface WorkflowCommandOptions {
-  all?: boolean;
-  callees?: boolean;
-  callers?: boolean;
-  depth: number;
-  exact?: boolean;
-  limit: number;
-  rank: number;
-  source?: boolean;
-  traceLimit: number;
+  file?: string;
+  js?: string;
+  maxCalls: number;
+  timeoutMs: number;
 }
 
 function numberOption(value: string): number {
@@ -332,39 +329,37 @@ export function createProgram(deps: ProgramDeps): Command {
 
   program
     .command("workflow")
-    .description("run bounded dependent discovery hops in one invocation")
-    .argument("<queryOrQualifiedName>")
-    .option("--source", "include one bounded source chunk")
-    .option("--callers", "include inbound relationships")
-    .option("--callees", "include outbound relationships")
-    .option("--all", "include source, callers, and callees")
-    .option("--exact", "skip search and use the argument as an exact qualified name")
-    .option("--rank <n>", "select 1-based search result", positiveNumberOption, 1)
-    .option("--limit <n>", "candidate search limit", positiveNumberOption, 5)
-    .option("--depth <n>", "relationship depth", positiveNumberOption, 1)
-    .option("--trace-limit <n>", "maximum rows per relationship hop", positiveNumberOption, 20)
-    .action(async (queryOrQualifiedName: string, options: WorkflowCommandOptions) => {
-      const all = options.all === true;
-      const result = await runMultiHopWorkflow(deps.client, queryOrQualifiedName, {
-        exact: options.exact === true || looksLikeQualifiedName(queryOrQualifiedName),
-        rank: options.rank,
-        searchLimit: options.limit,
-        source: all || options.source === true,
-        callers: all || options.callers === true,
-        callees: all || options.callees === true,
-        depth: options.depth,
-        traceLimit: options.traceLimit,
+    .description("run trusted JavaScript over bounded GCAL operations")
+    .option("--js <code>", "execute JavaScript source")
+    .option("--file <path>", "execute JavaScript from a file")
+    .option(
+      "--max-calls <n>",
+      "maximum backend calls",
+      positiveNumberOption,
+      DEFAULT_JS_WORKFLOW_MAX_CALLS,
+    )
+    .option(
+      "--timeout-ms <n>",
+      "worker timeout in milliseconds",
+      positiveNumberOption,
+      DEFAULT_JS_WORKFLOW_TIMEOUT_MS,
+    )
+    .action(async (options: WorkflowCommandOptions) => {
+      const code = await loadWorkflowCode(options);
+      const result = await runJavaScriptWorkflow(deps.client, code, {
+        maxCalls: options.maxCalls,
+        timeoutMs: options.timeoutMs,
       });
 
-      writeLine(deps.writeOut, formatMultiHopWorkflowText(result));
-      writeWorkflowTraceTruncation(deps, "callers", result.inboundTotal, options.traceLimit);
-      writeWorkflowTraceTruncation(deps, "callees", result.outboundTotal, options.traceLimit);
-      for (const failure of result.failures) {
-        writeLine(deps.writeErr, `gcal: workflow ${failure.hop} failed: ${failure.message}`);
+      writeLine(deps.writeOut, formatJavaScriptWorkflowValue(result.value));
+      if (result.stdout.length > 0) {
+        writeLine(deps.writeErr, `gcal: workflow stdout\n${result.stdout.trimEnd()}`);
       }
-
-      if (result.failures.length > 0) {
-        throw new MultiHopWorkflowFailedError(result.failures.length);
+      if (result.stderr.length > 0) {
+        writeLine(deps.writeErr, `gcal: workflow stderr\n${result.stderr.trimEnd()}`);
+      }
+      if (result.logsTruncated) {
+        writeLine(deps.writeErr, "gcal: workflow console output truncated");
       }
     });
 
@@ -402,19 +397,13 @@ export function createProgram(deps: ProgramDeps): Command {
   return program;
 }
 
-function looksLikeQualifiedName(value: string): boolean {
-  return !/\s/.test(value) && (value.includes(".") || value.includes("::"));
-}
-
-function writeWorkflowTraceTruncation(
-  deps: ProgramDeps,
-  hop: "callers" | "callees",
-  total: number | undefined,
-  limit: number,
-): void {
-  if (total !== undefined && total > limit) {
-    writeLine(deps.writeErr, `gcal: workflow ${hop} truncated to ${limit} of ${total} rows`);
+async function loadWorkflowCode(options: WorkflowCommandOptions): Promise<string> {
+  if (options.js !== undefined && options.file !== undefined) {
+    throw new Error("gcal workflow accepts exactly one of --js or --file");
   }
+  if (options.js !== undefined) return options.js;
+  if (options.file !== undefined) return readFile(options.file, "utf8");
+  throw new Error("gcal workflow requires --js <code> or --file <path>");
 }
 
 function validateGetChunkOptions(qualifiedNames: string[], options: GetCommandOptions): void {

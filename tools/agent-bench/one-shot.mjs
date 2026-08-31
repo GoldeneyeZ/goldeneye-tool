@@ -69,7 +69,7 @@ export function agentVerificationPolicy() {
     "One-shot execution policy (final override):",
     "- Do not run build, compile, test, lint, check, verification, or validation commands.",
     "- Make the requested source edits, inspect the resulting diff/status if needed, then finish.",
-    "- GCAL discovery calls are not limited; prefer one bounded gcal workflow when a query feeds dependent source or relationship hops.",
+    "- GCAL discovery calls are not limited; prefer one gcal workflow --js/--file invocation when later discovery depends on earlier results.",
     "- The benchmark harness runs the held-out grader after you exit.",
   ].join("\n");
 }

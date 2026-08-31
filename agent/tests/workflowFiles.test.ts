@@ -23,15 +23,18 @@ describe("workflow files", () => {
     expect(goldeneyeGcalSkillMd).toContain("Stop discovery once the task has enough evidence");
     expect(goldeneyeGcalSkillMd).toContain("Run one `gcal get <qualified-name...>`");
     expect(goldeneyeGcalSkillMd).toContain("--query <query-2> ... --snippets <n>");
-    expect(goldeneyeGcalSkillMd).toContain('gcal workflow "<query>" --source');
-    expect(goldeneyeGcalSkillMd).toContain("--exact --all");
-    expect(goldeneyeGcalSkillMd).toContain("runs requested");
-    expect(goldeneyeGcalSkillMd).toContain("hops concurrently");
+    expect(goldeneyeGcalSkillMd).toContain("gcal workflow --file <path>");
+    expect(goldeneyeGcalSkillMd).toContain("gcal workflow --js <code>");
+    expect(goldeneyeGcalSkillMd).toContain("true async JavaScript body");
+    expect(goldeneyeGcalSkillMd).toContain("loop, branch");
+    expect(goldeneyeGcalSkillMd).toContain("`gcal.search`, `gcal.select`, `gcal.source`");
+    expect(goldeneyeGcalSkillMd).toContain("Return a JSON-serializable value");
+    expect(goldeneyeGcalSkillMd).toContain("not a security sandbox");
     expect(goldeneyeGcalSkillMd).toContain("Keep batches at five items or fewer");
     expect(goldeneyeGcalSkillMd).toContain("Exceed five only when every item is");
     expect(goldeneyeGcalSkillMd).toContain("directly relevant to the current task");
     expect(goldeneyeGcalSkillMd).toContain(
-      "A normal unknown-source lookup uses one `gcal workflow` invocation",
+      "A normal unknown-source lookup uses one `gcal search --snippets` invocation",
     );
     expect(goldeneyeGcalSkillMd).toContain(
       "Do not run `gcal status` or `gcal --help` unless blocked",

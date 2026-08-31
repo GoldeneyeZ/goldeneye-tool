@@ -124,15 +124,22 @@ try {
   );
   const workflow = runGcal(
     "workflow",
-    ["workflow", qualifiedHelper, "--exact", "--all"],
+    [
+      "workflow",
+      "--js",
+      `const q = ${JSON.stringify(qualifiedHelper)};
+const source = await gcal.source(q);
+const [callers, callees] = await Promise.all([gcal.callers(q), gcal.callees(q)]);
+return { selected: q, source: source.source, callers, callees };`,
+    ],
     projectEnvironment,
   );
   assert.equal(workflow.status, 0, commandFailure("gcal workflow", workflow));
-  assert.match(workflow.stdout, /^# selected\n/m);
-  assert.match(workflow.stdout, /^# source\n/m);
-  assert.match(workflow.stdout, /^# inbound\n/m);
-  assert.match(workflow.stdout, /^# outbound\n/m);
-  assert.ok(workflow.stdout.includes(expected.source.trimEnd()));
+  const workflowPayload = normalizeValue(JSON.parse(workflow.stdout), project, canonicalRoot);
+  assert.equal(workflowPayload.selected, "<project>.src.lib.helper");
+  assert.equal(workflowPayload.source, expected.source);
+  assert.equal(workflowPayload.callers.length, 1);
+  assert.deepEqual(workflowPayload.callees, []);
   expectJson(
     "arch",
     ["arch"],

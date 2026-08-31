@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -463,13 +463,11 @@ describe("GCAL CLI", () => {
 
   it("turns typed oversized single get into one manifest call and compact chunk UX", async () => {
     const qualifiedName = "com.example.Huge.run";
-    const get = vi
-      .fn()
-      .mockRejectedValue(
-        new GcalBackendError("MCP tool error: snippet exceeds bounds", "SnippetTooLarge", {
-          actual_lines: 900,
-        }),
-      );
+    const get = vi.fn().mockRejectedValue(
+      new GcalBackendError("MCP tool error: snippet exceeds bounds", "SnippetTooLarge", {
+        actual_lines: 900,
+      }),
+    );
     const getSnippetChunk = vi.fn();
     const getSnippetManifest = vi.fn().mockResolvedValue({
       selected: {
@@ -568,13 +566,11 @@ describe("GCAL CLI", () => {
 
   it("preserves typed stale-source failures from one explicit chunk call", async () => {
     const sha = "c".repeat(64);
-    const getSnippetChunk = vi
-      .fn()
-      .mockRejectedValue(
-        new GcalBackendError("MCP tool error: snippet source changed", "StaleSnippetSource", {
-          expected_source_sha256: sha,
-        }),
-      );
+    const getSnippetChunk = vi.fn().mockRejectedValue(
+      new GcalBackendError("MCP tool error: snippet source changed", "StaleSnippetSource", {
+        expected_source_sha256: sha,
+      }),
+    );
     const writes: string[] = [];
     const errors: string[] = [];
 
@@ -974,51 +970,68 @@ describe("GCAL CLI", () => {
     );
   });
 
-  it("runs search, source, caller, and callee workflow hops in one invocation", async () => {
-    const selected = normalizeSelectedSymbol(methodSnippetResponse);
+  it("runs adaptive JavaScript workflow code in one invocation", async () => {
     const candidates = normalizeSearchResponse(searchGraphResponse);
     const search = vi.fn().mockResolvedValue(candidates);
-    const get = vi.fn().mockResolvedValue(selected);
-    const callers = vi.fn().mockResolvedValue(inboundTrace);
-    const callees = vi.fn().mockResolvedValue(outboundTrace);
-    const { program, writes } = createTestProgram(fakeClient({ search, get, callers, callees }));
+    const { program, writes } = createTestProgram(fakeClient({ search }));
 
-    await program.parseAsync(["node", "gcal", "workflow", "BookingService", "--all"]);
+    await program.parseAsync([
+      "node",
+      "gcal",
+      "workflow",
+      "--js",
+      'const hits = await gcal.search("BookingService"); return hits.map(hit => hit.qualifiedName);',
+    ]);
 
-    expect(search).toHaveBeenCalledWith("BookingService", { limit: 5 });
-    expect(get).toHaveBeenCalledWith(candidates[0].qualifiedName);
-    expect(callers).toHaveBeenCalledWith(candidates[0].qualifiedName, { depth: 1 });
-    expect(callees).toHaveBeenCalledWith(candidates[0].qualifiedName, { depth: 1 });
-    expect(writes.join("")).toContain("# candidates");
-    expect(writes.join("")).toContain("# source");
-    expect(writes.join("")).toContain("# inbound");
-    expect(writes.join("")).toContain("# outbound");
+    expect(search).toHaveBeenCalledWith("BookingService", {
+      limit: 5,
+      label: undefined,
+      filePattern: undefined,
+      qualifiedNamePattern: undefined,
+    });
+    expect(writes.join("")).toBe(`${JSON.stringify(candidates.map((row) => row.qualifiedName))}\n`);
   });
 
-  it("returns partial workflow evidence with exit status 1 when one hop fails", async () => {
+  it("runs JavaScript workflow code from a file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gcal-workflow-"));
+    const workflowPath = join(directory, "investigate.js");
+    await writeFile(workflowPath, 'return (await gcal.search("token"))[0] ?? null;\n');
+    const search = vi.fn().mockResolvedValue([normalizeSearchResponse(searchGraphResponse)[0]]);
+    const { program, writes } = createTestProgram(fakeClient({ search }));
+
+    try {
+      await program.parseAsync(["node", "gcal", "workflow", "--file", workflowPath]);
+      expect(search).toHaveBeenCalledOnce();
+      expect(JSON.parse(writes.join(""))).toMatchObject({ qualifiedName: expect.any(String) });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("returns exit status 1 when JavaScript workflow code fails", async () => {
     const writes: string[] = [];
     const errors: string[] = [];
     const callers = vi.fn().mockRejectedValue(new Error("caller graph unavailable"));
-    const callees = vi.fn().mockResolvedValue(outboundTrace);
 
     const exitCode = await runCli({
       argv: [
         "node",
         "gcal",
         "workflow",
-        "com.example.booking.BookingService.cancelBooking",
-        "--callers",
-        "--callees",
+        "--js",
+        'return await gcal.callers("com.example.booking.BookingService.cancelBooking");',
       ],
       env: { GCAL_PROJECT: "example-project" },
-      createClient: () => fakeClient({ callers, callees }),
+      createClient: () => fakeClient({ callers }),
       writeOut: (text) => writes.push(text),
       writeErr: (text) => errors.push(text),
     });
 
     expect(exitCode).toBe(1);
-    expect(writes.join("")).toContain("# outbound");
-    expect(errors.join("")).toBe("gcal: workflow callers failed: caller graph unavailable\n");
+    expect(writes.join("")).toBe("");
+    expect(errors.join("")).toContain(
+      "gcal workflow JavaScript failed: Error: caller graph unavailable",
+    );
   });
 
   it("registers GCAL commands including init", () => {
