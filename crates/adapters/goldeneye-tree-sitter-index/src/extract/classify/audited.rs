@@ -58,6 +58,11 @@ fn audited_label(
     Some(if spec.function_kinds.contains(&kind) {
         if matches!(language, "capnp" | "protobuf" | "smali") {
             "Function"
+        } else if matches!(language, "cpp" | "cuda")
+            && cpp_callable_name_node(node)
+                .is_some_and(|name| node_text(name, source).contains("::"))
+        {
+            "Method"
         } else if scope.kind == ScopeKind::Type {
             "Method"
         } else {
@@ -250,6 +255,9 @@ fn audited_definition_name(
 #[allow(clippy::too_many_lines)]
 fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> Option<Node<'tree>> {
     let kind = node.kind();
+    if matches!(language, "cpp" | "cuda") && matches!(label, "Function" | "Method") {
+        return cpp_callable_name_node(node);
+    }
     if language == "zig" && kind == "test_declaration" {
         return find_descendant_kind(node, &["string_content"]);
     }
@@ -389,4 +397,18 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
         .find_map(|field| node.child_by_field_name(field))
         .and_then(|candidate| first_name_like(candidate).or(Some(candidate)))
         .or_else(|| first_name_like(node))
+}
+
+fn cpp_callable_name_node(node: Node<'_>) -> Option<Node<'_>> {
+    let declarator = node
+        .child_by_field_name("declarator")
+        .or_else(|| find_descendant_kind(node, &["function_declarator"]))?;
+    let function = if declarator.kind() == "function_declarator" {
+        declarator
+    } else {
+        find_descendant_kind(declarator, &["function_declarator"])?
+    };
+    function
+        .child_by_field_name("declarator")
+        .or_else(|| function.named_child(0))
 }

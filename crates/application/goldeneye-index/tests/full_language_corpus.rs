@@ -267,6 +267,48 @@ struct SuppressUI: public OverrideUI {
 }
 
 #[test]
+fn cpp_out_of_class_method_matches_its_header_declaration() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("MsiCA.h"),
+        "class DeferredCA { public: int getArg() const; };\n",
+    )
+    .expect("write C++ header");
+    fs::write(
+        temp.path().join("MsiCA.cpp"),
+        "int DeferredCA::getArg() const { return 1; }\n",
+    )
+    .expect("write C++ source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index qualified C++ method");
+
+    let methods = service
+        .repository()
+        .search_nodes(&result.project.id, "getArg", 10)
+        .expect("search qualified method")
+        .into_iter()
+        .filter(|hit| hit.node.label.as_str() == "Method")
+        .collect::<Vec<_>>();
+    assert_eq!(methods.len(), 1);
+    assert_eq!(methods[0].node.name, "getArg");
+    assert!(
+        methods[0]
+            .node
+            .qualified_name
+            .as_str()
+            .ends_with(".DeferredCA.getArg")
+    );
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
