@@ -167,8 +167,9 @@ The commands intentionally produce compact agent-facing output. Candidate output
 results, and decide later calls from earlier evidence. Supply exactly one of `--js`
 or `--file`. The async body receives `gcal.search`, `gcal.select`, `gcal.source`, `gcal.trySource`,
 `gcal.callers`, `gcal.callees`, `gcal.tryCallers`, and `gcal.tryCallees`
-(`gcal.get` is an alias), `gcal.callers`, and `gcal.callees`; return a JSON-serializable
-value for stdout. JavaScript can use normal control flow and `Promise.all`:
+(`gcal.get` is an alias); return a JSON-serializable value for stdout. Prefer `--file`
+for multi-line workflows; use inline `--js` only for short bodies. JavaScript can use
+normal control flow and `Promise.all`:
 
 ```js
 const hits = await gcal.search("authentication", { limit: 10 });

@@ -63,6 +63,8 @@ export const goldeneyeGcalSkillMd = [
   "returns `{ ok: true, ...sourceFields }` or `{ ok: false, error }`, so one source",
   "miss does not reject a batch. Read successful source text from `.source` directly.",
   "Return a JSON-serializable value.",
+  "Prefer `--file` for multi-line programs; reserve inline `--js` for short bodies to",
+  "avoid shell-quoting corruption.",
   "Use a targeted `filePattern` search option and deduplicate candidates by `filePath`",
   "when a broad query spans code, tests, docs, or resource files. Search results may",
   "include project/module candidates without source; use `gcal.trySource` for batches.",
