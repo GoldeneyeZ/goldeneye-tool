@@ -1225,8 +1225,9 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
         ? [
             "- GCAL strategy: single dossier workflow.",
             "- Your first code-discovery command must be exactly one gcal workflow --js/--file invocation. Build one structured implementation dossier inside it: ranked production symbols and exact source, propagation path, analogous tests, docs/help/locales, platform variants, and unresolved gaps. Loop over dependent results and parallelize independent reads with Promise.all.",
-            "- Keep that workflow within its 32-call backend guard: use at most six targeted searches with { limit: 3 }, retain at most three hits per search, deduplicate, and fetch at most eighteen exact sources. Each search string must be one exact identifier/literal or pipe-separated alternatives, never a prose or multi-concept phrase. Do not fetch every hit.",
-            "- After that workflow, use at most three additional GCAL CLI invocations, only for exact missing evidence. Never invoke gcal workflow a second time. Stop discovery once the dossier supports edits.",
+            "- Keep that workflow within its 32-call backend guard: use at most six targeted searches with { limit: 3 }, retain at most three hits per search, deduplicate, and fetch at most twelve exact sources. Each search string must be one exact identifier/literal or pipe-separated alternatives, never a prose or multi-concept phrase. Do not fetch every hit.",
+            "- The workflow return value must stay below 36 KiB. Never return raw source responses or complete files: project each fetched source into compact metadata plus only the relevant excerpt (at most 2,000 characters per source). Return unresolved exact source IDs so a later batch get can retrieve full text when necessary.",
+            "- After a successful workflow, do not call gcal help or status. Use at most three additional GCAL CLI invocations, only for exact missing evidence; batch exact gets where possible. Never invoke gcal workflow a second time. Stop discovery once the dossier supports edits.",
           ].join("\n")
         : "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
