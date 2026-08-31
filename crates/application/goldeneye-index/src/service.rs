@@ -109,11 +109,20 @@ where
     }
 }
 
-fn deduplicate_shared_modules(nodes: &mut Vec<GraphNode>) {
+fn deduplicate_shared_nodes(nodes: &mut Vec<GraphNode>) {
     let mut seen = BTreeSet::new();
-    nodes.retain(|node| {
-        node.label.as_str() != "Module"
-            || seen.insert((node.id.clone(), node.qualified_name.as_str().to_owned()))
+    nodes.retain(|node| seen.insert((node.id.clone(), node.qualified_name.as_str().to_owned())));
+}
+
+fn deduplicate_edges(edges: &mut Vec<GraphEdge>) {
+    let mut seen = BTreeSet::new();
+    edges.retain(|edge| {
+        seen.insert((
+            edge.source.clone(),
+            edge.target.clone(),
+            edge.kind.clone(),
+            edge.discriminator.clone(),
+        ))
     });
 }
 

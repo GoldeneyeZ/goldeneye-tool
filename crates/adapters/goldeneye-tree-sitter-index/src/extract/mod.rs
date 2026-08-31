@@ -174,7 +174,7 @@ mod full_language_tests {
     mod fixtures {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/full_language_fixtures.rs"
+            "/../../application/goldeneye-index/tests/support/full_language_fixtures.rs"
         ));
     }
 

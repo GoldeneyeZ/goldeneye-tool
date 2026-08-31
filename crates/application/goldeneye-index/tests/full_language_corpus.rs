@@ -234,6 +234,39 @@ fn same_stem_properties_and_xml_files_keep_distinct_file_identity() {
 }
 
 #[test]
+fn cpp_header_and_source_can_repeat_a_private_definition() {
+    let temp = TempDir::new().expect("temp repository");
+    let source = r#"
+struct OverrideUI {};
+struct SuppressUI: public OverrideUI {
+    SuppressUI(): OverrideUI() {}
+};
+"#;
+    fs::write(temp.path().join("MsiUtils.cpp"), source).expect("write C++ source");
+    fs::write(temp.path().join("MsiUtils.h"), source).expect("write C++ header");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index repeated C++ definition");
+
+    assert_eq!(result.counts.files, 2);
+    let suppress_ui = service
+        .repository()
+        .search_nodes(&result.project.id, "SuppressUI", 10)
+        .expect("search repeated definition")
+        .into_iter()
+        .filter(|hit| hit.node.label.as_str() == "Class")
+        .collect::<Vec<_>>();
+    assert_eq!(suppress_ui.len(), 1);
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(

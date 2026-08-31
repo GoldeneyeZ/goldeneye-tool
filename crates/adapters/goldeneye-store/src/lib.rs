@@ -102,8 +102,15 @@ pub enum StoreError {
     },
     #[error("graph references missing node: {node_id:?}")]
     MissingNode { node_id: NodeId },
-    #[error("duplicate node ID in replacement: {0:?}")]
-    DuplicateNodeId(NodeId),
+    #[error(
+        "duplicate node ID in replacement: {node_id:?} ({qualified_name:?}); first file {first_file_path:?}, duplicate file {file_path:?}"
+    )]
+    DuplicateNodeId {
+        node_id: NodeId,
+        first_file_path: Option<ProjectRelativePath>,
+        file_path: Option<ProjectRelativePath>,
+        qualified_name: QualifiedName,
+    },
     #[error("duplicate file path in replacement: {0:?}")]
     DuplicateFilePath(ProjectRelativePath),
     #[error("duplicate qualified name in replacement: {0:?}")]

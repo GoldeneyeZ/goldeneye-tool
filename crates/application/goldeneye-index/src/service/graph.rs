@@ -1,7 +1,7 @@
 use super::{
     Arc, BTreeMap, BTreeSet, ExtractedFile, FileGraph, FileRecord, IndexError, IndexRepository,
-    IndexService, ProjectGraph, ProjectRecord, ProjectRelativePath, branch_node,
-    deduplicate_shared_modules, project_contains_file, project_has_branch, project_node,
+    IndexService, ProjectGraph, ProjectRecord, ProjectRelativePath, branch_node, deduplicate_edges,
+    deduplicate_shared_nodes, project_contains_file, project_has_branch, project_node,
 };
 
 impl<R> IndexService<R>
@@ -48,7 +48,7 @@ where
             nodes.extend(graph.nodes);
             edges.extend(graph.edges);
         }
-        deduplicate_shared_modules(&mut nodes);
+        deduplicate_shared_nodes(&mut nodes);
         let node_ids = nodes
             .iter()
             .map(|node| node.id.clone())
@@ -70,6 +70,7 @@ where
             &pending_imports,
             &source_files,
         )?;
+        deduplicate_edges(&mut edges);
         Ok((files, nodes, edges))
     }
 }
