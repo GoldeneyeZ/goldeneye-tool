@@ -47,6 +47,9 @@ one of `--js <code>` or `--file <path>`. The body can loop, branch, use
 alias), `gcal.trySource`, `gcal.callers`, and `gcal.callees`. `gcal.trySource`
 returns `{ ok: true, value }` or `{ ok: false, error }`, so one source miss does
 not reject a batch. Return a JSON-serializable value.
+Use a targeted `filePattern` search option and deduplicate candidates by `filePath`
+when a broad query spans code, tests, docs, or resource files. Search results may
+include project/module candidates without source; use `gcal.trySource` for batches.
 
 ```js
 const hits = await gcal.search("authentication", { limit: 10 });
