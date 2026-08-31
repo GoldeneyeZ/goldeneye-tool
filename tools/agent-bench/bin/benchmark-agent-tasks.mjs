@@ -412,7 +412,7 @@ if (oneShot.enabled) {
       agent_verification_policy: agentVerificationPolicy(),
       gcal_discovery_strategy: selectedRun.engine.gcal_discovery_strategy ?? null,
       gcal_call_limit:
-        selectedRun.engine.gcal_discovery_strategy === "single-dossier" ? 4 : null,
+        selectedRun.engine.gcal_discovery_strategy === "single-dossier" ? 1 : null,
     },
     model_invocations: result.model_invocations,
     grader_invocations: result.grader_invocations,
@@ -1226,9 +1226,9 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
             "- GCAL strategy: single dossier workflow.",
             "- Your first code-discovery command must be exactly one gcal workflow --js/--file invocation. Build one structured implementation dossier inside it: ranked production symbols and exact source, propagation path, analogous tests, docs/help/locales, platform variants, and unresolved gaps. Loop over dependent results and parallelize independent reads with Promise.all.",
             "- Use the six searches as evidence buckets: option parsing/config, model propagation, layout/copy order, analogous tests, docs/manual, and help/locales/platform variants. Each search string must be one exact identifier/literal or pipe-separated alternatives, never prose. Give every search a bucket-specific filePattern regex so docs resolve to docs, locales to resource files, tests to tests, and parser/model/layout evidence to their Java areas.",
-            "- Within each bucket, deduplicate by filePath and retain up to three distinct files before considering extras; do not let early results or duplicate symbols consume a global quota. Fetch at most eighteen exact sources with gcal.trySource so project/module pseudo-symbols or other source misses become explicit gaps instead of rejecting the workflow. Stay within the 32-call backend guard.",
-            "- The workflow return value must stay below 36 KiB. Never return raw source responses or complete files: project each fetched source into compact metadata plus only the relevant excerpt (at most 1,500 characters per source). Return unresolved exact source IDs so a later batch get can retrieve full text when necessary.",
-            "- The dossier must report coverage or an explicit gap for every evidence bucket. After a successful workflow, do not call gcal help or status. Use at most three additional GCAL CLI invocations, only for exact missing evidence; batch exact gets where possible and reuse exact returned IDs without shortening or synthesizing them. Never invoke gcal workflow a second time. Stop discovery once all buckets support edits.",
+            "- Within each bucket, deduplicate by filePath and retain up to four distinct files before considering extras; do not let early results or duplicate symbols consume a global quota. Fetch at most twenty-four exact sources with gcal.trySource so project/module pseudo-symbols or other source misses become explicit gaps instead of rejecting the workflow. Use any remaining backend budget for at most two targeted callers/callees traces.",
+            "- The workflow return value must stay below 36 KiB. Never return raw source responses or complete files: project each fetched source into compact metadata plus only the relevant excerpt (at most 1,000 characters per source). Report coverage and explicit gaps for every evidence bucket.",
+            "- This workflow is the entire GCAL discovery phase. After it returns, do not invoke any GCAL command, including help, status, get, search, or a second workflow. Implement directly from the dossier.",
           ].join("\n")
         : "- Use one GCAL command path per discovery need; use gcal workflow --js/--file for adaptive dependent hops; stop discovery once enough evidence exists."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
@@ -2081,10 +2081,10 @@ function gcalStrategyViolations(commandEvents, engine) {
       actual: workflows.length,
     });
   }
-  if (gcalCommands.length > 4) {
+  if (gcalCommands.length > 1) {
     violations.push({
       type: "gcal_call_budget",
-      expected_maximum: 4,
+      expected_maximum: 1,
       actual: gcalCommands.length,
     });
   }
