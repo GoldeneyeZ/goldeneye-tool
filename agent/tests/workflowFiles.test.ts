@@ -28,6 +28,7 @@ describe("workflow files", () => {
     expect(goldeneyeGcalSkillMd).toContain("true async JavaScript body");
     expect(goldeneyeGcalSkillMd).toContain("loop, branch");
     expect(goldeneyeGcalSkillMd).toContain("`gcal.search`, `gcal.select`, `gcal.source`");
+    expect(goldeneyeGcalSkillMd).toContain("`gcal.trySource`");
     expect(goldeneyeGcalSkillMd).toContain("Return a JSON-serializable value");
     expect(goldeneyeGcalSkillMd).toContain("not a security sandbox");
     expect(goldeneyeGcalSkillMd).toContain("Keep batches at five items or fewer");

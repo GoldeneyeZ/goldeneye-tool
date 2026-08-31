@@ -76,6 +76,13 @@ const gcal = Object.freeze({
   source(qualifiedName) {
     return call("source", [qualifiedName]);
   },
+  async trySource(qualifiedName) {
+    try {
+      return { ok: true, value: await call("source", [qualifiedName]) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
   get(qualifiedName) {
     return call("source", [qualifiedName]);
   },

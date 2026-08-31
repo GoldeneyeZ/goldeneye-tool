@@ -44,13 +44,17 @@ unless the task earns more source.
 `gcal workflow` executes a true async JavaScript body in one worker. Supply exactly
 one of `--js <code>` or `--file <path>`. The body can loop, branch, use
 `Promise.all`, and call `gcal.search`, `gcal.select`, `gcal.source` (`gcal.get` is an
-alias), `gcal.callers`, and `gcal.callees`. Return a JSON-serializable value.
+alias), `gcal.trySource`, `gcal.callers`, and `gcal.callees`. `gcal.trySource`
+returns `{ ok: true, value }` or `{ ok: false, error }`, so one source miss does
+not reject a batch. Return a JSON-serializable value.
 
 ```js
 const hits = await gcal.search("authentication", { limit: 10 });
 const evidence = [];
 for (const hit of hits) {
-  const source = await gcal.source(hit.qualifiedName);
+  const settled = await gcal.trySource(hit.qualifiedName);
+  if (!settled.ok) continue;
+  const source = settled.value;
   if (!source.source.includes("token")) continue;
   const callers = await gcal.callers(hit.qualifiedName, { depth: 1, limit: 20 });
   evidence.push({ hit, source, callers });

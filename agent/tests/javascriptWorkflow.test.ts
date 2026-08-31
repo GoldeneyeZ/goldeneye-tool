@@ -131,6 +131,27 @@ describe("runJavaScriptWorkflow", () => {
     expect(result.value).toEqual({ inbound: [edge("inbound")], outbound: [edge("outbound")] });
   });
 
+  it("can settle source failures without aborting the workflow", async () => {
+    const get = vi.fn(async (qualifiedName: string) => {
+      if (qualifiedName === "example.Project") throw new Error("symbol has no indexed file");
+      return selected(qualifiedName, "source");
+    });
+    const result = await runJavaScriptWorkflow(
+      client({ get }),
+      `return await Promise.all([
+        gcal.trySource("example.Project"),
+        gcal.trySource("example.Service.run"),
+      ]);`,
+      { maxCalls: 2, timeoutMs: 2_000 },
+    );
+
+    expect(result.callCount).toBe(2);
+    expect(result.value).toEqual([
+      { ok: false, error: "symbol has no indexed file" },
+      { ok: true, value: selected("example.Service.run", "source") },
+    ]);
+  });
+
   it("terminates scripts exceeding backend-call or wall-clock budgets", async () => {
     const search = vi.fn().mockResolvedValue([]);
 
