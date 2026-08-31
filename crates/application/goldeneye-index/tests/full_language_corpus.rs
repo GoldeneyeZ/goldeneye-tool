@@ -267,16 +267,26 @@ struct SuppressUI: public OverrideUI {
 }
 
 #[test]
-fn cpp_out_of_class_method_matches_its_header_declaration() {
+fn cpp_nested_constructor_definitions_match_header_declarations() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
-        temp.path().join("MsiCA.h"),
-        "class DeferredCA { public: int getArg() const; };\n",
+        temp.path().join("ResourceEditor.h"),
+        concat!(
+            "class ResourceEditor { public:\n",
+            "  class FileLock { public:\n",
+            "    explicit FileLock(int);\n",
+            "    explicit FileLock(long);\n",
+            "  };\n",
+            "};\n",
+        ),
     )
     .expect("write C++ header");
     fs::write(
-        temp.path().join("MsiCA.cpp"),
-        "int DeferredCA::getArg() const { return 1; }\n",
+        temp.path().join("ResourceEditor.cpp"),
+        concat!(
+            "ResourceEditor::FileLock::FileLock(int) {}\n",
+            "ResourceEditor::FileLock::FileLock(long) {}\n",
+        ),
     )
     .expect("write C++ source");
 
@@ -288,24 +298,68 @@ fn cpp_out_of_class_method_matches_its_header_declaration() {
     );
     let result = service
         .index_repository(temp.path())
-        .expect("index qualified C++ method");
+        .expect("index nested C++ constructors");
 
-    let methods = service
+    let hits = service
         .repository()
-        .search_nodes(&result.project.id, "getArg", 10)
-        .expect("search qualified method")
-        .into_iter()
-        .filter(|hit| hit.node.label.as_str() == "Method")
-        .collect::<Vec<_>>();
-    assert_eq!(methods.len(), 1);
-    assert_eq!(methods[0].node.name, "getArg");
-    assert!(
-        methods[0]
-            .node
-            .qualified_name
-            .as_str()
-            .ends_with(".DeferredCA.getArg")
+        .search_nodes(&result.project.id, "FileLock", 10)
+        .expect("search nested class and constructors");
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Class")
+            .count(),
+        1
     );
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Method")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn cpp_anonymous_namespace_does_not_steal_a_descendant_name() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(temp.path().join("CfgFile.h"), "class CfgFile {};\n").expect("write C++ header");
+    fs::write(
+        temp.path().join("CfgFile.cpp"),
+        concat!(
+            "namespace {\n",
+            "template <typename CfgFile> void helper(CfgFile&) {}\n",
+            "}\n",
+        ),
+    )
+    .expect("write C++ source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index anonymous C++ namespace");
+
+    let hits = service
+        .repository()
+        .search_nodes(&result.project.id, "CfgFile", 10)
+        .expect("search CfgFile nodes");
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Class")
+            .count(),
+        1
+    );
+    assert!(!hits.iter().any(|hit| {
+        hit.node.label.as_str() == "Module"
+            && hit
+                .node
+                .qualified_name
+                .as_str()
+                .ends_with(".CfgFile.CfgFile")
+    }));
 }
 
 #[test]

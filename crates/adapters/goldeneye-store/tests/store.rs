@@ -1077,7 +1077,7 @@ fn duplicate_qualified_names_are_rejected_without_writing_partial_graph() {
 
     assert!(matches!(
         store.replace_project_graph(&project, vec![source_file], vec![first, second], vec![]),
-        Err(StoreError::DuplicateQualifiedName(_))
+        Err(StoreError::DuplicateQualifiedName { .. })
     ));
     assert_eq!(store.counts(&project.id).expect("empty counts").nodes, 0);
 }

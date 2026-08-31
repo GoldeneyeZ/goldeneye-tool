@@ -66,7 +66,7 @@ pub(super) fn validate_replacement(
 
 fn validate_replacement_nodes(file: &FileRecord, nodes: &[GraphNode]) -> Result<(), StoreError> {
     let mut node_ids = BTreeMap::new();
-    let mut qualified_names = BTreeSet::new();
+    let mut qualified_names = BTreeMap::new();
     for node in nodes {
         if node.project != file.id.project {
             return Err(StoreError::ProjectMismatch {
@@ -94,10 +94,19 @@ fn validate_replacement_nodes(file: &FileRecord, nodes: &[GraphNode]) -> Result<
                 qualified_name: node.qualified_name.clone(),
             });
         }
-        if !qualified_names.insert(node.qualified_name.clone()) {
-            return Err(StoreError::DuplicateQualifiedName(
-                node.qualified_name.clone(),
-            ));
+        if let Some((first_node_id, first_label, first_file_path)) = qualified_names.insert(
+            node.qualified_name.clone(),
+            (node.id.clone(), node.label.clone(), node.file_path.clone()),
+        ) {
+            return Err(StoreError::DuplicateQualifiedName {
+                qualified_name: node.qualified_name.clone(),
+                first_node_id,
+                first_label,
+                first_file_path,
+                node_id: node.id.clone(),
+                label: node.label.clone(),
+                file_path: node.file_path.clone(),
+            });
         }
     }
     Ok(())
@@ -166,7 +175,7 @@ fn validate_project_nodes(
     nodes: &[GraphNode],
 ) -> Result<BTreeSet<NodeId>, StoreError> {
     let mut node_ids = BTreeMap::new();
-    let mut qualified_names = BTreeSet::new();
+    let mut qualified_names = BTreeMap::new();
     for node in nodes {
         if node.project != *project {
             return Err(StoreError::ProjectMismatch {
@@ -190,10 +199,19 @@ fn validate_project_nodes(
                 qualified_name: node.qualified_name.clone(),
             });
         }
-        if !qualified_names.insert(node.qualified_name.clone()) {
-            return Err(StoreError::DuplicateQualifiedName(
-                node.qualified_name.clone(),
-            ));
+        if let Some((first_node_id, first_label, first_file_path)) = qualified_names.insert(
+            node.qualified_name.clone(),
+            (node.id.clone(), node.label.clone(), node.file_path.clone()),
+        ) {
+            return Err(StoreError::DuplicateQualifiedName {
+                qualified_name: node.qualified_name.clone(),
+                first_node_id,
+                first_label,
+                first_file_path,
+                node_id: node.id.clone(),
+                label: node.label.clone(),
+                file_path: node.file_path.clone(),
+            });
         }
     }
     Ok(node_ids.into_keys().collect())

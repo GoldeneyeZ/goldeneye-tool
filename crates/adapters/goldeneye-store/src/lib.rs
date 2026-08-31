@@ -113,8 +113,18 @@ pub enum StoreError {
     },
     #[error("duplicate file path in replacement: {0:?}")]
     DuplicateFilePath(ProjectRelativePath),
-    #[error("duplicate qualified name in replacement: {0:?}")]
-    DuplicateQualifiedName(QualifiedName),
+    #[error(
+        "duplicate qualified name in replacement: {qualified_name:?}; first {first_node_id:?} ({first_label:?}) in {first_file_path:?}, duplicate {node_id:?} ({label:?}) in {file_path:?}"
+    )]
+    DuplicateQualifiedName {
+        qualified_name: QualifiedName,
+        first_node_id: NodeId,
+        first_label: NodeLabel,
+        first_file_path: Option<ProjectRelativePath>,
+        node_id: NodeId,
+        label: NodeLabel,
+        file_path: Option<ProjectRelativePath>,
+    },
     #[error("duplicate edge identity in replacement")]
     DuplicateEdge,
     #[error("stored {field} is corrupt: {reason}")]

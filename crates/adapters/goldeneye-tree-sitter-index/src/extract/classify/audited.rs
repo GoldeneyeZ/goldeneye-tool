@@ -255,6 +255,12 @@ fn audited_definition_name(
 #[allow(clippy::too_many_lines)]
 fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> Option<Node<'tree>> {
     let kind = node.kind();
+    if matches!(language, "cpp" | "cuda")
+        && kind == "namespace_definition"
+        && node.child_by_field_name("name").is_none()
+    {
+        return None;
+    }
     if matches!(language, "cpp" | "cuda") && matches!(label, "Function" | "Method") {
         return cpp_callable_name_node(node);
     }
@@ -400,9 +406,18 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
 }
 
 fn cpp_callable_name_node(node: Node<'_>) -> Option<Node<'_>> {
-    let declarator = node
-        .child_by_field_name("declarator")
-        .or_else(|| find_descendant_kind(node, &["function_declarator"]))?;
+    let declaration = if node.kind() == "template_declaration" {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "function_definition" | "declaration" | "field_declaration"
+            )
+        })?
+    } else {
+        node
+    };
+    let declarator = declaration.child_by_field_name("declarator")?;
     let function = if declarator.kind() == "function_declarator" {
         declarator
     } else {
