@@ -44,13 +44,16 @@ unless the task earns more source.
 `gcal workflow` executes a true async JavaScript body in one worker. Supply exactly
 one of `--js <code>` or `--file <path>`. The body can loop, branch, use
 `Promise.all`, and call `gcal.search`, `gcal.select`, `gcal.source` (`gcal.get` is an
-alias), `gcal.trySource`, `gcal.callers`, and `gcal.callees`. `gcal.trySource`
+alias), `gcal.trySource`, `gcal.callers`, `gcal.callees`, `gcal.tryCallers`, and
+`gcal.tryCallees`. `gcal.trySource`
 returns `{ ok: true, ...sourceFields }` or `{ ok: false, error }`, so one source
 miss does not reject a batch. Read successful source text from `.source` directly.
 Return a JSON-serializable value.
 Use a targeted `filePattern` search option and deduplicate candidates by `filePath`
 when a broad query spans code, tests, docs, or resource files. Search results may
 include project/module candidates without source; use `gcal.trySource` for batches.
+Use `gcal.tryCallers` or `gcal.tryCallees` for optional traces; successful results
+are `{ ok: true, edges }` and misses are `{ ok: false, error }`.
 
 ```js
 const hits = await gcal.search("authentication", { limit: 10 });

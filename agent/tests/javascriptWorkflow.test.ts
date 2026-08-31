@@ -152,6 +152,25 @@ describe("runJavaScriptWorkflow", () => {
     ]);
   });
 
+  it("can settle optional trace failures without aborting the workflow", async () => {
+    const callers = vi.fn().mockRejectedValue(new Error("symbol was not found"));
+    const callees = vi.fn().mockResolvedValue([edge("outbound")]);
+    const result = await runJavaScriptWorkflow(
+      client({ callers, callees }),
+      `return await Promise.all([
+        gcal.tryCallers("example.Missing.run"),
+        gcal.tryCallees("example.Target.run"),
+      ]);`,
+      { maxCalls: 2, timeoutMs: 2_000 },
+    );
+
+    expect(result.callCount).toBe(2);
+    expect(result.value).toEqual([
+      { ok: false, error: "symbol was not found" },
+      { ok: true, edges: [edge("outbound")] },
+    ]);
+  });
+
   it("terminates scripts exceeding backend-call or wall-clock budgets", async () => {
     const search = vi.fn().mockResolvedValue([]);
 

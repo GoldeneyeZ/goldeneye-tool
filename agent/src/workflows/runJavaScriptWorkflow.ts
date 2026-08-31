@@ -93,8 +93,22 @@ const gcal = Object.freeze({
   callers(qualifiedName, options = {}) {
     return call("callers", [qualifiedName, options]);
   },
+  async tryCallers(qualifiedName, options = {}) {
+    try {
+      return { ok: true, edges: await call("callers", [qualifiedName, options]) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
   callees(qualifiedName, options = {}) {
     return call("callees", [qualifiedName, options]);
+  },
+  async tryCallees(qualifiedName, options = {}) {
+    try {
+      return { ok: true, edges: await call("callees", [qualifiedName, options]) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   },
   select(rows, index = 0) {
     if (!Array.isArray(rows)) throw new Error("gcal.select rows must be an array");

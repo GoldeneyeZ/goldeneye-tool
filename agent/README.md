@@ -165,7 +165,8 @@ The commands intentionally produce compact agent-facing output. Candidate output
 
 `workflow` runs true JavaScript so one CLI invocation can loop, branch, select search
 results, and decide later calls from earlier evidence. Supply exactly one of `--js`
-or `--file`. The async body receives `gcal.search`, `gcal.select`, `gcal.source`, `gcal.trySource`
+or `--file`. The async body receives `gcal.search`, `gcal.select`, `gcal.source`, `gcal.trySource`,
+`gcal.callers`, `gcal.callees`, `gcal.tryCallers`, and `gcal.tryCallees`
 (`gcal.get` is an alias), `gcal.callers`, and `gcal.callees`; return a JSON-serializable
 value for stdout. JavaScript can use normal control flow and `Promise.all`:
 
