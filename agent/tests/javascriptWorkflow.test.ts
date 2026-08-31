@@ -148,7 +148,7 @@ describe("runJavaScriptWorkflow", () => {
     expect(result.callCount).toBe(2);
     expect(result.value).toEqual([
       { ok: false, error: "symbol has no indexed file" },
-      { ok: true, value: selected("example.Service.run", "source") },
+      { ok: true, ...selected("example.Service.run", "source") },
     ]);
   });
 

@@ -174,9 +174,8 @@ const hits = await gcal.search("authentication", { limit: 10 });
 const evidence = [];
 
 for (const hit of hits) {
-  const settled = await gcal.trySource(hit.qualifiedName);
-  if (!settled.ok) continue;
-  const source = settled.value;
+  const source = await gcal.trySource(hit.qualifiedName);
+  if (!source.ok) continue;
   if (!source.source.includes("token")) continue;
 
   const [callers, callees] = await Promise.all([

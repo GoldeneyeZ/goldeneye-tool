@@ -45,8 +45,9 @@ unless the task earns more source.
 one of `--js <code>` or `--file <path>`. The body can loop, branch, use
 `Promise.all`, and call `gcal.search`, `gcal.select`, `gcal.source` (`gcal.get` is an
 alias), `gcal.trySource`, `gcal.callers`, and `gcal.callees`. `gcal.trySource`
-returns `{ ok: true, value }` or `{ ok: false, error }`, so one source miss does
-not reject a batch. Return a JSON-serializable value.
+returns `{ ok: true, ...sourceFields }` or `{ ok: false, error }`, so one source
+miss does not reject a batch. Read successful source text from `.source` directly.
+Return a JSON-serializable value.
 Use a targeted `filePattern` search option and deduplicate candidates by `filePath`
 when a broad query spans code, tests, docs, or resource files. Search results may
 include project/module candidates without source; use `gcal.trySource` for batches.
@@ -55,9 +56,8 @@ include project/module candidates without source; use `gcal.trySource` for batch
 const hits = await gcal.search("authentication", { limit: 10 });
 const evidence = [];
 for (const hit of hits) {
-  const settled = await gcal.trySource(hit.qualifiedName);
-  if (!settled.ok) continue;
-  const source = settled.value;
+  const source = await gcal.trySource(hit.qualifiedName);
+  if (!source.ok) continue;
   if (!source.source.includes("token")) continue;
   const callers = await gcal.callers(hit.qualifiedName, { depth: 1, limit: 20 });
   evidence.push({ hit, source, callers });
