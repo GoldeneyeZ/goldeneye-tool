@@ -18,6 +18,7 @@ import { contextAffordanceWarnings } from "../kernel/affordanceSignals.js";
 import { callerTraceThresholdFromEnv } from "../kernel/inspectPolicy.js";
 import { inboundTraceDecision } from "../kernel/tracePolicy.js";
 import type { TraceEdge } from "../domain/types.js";
+import { normalizeFilePattern } from "../workflows/filePattern.js";
 import {
   BATCH_SNIPPET_CHUNK_BYTES,
   BatchGetFailedError,
@@ -131,7 +132,7 @@ export function createProgram(deps: ProgramDeps): Command {
     .argument("<query>")
     .option("--limit <n>", "maximum rows", numberOption, 5)
     .option("--label <label>")
-    .option("--file <regex>")
+    .option("--file <regex-or-glob>")
     .option("--qn <regex>")
     .option("--query <query>", "additional query branch", collectOption, [])
     .option("--snippets [n]", "hydrate top candidates", positiveNumberOption)
@@ -139,7 +140,7 @@ export function createProgram(deps: ProgramDeps): Command {
       const searchOptions = {
         limit: options.limit,
         label: options.label,
-        filePattern: options.file,
+        filePattern: normalizeFilePattern(options.file),
         qualifiedNamePattern: options.qn,
       };
       const snippetLimit = options.snippets === true ? 3 : options.snippets;

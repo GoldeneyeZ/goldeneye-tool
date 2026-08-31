@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import type { GcalBackendClient } from "../domain/GcalBackendClient.js";
 import type { SearchOptions, TraceOptions } from "../domain/types.js";
+import { normalizeFilePattern } from "./filePattern.js";
 import { validateSearchQueries } from "./searchSymbols.js";
 
 export const DEFAULT_JS_WORKFLOW_MAX_CALLS = 32;
@@ -295,7 +296,9 @@ function searchOptions(value: unknown): Partial<SearchOptions> {
   return {
     limit,
     label: optionalString(input.label, "gcal.search label"),
-    filePattern: optionalString(input.filePattern, "gcal.search filePattern"),
+    filePattern: normalizeFilePattern(
+      optionalString(input.filePattern, "gcal.search filePattern"),
+    ),
     qualifiedNamePattern: optionalString(
       input.qualifiedNamePattern,
       "gcal.search qualifiedNamePattern",

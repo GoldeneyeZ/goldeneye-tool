@@ -54,6 +54,7 @@ avoid shell-quoting corruption.
 Use a targeted `filePattern` search option and deduplicate candidates by `filePath`
 when a broad query spans code, tests, docs, or resource files. Search results may
 include project/module candidates without source; use `gcal.trySource` for batches.
+`filePattern` accepts regex or common `*`/`**` glob spelling.
 Use `gcal.tryCallers` or `gcal.tryCallees` for optional traces; successful results
 are `{ ok: true, edges }` and misses are `{ ok: false, error }`.
 
