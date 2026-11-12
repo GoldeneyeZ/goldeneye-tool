@@ -89,8 +89,8 @@ export function emptyTelemetry() {
     mcp_calls_by_server: {},
     mcp_failures: 0,
     index_failures: 0,
-    ack_calls: 0,
-    ack_failures: 0,
+    gcal_calls: 0,
+    gcal_failures: 0,
     command_calls: 0,
     command_events: [],
     protocol_violations: [],
@@ -116,9 +116,9 @@ export function emptyWaste() {
     no_match_answers: 0,
     /** Edits written by hand. */
     patches: 0,
-    ack_replace_calls: 0,
-    ack_check_calls: 0,
-    ack_get_tests_calls: 0,
+    gcal_replace_calls: 0,
+    gcal_check_calls: 0,
+    gcal_get_tests_calls: 0,
     /** Bytes of command output returned to the model. */
     output_bytes: 0,
   };
@@ -148,9 +148,9 @@ export function accumulateWaste(waste, event) {
   waste.ambiguous_answers += count(output, /^# ambiguous/gm);
   waste.not_found_answers += count(output, /^# not found/gm);
   waste.no_match_answers += count(output, /^# no (?:text )?match/gm);
-  waste.ack_replace_calls += count(command, /\back\s+replace\b/g);
-  waste.ack_check_calls += count(command, /\back\s+check\b/g);
-  waste.ack_get_tests_calls += count(command, /\back\s+get\b[^;&|]*--tests\b/g);
+  waste.gcal_replace_calls += count(command, /\back\s+replace\b/g);
+  waste.gcal_check_calls += count(command, /\back\s+check\b/g);
+  waste.gcal_get_tests_calls += count(command, /\back\s+get\b[^;&|]*--tests\b/g);
   return waste;
 }
 
@@ -165,16 +165,16 @@ export function wasteSummary(telemetry) {
   return { ...(telemetry.waste ?? emptyWaste()), repeated_commands: repeated };
 }
 
-export function snapshotAckEnvironment(environment) {
+export function snapshotGcalEnvironment(environment) {
   return {
     ...environment,
-    ACK_DAEMON: "off",
+    GCAL_DAEMON: "off",
   };
 }
 
-export function isAckDaemonProcessCommand(
+export function isGcalDaemonProcessCommand(
   commandLine,
-  ackHome,
+  gcalHome,
   platform = process.platform,
 ) {
   const normalize = (value) => {
@@ -182,10 +182,10 @@ export function isAckDaemonProcessCommand(
     return platform === "win32" ? rendered.toLowerCase() : rendered;
   };
   const command = normalize(commandLine);
-  const home = normalize(resolve(ackHome));
+  const home = normalize(resolve(gcalHome));
   return (
     command.includes("daemonmain.js") &&
-    command.includes("--ack-home") &&
+    command.includes("--gcal-home") &&
     command.includes(home)
   );
 }
@@ -199,8 +199,8 @@ const DIRECT_READ_PATTERN =
   /(?:get-content|\bgc\b|\bcat\b|\btype\b|\bhead\b|\btail\b|\bmore\b|\bless\b|\bbat\b|\bsed\b|readfilesync|readalltext|git\s+(?:show|blame))/i;
 
 const SHELL_WRAPPER_PATTERN = /\s-(?:Command|c)\s+(["'])([\s\S]*)\1\s*$/i;
-const ACK_INVOCATION_PATTERN = /^[\s"'`(]*ack(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i;
-const ACK_SUBCOMMAND_PATTERN = /\back(?:\.(?:exe|cmd|ps1))?\s+grep\b/gi;
+const GCAL_INVOCATION_PATTERN = /^[\s"'`(]*gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i;
+const GCAL_SUBCOMMAND_PATTERN = /\back(?:\.(?:exe|cmd|ps1))?\s+grep\b/gi;
 
 // The script a `pwsh -Command "..."` wrapper runs, or the command itself.
 function shellScript(command) {
@@ -233,11 +233,11 @@ export function isDirectSourceReadCommand(command) {
   const commandHasSourceFile = SOURCE_FILE_PATTERN.test(rendered);
   const commandHasNonSourceFile = NON_SOURCE_FILE_PATTERN.test(rendered);
   for (const segment of shellSegments(shellScript(rendered))) {
-    // `ack grep Foo.java` is the ACK surface, not a raw search or file read.
-    if (ACK_INVOCATION_PATTERN.test(segment)) continue;
-    // Quotes nested inside a regex argument can split one `ack grep` call in
-    // the middle; the `grep` after `ack` is still the ACK subcommand.
-    if (RAW_SEARCH_PATTERN.test(segment.replace(ACK_SUBCOMMAND_PATTERN, " "))) {
+    // `gcal grep Foo.java` is the GCAL surface, not a raw search or file read.
+    if (GCAL_INVOCATION_PATTERN.test(segment)) continue;
+    // Quotes nested inside a regex argument can split one `gcal grep` call in
+    // the middle; the `grep` after `gcal` is still the GCAL subcommand.
+    if (RAW_SEARCH_PATTERN.test(segment.replace(GCAL_SUBCOMMAND_PATTERN, " "))) {
       if (SOURCE_FILE_PATTERN.test(segment) || commandHasSourceFile) return true;
       if (!NON_SOURCE_FILE_PATTERN.test(segment) && !commandHasNonSourceFile) return true;
     }
@@ -250,13 +250,13 @@ export function protocolViolationsForEngine(violations, engineKind) {
   if (engineKind === "vanilla") {
     return violations.filter((violation) => violation.type !== "direct_source_read");
   }
-  if (engineKind === "ack") {
-    return violations.filter((violation) => violation.type !== "ack_cli");
+  if (engineKind === "gcal") {
+    return violations.filter((violation) => violation.type !== "gcal_cli");
   }
-  // The hybrid lane may use ack and shell tools alike.
+  // The hybrid lane may use gcal and shell tools alike.
   if (engineKind === "hybrid") {
     return violations.filter(
-      (violation) => violation.type !== "ack_cli" && violation.type !== "direct_source_read",
+      (violation) => violation.type !== "gcal_cli" && violation.type !== "direct_source_read",
     );
   }
   return violations;
@@ -337,14 +337,14 @@ export function accumulateCodexLine(telemetry, line) {
         exit_code: Number.isFinite(exitCode) ? exitCode : null,
       });
     }
-    const isAckCommand = /(?:^|[^A-Za-z0-9_.-])ack(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(rendered);
-    if (countToolCalls && isAckCommand) {
-      telemetry.ack_calls += 1;
+    const isGcalCommand = /(?:^|[^A-Za-z0-9_.-])gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(rendered);
+    if (countToolCalls && isGcalCommand) {
+      telemetry.gcal_calls += 1;
       const exitCode = object.exit_code ?? object.exitCode;
       if (object.status === "failed" || (Number.isFinite(exitCode) && exitCode !== 0)) {
-        telemetry.ack_failures += 1;
+        telemetry.gcal_failures += 1;
       }
-      telemetry.protocol_violations.push({ type: "ack_cli", command: rendered.slice(0, 500) });
+      telemetry.protocol_violations.push({ type: "gcal_cli", command: rendered.slice(0, 500) });
     }
     if (countToolCalls && isDirectSourceReadCommand(rendered)) {
       telemetry.protocol_violations.push({
@@ -449,8 +449,8 @@ const SUMMARY_METRICS = [
   "preindex_ms",
   "completion_ms",
   "mcp_calls",
-  "ack_calls",
-  "ack_failures",
+  "gcal_calls",
+  "gcal_failures",
   "cache_bytes",
   "patch_bytes",
 ];
@@ -577,7 +577,7 @@ export function normalizeReadySnapshot(config, configPath) {
 }
 
 export function resolveRunLayout({ kind, readySnapshot, runId, worktreeRoot, cacheRoot }) {
-  if (kind === "ack" && readySnapshot) {
+  if (kind === "gcal" && readySnapshot) {
     return {
       worktree: readySnapshot.worktree,
       cacheDir: readySnapshot.live_cache,
@@ -592,7 +592,7 @@ export function resolveRunLayout({ kind, readySnapshot, runId, worktreeRoot, cac
 }
 
 export function shouldPrimeIndex({ kind, usesReadySnapshot }) {
-  return kind === "ack" && !usesReadySnapshot;
+  return kind === "gcal" && !usesReadySnapshot;
 }
 
 export function resolveRepositoryGate({ sourceRepository, worktree, usesReadySnapshot }) {
@@ -630,15 +630,15 @@ export function loadConfig(configPath) {
   }
   for (const engine of config.engines) {
     engine.kind ??= "mcp";
-    if (!["ack", "mcp", "serena", "vanilla"].includes(engine.kind)) {
+    if (!["gcal", "mcp", "serena", "vanilla"].includes(engine.kind)) {
       throw new Error(`Unknown engine kind for ${engine.id}: ${engine.kind}`);
     }
     if (engine.kind !== "vanilla" && !engine.command) {
       throw new Error(`Engine ${engine.id} needs a command`);
     }
     engine.command = resolveRelative(base, engine.command);
-    if (engine.kind === "ack") {
-      if (!engine.backend_command) throw new Error(`ACK engine ${engine.id} needs backend_command`);
+    if (engine.kind === "gcal") {
+      if (!engine.backend_command) throw new Error(`GCAL engine ${engine.id} needs backend_command`);
       engine.backend_command = resolveRelative(base, engine.backend_command);
     }
   }

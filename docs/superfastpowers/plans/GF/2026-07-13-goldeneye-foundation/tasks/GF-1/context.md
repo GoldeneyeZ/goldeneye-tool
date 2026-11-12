@@ -22,7 +22,7 @@ Files above are starting points only. Inspect any additional files needed to com
 - Reviewed commit range: `HEAD^..HEAD`
 - Files created: `.cbmignore`; `.gitignore`; `Cargo.lock`; `Cargo.toml`; `rust-toolchain.toml`; `rustfmt.toml`; `crates/goldeneye-domain/Cargo.toml`; `crates/goldeneye-domain/src/lib.rs`; task-local review files.
 - Files modified: `context.md`; `plan-progression.md`.
-- Additional relevant files: `.upstream/` reference source and `target/` build output are excluded from Git and ACK indexing.
+- Additional relevant files: `.upstream/` reference source and `target/` build output are excluded from Git and GCAL indexing.
 - Verification commands/results:
   - RED: `cargo test -p goldeneye-domain` -> exit 101; unresolved imports `DomainError` and `ProjectId`.
   - First GREEN gate: `cargo fmt --check && cargo clippy -p goldeneye-domain --all-targets -- -D warnings && cargo test -p goldeneye-domain` -> clippy correctly rejected missing `# Errors` docs.
@@ -39,5 +39,5 @@ Files above are starting points only. Inspect any additional files needed to com
 - `ProjectId` preserves its input and exposes it through `as_str`.
 - Public fallible constructor documents its error contract to satisfy workspace pedantic lint policy.
 - `Cargo.lock` is committed for reproducible application dependency resolution.
-- Root `.gitignore` and `.cbmignore` keep generated/reference trees out of Git and Goldeneye's own ACK graph.
+- Root `.gitignore` and `.cbmignore` keep generated/reference trees out of Git and Goldeneye's own GCAL graph.
 

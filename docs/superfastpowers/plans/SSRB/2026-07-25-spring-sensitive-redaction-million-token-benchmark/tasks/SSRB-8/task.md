@@ -2,7 +2,7 @@
 
 <TASK-ID>SSRB-8</TASK-ID>
 
-Execute exactly three vanilla and three warm ACK runs after qualification.
+Execute exactly three vanilla and three warm GCAL runs after qualification.
 
 **Files:**
 - Generate:
@@ -123,13 +123,13 @@ Report:
 - median, range, sample SD, and CV%;
 - correctness;
 - cached and uncached tokens separately;
-- ACK call/failure/discovery counts;
+- GCAL call/failure/discovery counts;
 - patch statistics;
 - qualification evidence;
 - built-in and independent audit evidence;
 - limitations at `n = 3`.
 
-State whether ACK improved or regressed each metric. Do not claim statistical
+State whether GCAL improved or regressed each metric. Do not claim statistical
 significance.
 
 - [ ] **Step 8: Commit final benchmark documentation only**

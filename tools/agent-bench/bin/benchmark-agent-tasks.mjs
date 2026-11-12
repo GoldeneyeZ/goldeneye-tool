@@ -22,7 +22,7 @@ import {
   codexSandboxArgs,
   emptyTelemetry,
   expandTokens,
-  isAckDaemonProcessCommand,
+  isGcalDaemonProcessCommand,
   loadConfig,
   protocolViolationsForEngine,
   resolveRepositoryGate,
@@ -30,7 +30,7 @@ import {
   sanitizeId,
   selectRunEngines,
   shouldPrimeIndex,
-  snapshotAckEnvironment,
+  snapshotGcalEnvironment,
   summarizeRuns,
   tomlInlineTable,
   tomlString,
@@ -103,13 +103,13 @@ Options:
   --one-shot               run one standalone, unqualified benchmark attempt
   --skip-agent-verification forbid agent-side build/test/lint/check commands
   --attempt-id <id>         one-shot artifact attempt identifier
-  --ack-daemon              one-shot: the agent's ack calls share one warm Goldeneye daemon
-  --ack-discovery <mode>    one-shot: ack (ack only, default) or hybrid (ack and shell tools)
+  --gcal-daemon              one-shot: the agent's gcal calls share one warm Goldeneye daemon
+  --gcal-discovery <mode>    one-shot: gcal (gcal only, default) or hybrid (gcal and shell tools)
   --skip-build              use the existing Goldeneye release binary
   --dry-run                 validate and print the matrix only
-  --prepare-snapshot        create the immutable ACK ready snapshot and exit
+  --prepare-snapshot        create the immutable GCAL ready snapshot and exit
   --verify-only             validate frozen candidate, source, and snapshot without Codex
-  --smoke                   run one unscored ACK candidate and held-out grader
+  --smoke                   run one unscored GCAL candidate and held-out grader
   --calibration             run one non-scored vanilla calibration
   --calibration-id <id>     immutable artifact attempt identifier
   --audit-report            audit the four-run report against raw artifacts
@@ -186,17 +186,17 @@ if (flags.has("--calibration")) {
 const calibrationId = flags.has("--calibration")
   ? sanitizeId(flags.get("--calibration-id"))
   : null;
-// How the ACK lane is exposed to the agent. Preparation (indexing, snapshots)
+// How the GCAL lane is exposed to the agent. Preparation (indexing, snapshots)
 // always uses the per-call benchmark backend, whatever these say.
-const ackLane = {
-  daemon: flags.has("--ack-daemon"),
-  discovery: flags.get("--ack-discovery") ?? "ack",
+const gcalLane = {
+  daemon: flags.has("--gcal-daemon"),
+  discovery: flags.get("--gcal-discovery") ?? "gcal",
 };
-if (!["ack", "hybrid"].includes(ackLane.discovery)) {
-  fail("--ack-discovery accepts only ack,hybrid");
+if (!["gcal", "hybrid"].includes(gcalLane.discovery)) {
+  fail("--gcal-discovery accepts only gcal,hybrid");
 }
-if ((ackLane.daemon || ackLane.discovery !== "ack") && !oneShot.enabled) {
-  fail("--ack-daemon and --ack-discovery require --one-shot");
+if ((gcalLane.daemon || gcalLane.discovery !== "gcal") && !oneShot.enabled) {
+  fail("--gcal-daemon and --gcal-discovery require --one-shot");
 }
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
@@ -234,14 +234,14 @@ if (flags.has("--dry-run")) {
   process.exit(0);
 }
 
-const candidateEngine = benchmarkEngines.find((engine) => engine.kind === "ack")?.id;
+const candidateEngine = benchmarkEngines.find((engine) => engine.kind === "gcal")?.id;
 const vanillaEngine = benchmarkEngines.find((engine) => engine.kind === "vanilla")?.id;
 const markdownOutput = config.output.toLowerCase().endsWith(".json")
   ? `${config.output.slice(0, -5)}.md`
   : `${config.output}.md`;
 
 if (flags.has("--audit-report")) {
-  if (!candidateEngine || !vanillaEngine) fail("--audit-report requires ACK and vanilla engines");
+  if (!candidateEngine || !vanillaEngine) fail("--audit-report requires GCAL and vanilla engines");
   const preparation = readPreparation(resolvePreparationArtifacts(config).preparation);
   if (!preparation.eligible_for_scoring) fail("--audit-report requires eligible preparation");
   const verification = await verifyPreparedSnapshot({
@@ -422,9 +422,9 @@ if (oneShot.enabled) {
       cache_modes: config.cache_modes,
       timeout_ms: config.timeout_ms,
       agent_verification_policy: agentVerificationPolicy(),
-      ack_call_limit: null,
-      ack_daemon: ackLane.daemon,
-      ack_discovery: ackLane.discovery,
+      gcal_call_limit: null,
+      gcal_daemon: gcalLane.daemon,
+      gcal_discovery: gcalLane.discovery,
     },
     model_invocations: result.model_invocations,
     grader_invocations: result.grader_invocations,
@@ -526,8 +526,8 @@ console.log(`Agent benchmark artifact: ${config.output}`);
 async function prepareReadySnapshot({ baseCommit, config, repoName }) {
   const readySnapshot = config.ready_snapshot;
   if (!readySnapshot) throw new Error("--prepare-snapshot requires ready_snapshot configuration");
-  const ackEngine = benchmarkEngines.find((engine) => engine.kind === "ack");
-  if (!ackEngine) throw new Error("--prepare-snapshot requires an ACK engine");
+  const gcalEngine = benchmarkEngines.find((engine) => engine.kind === "gcal");
+  if (!gcalEngine) throw new Error("--prepare-snapshot requires an GCAL engine");
 
   const startedAt = performance.now();
   const provenance = captureBenchmarkProvenance({ config, configPath });
@@ -564,20 +564,20 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
     rmIfInside(readySnapshot.live_cache, readySnapshot.allowed_cache_root);
     mkdirSync(readySnapshot.live_cache, { recursive: true });
     const engine = engineRuntime(
-      ackEngine,
+      gcalEngine,
       readySnapshot.worktree,
       readySnapshot.live_cache,
       repoName,
       // The backend only needs the worktree; the source repository may live elsewhere.
       readySnapshot.allowed_worktree_root,
     );
-    activeGate = "ack_initialize";
-    initializer = await initializeAckForSnapshot(
+    activeGate = "gcal_initialize";
+    initializer = await initializeGcalForSnapshot(
       engine,
       readySnapshot.worktree,
       config.preindex_timeout_ms ?? 600_000,
     );
-    recordGate(gates, "ack_initialize", {
+    recordGate(gates, "gcal_initialize", {
       expected: { exit_code: 0, backend_exit_verified: true },
       observed: initializer,
       passed: true,
@@ -668,7 +668,7 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
     };
   } catch (error) {
     recordGate(gates, activeGate, {
-      expected: activeGate === "ack_initialize"
+      expected: activeGate === "gcal_initialize"
         ? { exit_code: 0, backend_exit_verified: true }
         : { passed: true },
       observed: error.initializer ?? errorMessage(error),
@@ -744,11 +744,11 @@ async function preservePreparationFailure({ baseCommit, config, error, liveCache
 
 function preserveInitializerEvidence(root, initializer) {
   if (!initializer) return null;
-  const stdout = writeFailureEvidenceFile(root, "ack-init.stdout.log", initializer.stdout ?? "");
-  const stderr = writeFailureEvidenceFile(root, "ack-init.stderr.log", initializer.stderr ?? "");
+  const stdout = writeFailureEvidenceFile(root, "gcal-init.stdout.log", initializer.stdout ?? "");
+  const stderr = writeFailureEvidenceFile(root, "gcal-init.stderr.log", initializer.stderr ?? "");
   const metadata = writeFailureEvidenceFile(
     root,
-    "ack-init.json",
+    "gcal-init.json",
     `${JSON.stringify({
       exit_code: initializer.exit_code,
       duration_ms: initializer.duration_ms,
@@ -797,14 +797,14 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
       "target/release/goldeneye.exe",
     ],
   });
-  const ackEngine = config.engines.find((engine) => engine.kind === "ack");
-  if (!ackEngine) throw new Error("Candidate provenance requires an ACK engine");
-  const mainModule = (ackEngine.args ?? []).find((arg) => /(?:^|[\\/])dist[\\/]main\.js$/i.test(arg));
-  if (!mainModule) throw new Error(`ACK engine ${ackEngine.id} must name dist/main.js in args`);
-  const ackRoot = resolve(dirname(mainModule), "..");
-  const ack = captureRepositoryProvenance({
-    repo: ackRoot,
-    selectedFiles: ["dist/main.js", selectDependencyLock(ackRoot)],
+  const gcalEngine = config.engines.find((engine) => engine.kind === "gcal");
+  if (!gcalEngine) throw new Error("Candidate provenance requires an GCAL engine");
+  const mainModule = (gcalEngine.args ?? []).find((arg) => /(?:^|[\\/])dist[\\/]main\.js$/i.test(arg));
+  if (!mainModule) throw new Error(`GCAL engine ${gcalEngine.id} must name dist/main.js in args`);
+  const gcalRoot = resolve(dirname(mainModule), "..");
+  const gcal = captureRepositoryProvenance({
+    repo: gcalRoot,
+    selectedFiles: ["dist/main.js", selectDependencyLock(gcalRoot)],
   });
   const operationalFiles = [
     currentConfigPath,
@@ -825,7 +825,7 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
     captured_at: new Date().toISOString(),
     candidate: {
       goldeneye: goldeneyeFull,
-      ack,
+      gcal,
     },
     harness: {
       repository: captureRepositoryProvenance({ repo: workspace, selectedFiles: harnessFiles }),
@@ -889,8 +889,8 @@ async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repo
   const readySnapshot = config.ready_snapshot;
   if (!readySnapshot) throw new Error("--smoke requires ready_snapshot configuration");
   const task = config.tasks.at(0);
-  const engine = config.engines.find((entry) => entry.kind === "ack");
-  if (!task || !engine) throw new Error("--smoke requires one task and an ACK engine");
+  const engine = config.engines.find((entry) => entry.kind === "gcal");
+  if (!task || !engine) throw new Error("--smoke requires one task and an GCAL engine");
 
   const preSmoke = captureBenchmarkProvenance({ config, configPath });
   if (expectedCandidate) assertCandidateUnchanged(expectedCandidate, preSmoke.candidate, "pre-smoke");
@@ -938,7 +938,7 @@ async function runSmoke({ artifacts, baseCommit, config, expectedCandidate, repo
 }
 
 async function resolveOneShotPreparation({ baseCommit, config, engine, repoName }) {
-  if (engine.kind !== "ack") {
+  if (engine.kind !== "gcal") {
     return { preparation: null, snapshotRefreshed: false, verification: null };
   }
 
@@ -1068,8 +1068,8 @@ async function executeRun(run, context) {
       writeFileSync(join(runDir, "overlay-status.txt"), `${overlayPaths.join("\n")}\n`);
     }
 
-    if (engine.kind === "ack" && ackLane.daemon) {
-      daemonPrewarmMs = prewarmAckDaemon(engine, worktree);
+    if (engine.kind === "gcal" && gcalLane.daemon) {
+      daemonPrewarmMs = prewarmGcalDaemon(engine, worktree);
     }
 
     const prompt = composePrompt(run.task, run.cacheMode, engine, {
@@ -1108,18 +1108,18 @@ async function executeRun(run, context) {
     graderResult ??= { exit_code: null, duration_ms: null, error: errorMessage(error) };
   } finally {
     cacheBytes = directorySize(cacheDir);
-    if (engine?.kind === "ack") {
+    if (engine?.kind === "gcal") {
       engineMetrics = {
-        ack_registry_exists: existsSync(join(engine.ackHome, "projects.json")),
+        gcal_registry_exists: existsSync(join(engine.gcalHome, "projects.json")),
         cbm_decoy_files: directoryFileCount(engine.cbmDecoy),
         goldeneye_db_bytes: existsSync(engine.goldeneyeDb)
           ? statSync(engine.goldeneyeDb).size
           : 0,
-        ack_daemon: ackLane.daemon,
-        ack_discovery: ackLane.discovery,
+        gcal_daemon: gcalLane.daemon,
+        gcal_discovery: gcalLane.discovery,
         daemon_prewarm_ms: daemonPrewarmMs,
       };
-      engineMetrics.daemon_shutdown_verified = await shutdownAckDaemon(engine.ackHome);
+      engineMetrics.daemon_shutdown_verified = await shutdownGcalDaemon(engine.gcalHome);
     }
     if (worktreeAdded && !flags.has("--keep-worktrees")) {
       removeWorktreeIfRegistered(context.config.repo, worktree, worktreeRoot);
@@ -1133,7 +1133,7 @@ async function executeRun(run, context) {
   const compliance = analyzeAgentVerificationCalls(telemetry.command_events);
   const protocolViolations = protocolViolationsForEngine(
     telemetry.protocol_violations,
-    run.engine.kind === "ack" && ackLane.discovery === "hybrid" ? "hybrid" : run.engine.kind,
+    run.engine.kind === "gcal" && gcalLane.discovery === "hybrid" ? "hybrid" : run.engine.kind,
   );
   // Paths the overlay left dirty are the task's starting state, not the agent's doing.
   const overlayPathSet = new Set(overlayPaths);
@@ -1198,8 +1198,8 @@ async function executeRun(run, context) {
     mcp_calls_by_server: telemetry.mcp_calls_by_server,
     mcp_failures: telemetry.mcp_failures,
     index_failures: telemetry.index_failures,
-    ack_calls: telemetry.ack_calls,
-    ack_failures: telemetry.ack_failures,
+    gcal_calls: telemetry.gcal_calls,
+    gcal_failures: telemetry.gcal_failures,
     command_calls: telemetry.command_calls,
     waste: wasteSummary(telemetry),
     ...(context.mode === "one-shot" ? {
@@ -1236,40 +1236,40 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
   const taskPrompt = readFileSync(task.prompt_file, "utf8").trim();
   const sourceLanguage = task.source_language ?? "TypeScript, TSX, or Rust";
   const sourceExtensions = (task.source_extensions ?? [".ts", ".tsx", ".rs"]).join(", ");
-  const ackEditCommands =
-    " ack get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows). ack check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status.";
-  const ackSyntax =
-    "ack takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). ack get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). ack grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. ack search falls back to text when no symbol matches. ack callers adds text references to call-graph edges; ack callees and ack impls follow the graph the other way. ack replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express." +
-    ackEditCommands;
+  const gcalEditCommands =
+    " gcal get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows). gcal check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status.";
+  const gcalSyntax =
+    "gcal takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). gcal get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). gcal grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. gcal search falls back to text when no symbol matches. gcal callers adds text references to call-graph edges; gcal callees and gcal impls follow the graph the other way. gcal replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express." +
+    gcalEditCommands;
   const discoveryInstructions =
     engine.kind === "vanilla"
       ? "- No code-memory MCP is available. Use ordinary local shell and file tools for discovery."
-      : engine.kind === "ack" && engine.shellDiscovery
-        ? `- Two discovery surfaces are available: the ack CLI, which queries a code-graph index of this repository, and ordinary shell and file tools (rg, Get-Content, git). Choose per need and never ask the same question through both. Direct Goldeneye MCP tools are not available in this lane.\n- Use ack when the answer spans files: how a flow works, who calls or implements something, the source of several named symbols in one call, every use of a name across the repository, or the same edit in many files.\n- Use shell tools when one known file is enough: reading or editing a file whose path you already have, non-source files, a quick check in one directory.\n- ${ackSyntax}`
-        : engine.kind === "ack"
-        ? `- Use only the ack CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use ack get/search/grep/callers/callees/impls/arch instead. git status, git diff, edits, and build/test commands remain allowed.\n- ack takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). ack get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). ack grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. ack search falls back to text when no symbol matches. ack callers adds text references to call-graph edges. ack replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express.${ackEditCommands}`
+      : engine.kind === "gcal" && engine.shellDiscovery
+        ? `- Two discovery surfaces are available: the gcal CLI, which queries a code-graph index of this repository, and ordinary shell and file tools (rg, Get-Content, git). Choose per need and never ask the same question through both. Direct Goldeneye MCP tools are not available in this lane.\n- Use gcal when the answer spans files: how a flow works, who calls or implements something, the source of several named symbols in one call, every use of a name across the repository, or the same edit in many files.\n- Use shell tools when one known file is enough: reading or editing a file whose path you already have, non-source files, a quick check in one directory.\n- ${gcalSyntax}`
+        : engine.kind === "gcal"
+        ? `- Use only the gcal CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use gcal get/search/grep/callers/callees/impls/arch instead. git status, git diff, edits, and build/test commands remain allowed.\n- gcal takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). gcal get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). gcal grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. gcal search falls back to text when no symbol matches. gcal callers adds text references to call-graph edges. gcal replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express.${gcalEditCommands}`
         : `- Use only the assigned ${engine.id} MCP tools to discover and read ${sourceLanguage} source.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Use the assigned MCP's semantic search and source tools instead. git status, git diff, edits, and build/test commands remain allowed.`;
   const cacheInstructions =
     cacheMode === "none"
       ? "- Cache condition: none; this lane has no code-memory engine."
-      : engine.kind === "ack"
+      : engine.kind === "gcal"
         ? cacheMode === "cold"
-          ? "- Cache condition: cold. Run ack init once from the repository root before other ACK commands. Do not set ACK_PROJECT."
-          : "- Cache condition: warm. ack init completed before this turn; use cwd-based ACK project resolution. Do not set ACK_PROJECT."
+          ? "- Cache condition: cold. Run gcal init once from the repository root before other GCAL commands. Do not set GCAL_PROJECT."
+          : "- Cache condition: warm. gcal init completed before this turn; use cwd-based GCAL project resolution. Do not set GCAL_PROJECT."
         : `- Cache condition: ${cacheMode}. Do not make assumptions about whether the repository is indexed; check through MCP when useful.`;
-  const ackInstruction =
-    engine.kind === "ack" && engine.shellDiscovery
-      ? "- Every tool call costs a full turn: answer each need in one call, batch names in one ack get, and chain several commands in one shell call. Name ack targets directly instead of searching for identifiers. Stop discovery once enough evidence exists; do not run ack status or ack --help."
-      : engine.kind === "ack"
-      ? "- Answer each discovery need with one ACK call: name targets directly instead of searching for identifiers, batch names, and chain several ack commands in one shell call. Stop discovery once enough evidence exists; do not run ack status or ack --help."
-      : "- Do not invoke the ack CLI; it is not part of this benchmark lane.";
+  const gcalInstruction =
+    engine.kind === "gcal" && engine.shellDiscovery
+      ? "- Every tool call costs a full turn: answer each need in one call, batch names in one gcal get, and chain several commands in one shell call. Name gcal targets directly instead of searching for identifiers. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
+      : engine.kind === "gcal"
+      ? "- Answer each discovery need with one GCAL call: name targets directly instead of searching for identifiers, batch names, and chain several gcal commands in one shell call. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
+      : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}
 
 You are participating in a controlled code-maintenance benchmark.
 - Work directly in the current repository and complete the task.
 - You may inspect, edit, and test the code.
 ${discoveryInstructions}
-${ackInstruction}
+${gcalInstruction}
 - Do not read or use Superfastpower skills. Do not spend time loading skill files; work directly.
 - Do not commit, push, or modify files outside the current repository.
 - Preserve unrelated user changes.
@@ -1279,16 +1279,16 @@ Task:
 ${taskPrompt}
 `.trimStart();
   const withPolicy = applyAgentVerificationPolicy(prompt, skipAgentVerification);
-  if (!skipAgentVerification || engine.kind !== "ack") return withPolicy;
-  // A parse of the changed files runs no project code and is part of the ACK
-  // product, so the ACK lanes may use it. Naming it as an exception after a
+  if (!skipAgentVerification || engine.kind !== "gcal") return withPolicy;
+  // A parse of the changed files runs no project code and is part of the GCAL
+  // product, so the GCAL lanes may use it. Naming it as an exception after a
   // rule that forbids "check" commands was not enough: in 11 of 12 runs the
   // agent followed the rule. The rule itself now carries the exception.
   const forbidden = "- Do not run build, compile, test, lint, check, verification, or validation commands.";
-  if (!withPolicy.includes(forbidden)) fail("one-shot policy text changed; update the ACK lane wording");
+  if (!withPolicy.includes(forbidden)) fail("one-shot policy text changed; update the GCAL lane wording");
   return withPolicy.replace(
     forbidden,
-    "- Do not run build, compile, test, lint, verification, or validation commands. The one exception is ack check: it only parses the files you changed and runs no project code. Run it once after your last edit, in the same shell call as git status, and fix what it reports.",
+    "- Do not run build, compile, test, lint, verification, or validation commands. The one exception is gcal check: it only parses the files you changed and runs no project code. Run it once after your last edit, in the same shell call as git status, and fix what it reports.",
   );
 }
 
@@ -1304,19 +1304,19 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
     };
   }
   const command = resolveExecutable(engine.command);
-  if (engine.kind === "ack") {
-    const ackHome = join(cacheDir, "ack-state");
+  if (engine.kind === "gcal") {
+    const gcalHome = join(cacheDir, "gcal-state");
     const cbmDecoy = join(cacheDir, "cbm-decoy");
     const goldeneyeDb = join(cacheDir, "goldeneye.db");
     return {
       command,
       args: engine.args ?? [],
-      ackHome,
+      gcalHome,
       cbmDecoy,
       environment: {
-        ACK_HOME: ackHome,
-        ACK_BACKEND: "benchmark",
-        ACK_MCP_COMMAND: resolveExecutable(engine.backend_command),
+        GCAL_HOME: gcalHome,
+        GCAL_BACKEND: "benchmark",
+        GCAL_MCP_COMMAND: resolveExecutable(engine.backend_command),
         CBM_ALLOWED_ROOT: allowedRoot,
         CBM_CACHE_DIR: cbmDecoy,
         GOLDENEYE_DB_PATH: goldeneyeDb,
@@ -1324,20 +1324,20 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
         ...(engine.env ?? {}),
       },
       // Only the agent's own calls (and the pre-warm) go through the daemon.
-      agentEnvironment: ackLane.daemon
+      agentEnvironment: gcalLane.daemon
         ? {
-            ACK_BACKEND: "goldeneye",
-            ACK_GOLDENEYE_COMMAND: resolveExecutable(engine.backend_command),
-            ACK_DAEMON: "auto",
-            ACK_DAEMON_IDLE: "30m",
+            GCAL_BACKEND: "goldeneye",
+            GCAL_GOLDENEYE_COMMAND: resolveExecutable(engine.backend_command),
+            GCAL_DAEMON: "auto",
+            GCAL_DAEMON_IDLE: "30m",
           }
         : {},
-      shellDiscovery: ackLane.discovery === "hybrid",
+      shellDiscovery: gcalLane.discovery === "hybrid",
       goldeneyeDb,
       id: engine.id,
       kind: engine.kind,
       repoName,
-      unsetEnvironment: ["ACK_MCP_URL", "ACK_PROJECT"],
+      unsetEnvironment: ["GCAL_MCP_URL", "GCAL_PROJECT"],
     };
   }
   if (engine.kind === "serena") {
@@ -1389,8 +1389,8 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
   };
 }
 
-/** Starts the lane's ACK daemon and loads the project graph; returns the time it took. */
-function prewarmAckDaemon(engine, worktree) {
+/** Starts the lane's GCAL daemon and loads the project graph; returns the time it took. */
+function prewarmGcalDaemon(engine, worktree) {
   const started = performance.now();
   const result = spawnSync(engine.command, [...engine.args, "status"], {
     cwd: worktree,
@@ -1401,10 +1401,10 @@ function prewarmAckDaemon(engine, worktree) {
     windowsHide: true,
   });
   if (result.status !== 0) {
-    throw new Error(`ACK daemon pre-warm failed: ${tail(result.stderr || result.stdout)}`);
+    throw new Error(`GCAL daemon pre-warm failed: ${tail(result.stderr || result.stdout)}`);
   }
   if (/daemon/i.test(result.stderr ?? "")) {
-    throw new Error(`ACK daemon pre-warm fell back: ${tail(result.stderr)}`);
+    throw new Error(`GCAL daemon pre-warm fell back: ${tail(result.stderr)}`);
   }
   return performance.now() - started;
 }
@@ -1455,7 +1455,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
     codeModeHost: config.codex_code_mode_host,
   }));
   args.push("-C", worktree);
-  if (engine.kind !== "vanilla" && engine.kind !== "ack") {
+  if (engine.kind !== "vanilla" && engine.kind !== "gcal") {
     const serverName = engine.mcpServerName;
     args.push(
       "-c",
@@ -1529,11 +1529,11 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   };
 }
 
-async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
+async function initializeGcalForSnapshot(engine, worktree, timeoutMs) {
   const startedAt = performance.now();
   const child = spawn(engine.command, [...engine.args, "init", worktree], {
     cwd: worktree,
-    env: snapshotAckEnvironment(processEnvironment(engine)),
+    env: snapshotGcalEnvironment(processEnvironment(engine)),
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -1587,8 +1587,8 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
     initializer.backend_exit_verified = await waitForProcessIdsExit(running, 2_000);
     const error = new Error(
       initializer.backend_exit_verified
-        ? `ACK initializer required forced backend shutdown: ${running.join(", ")}`
-        : `ACK initializer left backend processes running: ${running.join(", ")}`,
+        ? `GCAL initializer required forced backend shutdown: ${running.join(", ")}`
+        : `GCAL initializer left backend processes running: ${running.join(", ")}`,
     );
     error.initializer = initializer;
     throw error;
@@ -1596,7 +1596,7 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
   initializer.backend_exit_verified = true;
   if (outcome.error || outcome.exitCode !== 0) {
     const error = new Error(
-      `ACK init failed: ${outcome.error ? errorMessage(outcome.error) : tail(`${stdout}${stderr}`)}`,
+      `GCAL init failed: ${outcome.error ? errorMessage(outcome.error) : tail(`${stdout}${stderr}`)}`,
     );
     error.initializer = initializer;
     throw error;
@@ -1605,7 +1605,7 @@ async function initializeAckForSnapshot(engine, worktree, timeoutMs) {
 }
 
 async function primeIndex(engine, worktree, timeoutMs) {
-  if (engine.kind === "ack") {
+  if (engine.kind === "gcal") {
     const result = spawnSync(engine.command, [...engine.args, "init", worktree], {
       cwd: worktree,
       encoding: "utf8",
@@ -1615,7 +1615,7 @@ async function primeIndex(engine, worktree, timeoutMs) {
       windowsHide: true,
     });
     if (result.status !== 0) {
-      throw new Error(`ACK init failed: ${tail(result.stderr || result.stdout)}`);
+      throw new Error(`GCAL init failed: ${tail(result.stderr || result.stdout)}`);
     }
     return;
   }
@@ -1936,13 +1936,13 @@ function killProcessTree(pid) {
   }
 }
 
-async function shutdownAckDaemon(ackHome) {
-  const pids = ackDaemonProcessIds(ackHome);
+async function shutdownGcalDaemon(gcalHome) {
+  const pids = gcalDaemonProcessIds(gcalHome);
   for (const pid of pids) killProcessTree(pid);
   return waitForProcessIdsExit(pids, 5_000);
 }
 
-function ackDaemonProcessIds(ackHome) {
+function gcalDaemonProcessIds(gcalHome) {
   if (process.platform === "win32") {
     const result = spawnSync(
       "powershell",
@@ -1958,7 +1958,7 @@ function ackDaemonProcessIds(ackHome) {
     const processes = Array.isArray(parsed) ? parsed : [parsed];
     return processes
       .filter((entry) =>
-        isAckDaemonProcessCommand(entry.CommandLine, ackHome, process.platform),
+        isGcalDaemonProcessCommand(entry.CommandLine, gcalHome, process.platform),
       )
       .map((entry) => Number(entry.ProcessId))
       .filter(Number.isInteger);
@@ -1974,7 +1974,7 @@ function ackDaemonProcessIds(ackHome) {
     .map((line) => line.match(/^\s*(\d+)\s+(.*)$/))
     .filter(
       (match) =>
-        match && isAckDaemonProcessCommand(match[2], ackHome, process.platform),
+        match && isGcalDaemonProcessCommand(match[2], gcalHome, process.platform),
     )
     .map((match) => Number(match[1]));
 }
@@ -2140,7 +2140,7 @@ function analyzeDiscoveryTrace(path) {
     if (
       event.type !== "item.completed" ||
       item?.type !== "command_execution" ||
-      !/(?:^|[\s'"])ack\s+/i.test(item.command ?? "")
+      !/(?:^|[\s'"])gcal\s+/i.test(item.command ?? "")
     ) {
       continue;
     }

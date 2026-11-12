@@ -22,7 +22,7 @@ Files above are starting points only. Inspect any additional files needed to com
 - Files created: `crates/goldeneye-mcp/src/tools.rs`; task-local handoff/review evidence.
 - Files modified: `crates/goldeneye-mcp/src/server.rs`; `crates/goldeneye-mcp/src/lib.rs`; corrected GF-4 sections in the foundation plan and task package; this `context.md`; GF-4 section of `plan-progression.md`.
 - Additional relevant files: `.upstream/codebase-memory-mcp/src/mcp/mcp.c` and `.upstream/codebase-memory-mcp/tests/test_mcp.c` confirm no-cursor full lists, cursor-triggered pages of eight, `nextCursor`, `inputSchema`/`outputSchema`, and MCP `content`/`isError` tool-result envelopes.
-- Review discovery note: local ACK index reported ready but returned no Goldeneye MCP symbols; source inspection used the task-authorized Context Mode fallback. Upstream ACK graph lookup and exact snippets succeeded.
+- Review discovery note: local GCAL index reported ready but returned no Goldeneye MCP symbols; source inspection used the task-authorized Context Mode fallback. Upstream GCAL graph lookup and exact snippets succeeded.
 - Verification commands/results:
   - RED 1: `cargo test -p goldeneye-mcp tools` -> exit 101; unresolved `ToolDefinition` and `ToolRegistry` imports.
   - Corrected-contract RED: focused no-cursor/pagination test -> exit 101; expected all 10 tools without a cursor, got 8.

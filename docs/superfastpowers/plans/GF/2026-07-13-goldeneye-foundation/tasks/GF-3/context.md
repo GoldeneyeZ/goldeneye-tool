@@ -21,7 +21,7 @@ Files above are starting points only. Inspect any additional files needed to com
 - Files created: `crates/goldeneye-mcp/src/server.rs`; task-local handoff/review evidence.
 - Files modified: `crates/goldeneye-mcp/src/lib.rs`; this `context.md`; GF-3 section of `plan-progression.md`.
 - Additional relevant files: `.upstream/codebase-memory-mcp/src/mcp/mcp.c` confirms latest protocol `2025-11-25`, server identity `codebase-memory-mcp`, and `tools.listChanged=false`; `.upstream/codebase-memory-mcp/tests/test_mcp.c` confirms these initialize fields.
-- Review discovery note: local ACK `index_repository(mode="fast")` failed twice; source inspection used the mandated Context Mode fallback. Upstream ACK graph lookup and exact snippets succeeded.
+- Review discovery note: local GCAL `index_repository(mode="fast")` failed twice; source inspection used the mandated Context Mode fallback. Upstream GCAL graph lookup and exact snippets succeeded.
 - Verification commands/results:
   - RED 1: `cargo test -p goldeneye-mcp server` -> exit 101; unresolved import `super::Server`.
   - GREEN 1: `cargo test -p goldeneye-mcp server` -> exit 0; 3 passed, 0 failed.

@@ -1,7 +1,7 @@
 {
   "corpus": "spring-framework (core, beans, context)",
   "lanes": [
-    "ack",
+    "gcal",
     "vanilla"
   ],
   "env": {
@@ -23,14 +23,14 @@
         "getArgumentsForBindError(bindingResult.getObjectName(), field)",
         "ex.getValue()"
       ],
-      "ack": [
-        "ack get 'org.springframework.validation.DefaultBindingErrorProcessor.processPropertyAccessException'",
+      "gcal": [
+        "gcal get 'org.springframework.validation.DefaultBindingErrorProcessor.processPropertyAccessException'",
         {
-          "cmd": "ack search 'processPropertyAccessException' --limit 5",
+          "cmd": "gcal search 'processPropertyAccessException' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${V}.DefaultBindingErrorProcessor.DefaultBindingErrorProcessor.processPropertyAccessException'",
+          "cmd": "gcal get '${V}.DefaultBindingErrorProcessor.DefaultBindingErrorProcessor.processPropertyAccessException'",
           "when": "after-failure"
         }
       ],
@@ -46,10 +46,10 @@
         "buildFieldList(field, fieldList)",
         "addCodes(codeList, errorCode, objectName, fieldList)"
       ],
-      "ack": [
-        "ack search 'resolveMessageCodes' --snippets 5",
-        "ack symbol 'resolveMessageCodes.*' --qn '.*DefaultMessageCodesResolver.*' --limit 10",
-        "ack get '${V}.DefaultMessageCodesResolver.DefaultMessageCodesResolver.resolveMessageCodes#2'"
+      "gcal": [
+        "gcal search 'resolveMessageCodes' --snippets 5",
+        "gcal symbol 'resolveMessageCodes.*' --qn '.*DefaultMessageCodesResolver.*' --limit 10",
+        "gcal get '${V}.DefaultMessageCodesResolver.DefaultMessageCodesResolver.resolveMessageCodes#2'"
       ],
       "vanilla": [
         "rg -n 'String\\[\\] resolveMessageCodes\\(' --glob '*.java' spring-context/src/main",
@@ -63,14 +63,14 @@
       "evidence": [
         "return this.pd.getTypeDescriptor();"
       ],
-      "ack": [
-        "ack get 'org.springframework.beans.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
+      "gcal": [
+        "gcal get 'org.springframework.beans.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
         {
-          "cmd": "ack search 'toTypeDescriptor' --limit 10",
+          "cmd": "gcal search 'toTypeDescriptor' --limit 10",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${B}.BeanWrapperImpl.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
+          "cmd": "gcal get '${B}.BeanWrapperImpl.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
           "when": "after-failure"
         }
       ],
@@ -87,14 +87,14 @@
         "this.bindingResult.rejectValue(field, errorCode, defaultMessage);",
         "this.bindingResult.rejectValue(field, errorCode, errorArgs, defaultMessage);"
       ],
-      "ack": [
-        "ack get 'org.springframework.validation.BindException.rejectValue'",
+      "gcal": [
+        "gcal get 'org.springframework.validation.BindException.rejectValue'",
         {
-          "cmd": "ack symbol 'rejectValue.*' --qn '.*BindException.*' --limit 10",
+          "cmd": "gcal symbol 'rejectValue.*' --qn '.*BindException.*' --limit 10",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${V}.BindException.BindException.rejectValue' '${V}.BindException.BindException.rejectValue#2' '${V}.BindException.BindException.rejectValue#3'",
+          "cmd": "gcal get '${V}.BindException.BindException.rejectValue' '${V}.BindException.BindException.rejectValue#2' '${V}.BindException.BindException.rejectValue#3'",
           "when": "after-failure"
         }
       ],
@@ -112,14 +112,14 @@
         "PropertyEditor customEditor = getCustomEditor(fixedField);",
         "return this.bindingResult;"
       ],
-      "ack": [
-        "ack get 'org.springframework.validation.AbstractBindingResult.rejectValue' 'org.springframework.validation.AbstractPropertyBindingResult.getActualFieldValue' 'org.springframework.validation.AbstractPropertyBindingResult.formatFieldValue' 'org.springframework.validation.DataBinder.getInternalBindingResult'",
+      "gcal": [
+        "gcal get 'org.springframework.validation.AbstractBindingResult.rejectValue' 'org.springframework.validation.AbstractPropertyBindingResult.getActualFieldValue' 'org.springframework.validation.AbstractPropertyBindingResult.formatFieldValue' 'org.springframework.validation.DataBinder.getInternalBindingResult'",
         {
-          "cmd": "ack search 'rejectValue|getActualFieldValue|formatFieldValue|getInternalBindingResult' --limit 20",
+          "cmd": "gcal search 'rejectValue|getActualFieldValue|formatFieldValue|getInternalBindingResult' --limit 20",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${V}.AbstractBindingResult.AbstractBindingResult.rejectValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.getActualFieldValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.formatFieldValue' '${V}.DataBinder.DataBinder.getInternalBindingResult'",
+          "cmd": "gcal get '${V}.AbstractBindingResult.AbstractBindingResult.rejectValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.getActualFieldValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.formatFieldValue' '${V}.DataBinder.DataBinder.getInternalBindingResult'",
           "when": "after-failure"
         }
       ],
@@ -138,10 +138,10 @@
         "getBindingResult",
         "applyPropertyValues"
       ],
-      "ack": [
-        "ack get 'org.springframework.validation.DataBinder'",
-        "ack inspect 'DataBinder'",
-        "ack symbol '.*' --qn '.*\\.validation\\.DataBinder\\.DataBinder\\.[^.]+$' --label Method --limit 120"
+      "gcal": [
+        "gcal get 'org.springframework.validation.DataBinder'",
+        "gcal inspect 'DataBinder'",
+        "gcal symbol '.*' --qn '.*\\.validation\\.DataBinder\\.DataBinder\\.[^.]+$' --label Method --limit 120"
       ],
       "vanilla": [
         "rg -n '^\\t(public|protected) [^=]*\\(' ${VDIR}/DataBinder.java"
@@ -155,10 +155,10 @@
         "String attribute() default",
         "Class<? extends Annotation> annotation() default"
       ],
-      "ack": [
-        "ack get 'org.springframework.core.annotation.AliasFor'",
-        "ack search 'AliasFor' --limit 5",
-        "ack get '${C}.annotation.AliasFor.AliasFor'"
+      "gcal": [
+        "gcal get 'org.springframework.core.annotation.AliasFor'",
+        "gcal search 'AliasFor' --limit 5",
+        "gcal get '${C}.annotation.AliasFor.AliasFor'"
       ],
       "vanilla": [
         "Get-Content spring-core/src/main/java/org/springframework/core/annotation/AliasFor.java"
@@ -175,14 +175,14 @@
           "regex": "DataBinder(\\.java|\\.DataBinder)"
         }
       ],
-      "ack": [
-        "ack callers 'org.springframework.validation.BindingResult.addError' --limit 40",
+      "gcal": [
+        "gcal callers 'org.springframework.validation.BindingResult.addError' --limit 40",
         {
-          "cmd": "ack search 'addError' --limit 10",
+          "cmd": "gcal search 'addError' --limit 10",
           "when": "after-failure"
         },
-        "ack callers '${V}.BindingResult.BindingResult.addError' --limit 40",
-        "ack callers '${V}.AbstractBindingResult.AbstractBindingResult.addError' --limit 40",
+        "gcal callers '${V}.BindingResult.BindingResult.addError' --limit 40",
+        "gcal callers '${V}.AbstractBindingResult.AbstractBindingResult.addError' --limit 40",
         "rg -n '\\baddError\\(' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
       ],
       "vanilla": [
@@ -198,14 +198,14 @@
         "checkRequiredFields",
         "applyPropertyValues"
       ],
-      "ack": [
-        "ack callees 'org.springframework.validation.DataBinder.doBind'",
+      "gcal": [
+        "gcal callees 'org.springframework.validation.DataBinder.doBind'",
         {
-          "cmd": "ack search 'doBind' --limit 5",
+          "cmd": "gcal search 'doBind' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack callees '${V}.DataBinder.DataBinder.doBind'",
+          "cmd": "gcal callees '${V}.DataBinder.DataBinder.doBind'",
           "when": "after-failure"
         }
       ],
@@ -222,17 +222,17 @@
         "applyPropertyValues",
         "setPropertyValues"
       ],
-      "ack": [
-        "ack callees 'org.springframework.validation.DataBinder.bind' --depth 3 --limit 60",
+      "gcal": [
+        "gcal callees 'org.springframework.validation.DataBinder.bind' --depth 3 --limit 60",
         {
-          "cmd": "ack search 'bind' --qn '.*validation\\.DataBinder\\.DataBinder\\.bind$' --limit 5",
+          "cmd": "gcal search 'bind' --qn '.*validation\\.DataBinder\\.DataBinder\\.bind$' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack callees '${V}.DataBinder.DataBinder.bind' --depth 3 --limit 60",
+          "cmd": "gcal callees '${V}.DataBinder.DataBinder.bind' --depth 3 --limit 60",
           "when": "after-failure"
         },
-        "ack get '${V}.DataBinder.DataBinder.applyPropertyValues'"
+        "gcal get '${V}.DataBinder.DataBinder.applyPropertyValues'"
       ],
       "vanilla": [
         "rg -n -A 10 'public void bind\\(PropertyValues' ${VDIR}/DataBinder.java",
@@ -248,10 +248,10 @@
         "DataBinderTests",
         "DateTimeFormattingTests"
       ],
-      "ack": [
-        "ack search 'initDirectFieldAccess' --file '.*src/test/.*' --limit 20",
-        "ack search 'initDirectFieldAccess' --limit 5",
-        "ack callers '${V}.DataBinder.DataBinder.initDirectFieldAccess' --limit 50"
+      "gcal": [
+        "gcal search 'initDirectFieldAccess' --file '.*src/test/.*' --limit 20",
+        "gcal search 'initDirectFieldAccess' --limit 5",
+        "gcal callers '${V}.DataBinder.DataBinder.initDirectFieldAccess' --limit 50"
       ],
       "vanilla": [
         "rg -c 'initDirectFieldAccess' --glob '*Tests.java' spring-context spring-beans spring-core"
@@ -264,9 +264,9 @@
       "evidence": [
         "DefaultBindingErrorProcessor"
       ],
-      "ack": [
-        "ack search 'implements BindingErrorProcessor' --limit 10",
-        "ack symbol '.*BindingErrorProcessor' --label Class --limit 10"
+      "gcal": [
+        "gcal search 'implements BindingErrorProcessor' --limit 10",
+        "gcal symbol '.*BindingErrorProcessor' --label Class --limit 10"
       ],
       "vanilla": [
         "rg -n 'implements .*\\bBindingErrorProcessor\\b' --glob '*.java' spring-context spring-beans spring-core"
@@ -280,9 +280,9 @@
         "BeanPropertyBindingResult",
         "DirectFieldBindingResult"
       ],
-      "ack": [
-        "ack search 'extends AbstractPropertyBindingResult' --limit 10",
-        "ack symbol '.*BindingResult' --label Class --limit 20"
+      "gcal": [
+        "gcal search 'extends AbstractPropertyBindingResult' --limit 10",
+        "gcal symbol '.*BindingResult' --label Class --limit 20"
       ],
       "vanilla": [
         "rg -n 'extends AbstractPropertyBindingResult' --glob '*.java' spring-context spring-beans spring-core"
@@ -296,8 +296,8 @@
         "TypeMismatchException",
         "ERROR_CODE"
       ],
-      "ack": [
-        "ack search 'typeMismatch' --limit 10",
+      "gcal": [
+        "gcal search 'typeMismatch' --limit 10",
         "rg -n '\"typeMismatch\"' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
       ],
       "vanilla": [
@@ -313,9 +313,9 @@
           "regex": "DEFAULT_AUTO_GROW_COLLECTION_LIMIT\\s*=\\s*256"
         }
       ],
-      "ack": [
-        "ack search 'DEFAULT_AUTO_GROW_COLLECTION_LIMIT' --limit 5",
-        "ack get '${V}.DataBinder.DataBinder.DEFAULT_AUTO_GROW_COLLECTION_LIMIT'"
+      "gcal": [
+        "gcal search 'DEFAULT_AUTO_GROW_COLLECTION_LIMIT' --limit 5",
+        "gcal get '${V}.DataBinder.DataBinder.DEFAULT_AUTO_GROW_COLLECTION_LIMIT'"
       ],
       "vanilla": [
         "rg -n 'DEFAULT_AUTO_GROW_COLLECTION_LIMIT\\s*=' --glob '*.java' spring-context/src/main"
@@ -333,8 +333,8 @@
           "regex": "core[\\\\/]convert[\\\\/]TypeDescriptor\\.java"
         }
       ],
-      "ack": [
-        "ack search 'MergedAnnotations|TypeDescriptor' --label Class --limit 6"
+      "gcal": [
+        "gcal search 'MergedAnnotations|TypeDescriptor' --label Class --limit 6"
       ],
       "vanilla": [
         "rg --files spring-core spring-beans spring-context | rg '[\\\\/](MergedAnnotations|TypeDescriptor)\\.java$'"
@@ -355,8 +355,8 @@
           "regex": "springframework[./\\\\]validation"
         }
       ],
-      "ack": [
-        "ack arch"
+      "gcal": [
+        "gcal arch"
       ],
       "vanilla": [
         "git ls-files 'spring-core/src/main/java' 'spring-beans/src/main/java' 'spring-context/src/main/java' | ForEach-Object { (($_ -split '/')[0..7]) -join '/' } | Group-Object | Sort-Object Count -Descending | Select-Object -First 45 | ForEach-Object { \"$($_.Count) $($_.Name)\" }"
@@ -370,9 +370,9 @@
         "new FieldError(getObjectName(), fixedField, newVal, false,",
         "public void recordFieldValue(String field, Class<?> type, @Nullable Object value)"
       ],
-      "ack": [
-        "ack get AbstractBindingResult",
-        "ack get AbstractBindingResult.rejectValue AbstractBindingResult.recordFieldValue"
+      "gcal": [
+        "gcal get AbstractBindingResult",
+        "gcal get AbstractBindingResult.rejectValue AbstractBindingResult.recordFieldValue"
       ],
       "vanilla": [
         "Get-Content ${VDIR}/AbstractBindingResult.java"
@@ -387,10 +387,10 @@
         "assertThat(StringUtils.truncate(text, 10)).isEqualTo(truncated);",
         ".isThrownBy(() -> StringUtils.truncate(\"foo\", 0))"
       ],
-      "ack": [
-        "ack grep 'truncate(' StringUtils.java StringUtilsTests.java -C 5",
-        "ack get StringUtils.truncate spring-core/src/test/java/org/springframework/util/StringUtilsTests.java",
-        "ack get spring-core/src/test/java/org/springframework/util/StringUtilsTests.java:774-802"
+      "gcal": [
+        "gcal grep 'truncate(' StringUtils.java StringUtilsTests.java -C 5",
+        "gcal get StringUtils.truncate spring-core/src/test/java/org/springframework/util/StringUtilsTests.java",
+        "gcal get spring-core/src/test/java/org/springframework/util/StringUtilsTests.java:774-802"
       ],
       "vanilla": [
         "rg -n -C 5 'truncate\\(' spring-core/src/main/java/org/springframework/util/StringUtils.java spring-core/src/test/java/org/springframework/util/StringUtilsTests.java"
@@ -400,7 +400,7 @@
   "notes": [
     "Each lane is a scripted command chain; it stops at the first step whose cumulative output holds all evidence.",
     "A step with when=after-failure is a recovery attempt and runs only once an earlier step exited non-zero.",
-    "ack chains start from the name an agent would naturally type (package-qualified or Type.member), as observed in recorded agent runs.",
+    "gcal chains start from the name an agent would naturally type (package-qualified or Type.member), as observed in recorded agent runs.",
     "vanilla chains are deliberately tight (bounded -A windows, exact globs); real agents usually read more."
   ]
 }

@@ -167,7 +167,7 @@ try {
     qualified_name: extra.qualified_name,
   });
   assert.match(extraSource.source, /fn extra/);
-  pass("mutations and immediate ACK reads", JSON.stringify({ replaced, created }).length);
+  pass("mutations and immediate GCAL reads", JSON.stringify({ replaced, created }).length);
 
   await session.close();
   session = await McpSession.open(server, environment);

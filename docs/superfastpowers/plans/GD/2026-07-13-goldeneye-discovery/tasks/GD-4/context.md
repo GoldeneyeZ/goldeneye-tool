@@ -30,7 +30,7 @@ Files above are starting points only. Inspect any additional files needed to com
   - `crates/goldeneye-discovery/src/policy.rs`
   - `crates/goldeneye-discovery/tests/ignore_parity.rs`
   - `crates/goldeneye-discovery/tests/language_parity.rs`
-  - `.upstream/codebase-memory-mcp/src/discover/discover.c` via ACK snippets
+  - `.upstream/codebase-memory-mcp/src/discover/discover.c` via GCAL snippets
 - Verification commands/results:
   - RED: `cargo test -p goldeneye-discovery --test discovery_parity` -> exit 101, expected unresolved `discover` and `MAX_IGNORED_DETAILS`.
   - GREEN: `cargo test -p goldeneye-discovery --test discovery_parity` -> 15 passed, 0 failed.

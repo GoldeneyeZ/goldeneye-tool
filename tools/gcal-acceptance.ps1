@@ -1,13 +1,13 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string] $AckRoot,
+    [string] $GcalRoot,
     [string] $GoldeneyeBin
 )
 
 $arguments = @(
-    (Join-Path $PSScriptRoot 'ack-acceptance.mjs'),
-    '--ack-root',
-    $AckRoot
+    (Join-Path $PSScriptRoot 'gcal-acceptance.mjs'),
+    '--gcal-root',
+    $GcalRoot
 )
 if ($GoldeneyeBin) {
     $arguments += @('--goldeneye-bin', $GoldeneyeBin)

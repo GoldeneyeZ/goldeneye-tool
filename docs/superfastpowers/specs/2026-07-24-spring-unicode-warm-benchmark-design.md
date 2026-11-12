@@ -6,7 +6,7 @@
 
 ## Goal
 
-Measure the frozen Goldeneye plus ACK candidate on one routine Spring Framework
+Measure the frozen Goldeneye plus GCAL candidate on one routine Spring Framework
 maintenance task from an identical immutable warm index for every scored
 repetition. Compare correctness and agent behavior with the valid cached vanilla
 baseline. Preserve enough provenance and raw evidence to reproduce or reject
@@ -37,7 +37,7 @@ Add focused `StringUtilsTests`. The task-facing verification command is:
 
 ### Benchmark
 
-- Engine: frozen Goldeneye plus ACK candidate.
+- Engine: frozen Goldeneye plus GCAL candidate.
 - Cache condition: warm only.
 - Repetitions: three serial scored repetitions under one configuration.
 - Comparison: cached vanilla baseline using the same Spring commit, task, model,
@@ -81,7 +81,7 @@ Current `executeRun()` creates a unique worktree and cache per run, then
 `primeIndex()` builds a fresh warm index. That does not prove identical warm
 starting state across repetitions.
 
-Goldeneye and ACK persist absolute project/worktree paths. Copying one database
+Goldeneye and GCAL persist absolute project/worktree paths. Copying one database
 to different worktree paths risks stale path references. Scored repetitions
 therefore reuse one stable absolute serial-lane worktree path and one stable live
 cache path. Runs remain isolated because the lane is reset between repetitions,
@@ -95,15 +95,15 @@ Preparation occurs before scored timing:
 2. Capture frozen candidate provenance:
    - Goldeneye repository HEAD, dirty diff fingerprint, source fingerprint,
      release binary SHA-256, and binary diff fingerprint;
-   - ACK repository HEAD, tracked diff fingerprint, untracked-file inventory
+   - GCAL repository HEAD, tracked diff fingerprint, untracked-file inventory
      and fingerprints, dependency lock fingerprint, and built entrypoint
      fingerprint;
    - task, grader, harness, configuration, model, and prompt fingerprints.
 3. Create the stable detached Spring worktree at the approved base commit.
-4. Create an isolated live cache containing `ACK_HOME`, ACK registry,
+4. Create an isolated live cache containing `GCAL_HOME`, GCAL registry,
    `GOLDENEYE_DB_PATH`, and decoy Codebase Memory cache.
-5. Run ACK initialization once against that exact stable worktree path.
-6. Stop the ACK/backend process and confirm no writer remains.
+5. Run GCAL initialization once against that exact stable worktree path.
+6. Stop the GCAL/backend process and confirm no writer remains.
 7. Copy the complete ready cache into an immutable snapshot directory. Never
    hardlink snapshot files.
 8. Create a sorted SHA-256 manifest for every snapshot file and record snapshot
@@ -122,7 +122,7 @@ Before every scored repetition:
 3. Delete the live cache within its validated benchmark root.
 4. Copy the immutable snapshot directory into the live cache directory.
 5. Verify every live-cache file against the immutable SHA-256 manifest.
-6. Verify ACK registry, Goldeneye database, and expected project binding exist.
+6. Verify GCAL registry, Goldeneye database, and expected project binding exist.
 7. Verify the immutable snapshot manifest itself has not changed.
 8. Start scoring immediately before `codex exec`.
 
@@ -137,7 +137,7 @@ failure rejects the lane before scoring.
 - Snapshot preparation, restore, validation, engine setup, and indexing:
   maintenance metrics only.
 - Record correctness, command failures, protocol violations, timeouts, input and
-  output tokens, cached input, reasoning tokens, tool calls, ACK calls, backend
+  output tokens, cached input, reasoning tokens, tool calls, GCAL calls, backend
   MCP calls, failed calls, result payload bytes/cardinality, patch size, dirty
   paths, and grader duration.
 - Compare first search selection, search ordering, failed discovery commands,
@@ -170,8 +170,8 @@ Preserve benchmark-level:
 - Worktree/cache deletion uses validated paths contained by the configured
   benchmark roots.
 - Runs are serial; no shared writer operates against the snapshot or live cache.
-- Existing unrelated Goldeneye and ACK worktree changes are preserved.
-- Harness changes must not modify ACK or Goldeneye candidate source.
+- Existing unrelated Goldeneye and GCAL worktree changes are preserved.
+- Harness changes must not modify GCAL or Goldeneye candidate source.
 - Candidate fingerprints must match before preparation, before each run, and
   after the benchmark.
 - Spring source worktree must begin each run clean at the pinned commit.
@@ -210,7 +210,7 @@ Before the scored run:
 
 ## Non-Goals
 
-- Changing ACK or Goldeneye candidate code during this benchmark.
+- Changing GCAL or Goldeneye candidate code during this benchmark.
 - Running cold, Serena, or Codebase Memory lanes.
 - Replacing the cached vanilla baseline when its parity checks pass.
 - Expanding Spring task scope beyond `StringUtils.truncate` and focused tests.

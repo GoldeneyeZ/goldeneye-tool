@@ -45,7 +45,7 @@ test('evidence accepts literals and regular expressions', () => {
 });
 
 test('placeholders expand and unknown ones are rejected', () => {
-  assert.equal(expandPlaceholders("ack get '${P}.a.B'", { P: 'proj' }), "ack get 'proj.a.B'");
+  assert.equal(expandPlaceholders("gcal get '${P}.a.B'", { P: 'proj' }), "gcal get 'proj.a.B'");
   assert.throws(() => expandPlaceholders('${NOPE}', {}), /unknown placeholder/);
 });
 
@@ -107,14 +107,14 @@ test('summary and markdown aggregate per lane and category', () => {
     steps: [],
   });
   const scenarios = [
-    { id: 'read', category: 'read-symbol', lanes: { ack: lane(true, 1, 100), vanilla: lane(true, 2, 400) } },
-    { id: 'grep', category: 'text', lanes: { ack: lane(false, 2, 50), vanilla: lane(true, 1, 80) } },
+    { id: 'read', category: 'read-symbol', lanes: { gcal: lane(true, 1, 100), vanilla: lane(true, 2, 400) } },
+    { id: 'grep', category: 'text', lanes: { gcal: lane(false, 2, 50), vanilla: lane(true, 1, 80) } },
   ];
-  const lanes = ['ack', 'vanilla'];
+  const lanes = ['gcal', 'vanilla'];
   const summary = summarize(scenarios, lanes);
 
   assert.deepEqual(
-    { ok: summary.totals.ack.ok, calls: summary.totals.ack.calls, failed: summary.totals.ack.failed_calls },
+    { ok: summary.totals.gcal.ok, calls: summary.totals.gcal.calls, failed: summary.totals.gcal.failed_calls },
     { ok: 1, calls: 3, failed: 1 },
   );
   assert.equal(summary.by_category.text.vanilla.ok, 1);
@@ -127,7 +127,7 @@ test('summary and markdown aggregate per lane and category', () => {
     scenarios,
     summary,
   });
-  assert.match(markdown, /\| read \| read-symbol \| ok 1c 100t .* \| ack x\d/);
+  assert.match(markdown, /\| read \| read-symbol \| ok 1c 100t .* \| gcal x\d/);
   assert.match(markdown, /\| grep \| text \| FAIL 2c 50t .* \| vanilla \|/);
-  assert.match(markdown, /\| ack \| 1\/2 \| 3 \| 1 \|/);
+  assert.match(markdown, /\| gcal \| 1\/2 \| 3 \| 1 \|/);
 });

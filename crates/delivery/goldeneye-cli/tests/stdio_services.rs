@@ -313,7 +313,7 @@ fn stdio_check_syntax_parses_edited_and_unindexed_working_tree_files() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_ack_reads() {
+fn stdio_structural_edit_tools_roundtrip_locators_and_refresh_gcal_reads() {
     let temp = TempDir::new().expect("temp directory");
     let repo = temp.path().join("fixture");
     fixture(&repo);

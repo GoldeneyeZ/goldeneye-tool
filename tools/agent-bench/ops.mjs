@@ -215,23 +215,23 @@ export function createShellExecutor({ cwd, env, shell = 'pwsh', timeoutMs = 120_
   };
 }
 
-export function prepareAckShim(stateDir, ackEntry) {
+export function prepareGcalShim(stateDir, gcalEntry) {
   const binDir = path.join(stateDir, 'bin');
   mkdirSync(binDir, { recursive: true });
   // A PowerShell shim, not a .cmd one: cmd.exe would reinterpret `|`, `^` and
   // `&` inside quoted regex arguments before node ever sees them.
-  rmSync(path.join(binDir, 'ack.cmd'), { force: true });
+  rmSync(path.join(binDir, 'gcal.cmd'), { force: true });
   writeFileSync(
-    path.join(binDir, 'ack.ps1'),
-    `& node "${ackEntry}" @args\r\nexit $LASTEXITCODE\r\n`,
+    path.join(binDir, 'gcal.ps1'),
+    `& node "${gcalEntry}" @args\r\nexit $LASTEXITCODE\r\n`,
   );
   return binDir;
 }
 
-export function resolveProjectName(ackHome, repoRoot) {
-  const registryPath = path.join(ackHome, 'projects.json');
+export function resolveProjectName(gcalHome, repoRoot) {
+  const registryPath = path.join(gcalHome, 'projects.json');
   if (!existsSync(registryPath)) {
-    throw new Error(`ACK registry not found: ${registryPath}; run ack init with this ACK_HOME first`);
+    throw new Error(`GCAL registry not found: ${registryPath}; run gcal init with this GCAL_HOME first`);
   }
   const normalize = (value) => path.resolve(value).toLowerCase();
   const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
@@ -239,7 +239,7 @@ export function resolveProjectName(ackHome, repoRoot) {
     (project) => normalize(project.rootPath) === normalize(repoRoot),
   );
   if (entry === undefined) {
-    throw new Error(`no ACK project registered for ${repoRoot} in ${registryPath}`);
+    throw new Error(`no GCAL project registered for ${repoRoot} in ${registryPath}`);
   }
   return entry.project;
 }

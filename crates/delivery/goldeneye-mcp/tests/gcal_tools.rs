@@ -197,7 +197,7 @@ fn assert_query_trace_snippet_architecture(server: &Server, project: &str, quali
 }
 
 #[test]
-fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
+fn registry_is_truthful_and_cursor_paginates_all_gcal_tools() {
     let temp = TempDir::new().expect("temp directory");
     let server = server(&temp, temp.path());
     let all = request(&server, 1, "tools/list", json!({}));
@@ -286,7 +286,7 @@ fn registry_is_truthful_and_cursor_paginates_all_ack_tools() {
 }
 
 #[test]
-fn index_then_all_ack_read_tools_return_stable_structured_json() {
+fn index_then_all_gcal_read_tools_return_stable_structured_json() {
     let temp = TempDir::new().expect("temp directory");
     let repo = temp.path().join("fixture");
     fixture(&repo);

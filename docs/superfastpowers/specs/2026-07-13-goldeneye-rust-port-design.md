@@ -4,7 +4,7 @@ Date: 2026-07-13
 
 ## Decision
 
-Goldeneye will become a Rust rewrite of `DeusData/codebase-memory-mcp`, preserving its externally useful MCP and index compatibility while replacing internal C implementation with bounded Rust crates. Delivery uses vertical compatibility slices. Structural source editing and file creation land after the fast index and ACK-critical query slice; remaining upstream features then continue until full required parity.
+Goldeneye will become a Rust rewrite of `DeusData/codebase-memory-mcp`, preserving its externally useful MCP and index compatibility while replacing internal C implementation with bounded Rust crates. Delivery uses vertical compatibility slices. Structural source editing and file creation land after the fast index and GCAL-critical query slice; remaining upstream features then continue until full required parity.
 
 Reference source:
 
@@ -18,7 +18,7 @@ Reference source:
 Goldeneye is a headless CLI and MCP server for agent-native software development. Its primary advantage is token-efficient, context-efficient code navigation and mutation. It must:
 
 1. Replace upstream C/C++ runtime with Rust.
-2. Preserve enough upstream MCP behavior and graph semantics for ACK to operate against Goldeneye.
+2. Preserve enough upstream MCP behavior and graph semantics for GCAL to operate against Goldeneye.
 3. Support all Tree-sitter named nodes through generic structural edit locators.
 4. Create source files with parse validation.
 5. Reject stale or ambiguous edits instead of guessing.
@@ -34,10 +34,10 @@ Vertical compatibility slices:
 1. Freeze observable upstream contracts and fixtures.
 2. Establish Rust workspace, domain model, MCP transport, configuration, and compatibility harness.
 3. Port discovery, Tree-sitter integration, graph storage, fast indexing, and stable identities.
-4. Port ACK-critical read/query tools.
+4. Port GCAL-critical read/query tools.
 5. Add structural edit and create tools with targeted refresh.
 6. Port remaining enrichment, analysis, runtime, artifact, UI, and packaging features.
-7. Prove full objective through black-box parity, ACK acceptance, mutation, recovery, and cross-platform tests.
+7. Prove full objective through black-box parity, GCAL acceptance, mutation, recovery, and cross-platform tests.
 
 Only implemented MCP tools are advertised during migration. This prevents clients from treating stubbed behavior as working parity.
 
@@ -128,7 +128,7 @@ Audited upstream grammar sources occupy approximately 1.24 GiB, including genera
 
 ## Compatibility Boundary
 
-### ACK-Critical Slice
+### GCAL-Critical Slice
 
 Before structural editing is considered usable, Rust must provide:
 
@@ -138,13 +138,13 @@ Before structural editing is considered usable, Rust must provide:
 - `index_status`.
 - `get_graph_schema`.
 - `search_graph` with pagination and compact output.
-- `query_graph` for ACK-used Cypher patterns.
+- `query_graph` for GCAL-used Cypher patterns.
 - `trace_path` and compatibility alias `trace_call_path`.
 - `get_code_snippet` with exact, suffix, unique-short-name, ambiguity, and suggestion behavior.
 - `get_architecture`.
 - Stable project naming, file locations, qualified names, source spans, and graph refresh.
 
-ACK acceptance must exercise `ack status`, `ack search`, `ack symbol`, `ack inspect`, `ack get`, `ack callers`, `ack callees`, and `ack arch` against only the Rust server.
+GCAL acceptance must exercise `gcal status`, `gcal search`, `gcal symbol`, `gcal inspect`, `gcal get`, `gcal callers`, `gcal callees`, and `gcal arch` against only the Rust server.
 
 ### Eventual Upstream Parity
 
@@ -293,10 +293,10 @@ Safety rules:
 - Kill/restart tests prove recovery converges database facts to actual source bytes.
 - Concurrent-reader, concurrent-index, and competing-edit tests prove locking and stale rejection.
 
-### ACK Acceptance
+### GCAL Acceptance
 
-- Configure ACK to launch only Goldeneye Rust MCP.
-- Execute all Phase-1 ACK commands on small fixtures and representative real repositories.
+- Configure GCAL to launch only Goldeneye Rust MCP.
+- Execute all Phase-1 GCAL commands on small fixtures and representative real repositories.
 - Assert no fallback to upstream binary, expected compact fields, exact source retrieval, caller/callee paths, architecture output, and index freshness after Goldeneye mutation.
 
 ### Cross-Platform and Release Tests
@@ -323,15 +323,15 @@ Safety rules:
 - Discovery, language registry, vendored grammar build, syntax extraction, graph model, SQLite/FTS5 store, project IDs, FQNs, fast index.
 - Gate: normalized core graph fixtures match upstream on selected languages and path cases.
 
-### Phase 3: ACK-Critical Query Slice
+### Phase 3: GCAL-Critical Query Slice
 
 - Required read tools, compact output, targeted incremental refresh.
-- Gate: complete ACK acceptance suite passes against Rust only.
+- Gate: complete GCAL acceptance suite passes against Rust only.
 
 ### Phase 4: Structural Edit and Create
 
 - Syntax inspection, locators, mutation journal, edit tools, create tool, diff result, targeted refresh, recovery.
-- Gate: edit/create, stale/conflict, parse, durability, and ACK-post-edit freshness suites pass.
+- Gate: edit/create, stale/conflict, parse, durability, and GCAL-post-edit freshness suites pass.
 
 ### Phase 5: Enrichment and Analysis Parity
 
@@ -345,7 +345,7 @@ Safety rules:
 
 ### Phase 7: Completion Audit
 
-- Audit every upstream advertised capability, Goldeneye editing requirement, ACK command, platform, configuration contract, and license obligation against authoritative test/runtime evidence.
+- Audit every upstream advertised capability, Goldeneye editing requirement, GCAL command, platform, configuration contract, and license obligation against authoritative test/runtime evidence.
 - Goal is complete only when no required item is missing, weakly evidenced, or dependent on upstream C runtime.
 
 ## Completion Criteria
@@ -354,7 +354,7 @@ Goldeneye is complete when:
 
 1. Production runtime contains Rust implementation and allowed vendored grammar/parser assets, with no call into upstream C application code.
 2. Required upstream behavior and eventual parity scope pass black-box compatibility gates.
-3. ACK operates through Goldeneye for discovery, inspection, source retrieval, call tracing, and architecture without upstream fallback.
+3. GCAL operates through Goldeneye for discovery, inspection, source retrieval, call tracing, and architecture without upstream fallback.
 4. Generic named-node edits and file creation work across supported grammars, reject stale state, preserve unrelated bytes, validate syntax, recover from interruption, and refresh graph facts.
 5. Cross-platform release, packaging, security, durability, and license tests pass.
 6. Completion audit maps every stated requirement to current authoritative evidence.

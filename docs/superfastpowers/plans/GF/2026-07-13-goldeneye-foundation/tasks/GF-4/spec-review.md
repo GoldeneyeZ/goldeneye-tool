@@ -7,7 +7,7 @@
 
 - Independently inspected committed GF-4 changed-file scope, `tools.rs`, `server.rs`, `lib.rs`, corrected task contract, and task context from `a46ff10`.
 - Compared every registry field, pagination branch, cursor result, route, error envelope, and required test against the corrected GF-4 package.
-- Confirmed upstream contract through ACK exact snippets from `cbm_mcp_tools_list_page`, `mcp_tools_cursor_offset`, `mcp_add_tool_def`, `cbm_mcp_text_result`, and upstream MCP tests.
+- Confirmed upstream contract through GCAL exact snippets from `cbm_mcp_tools_list_page`, `mcp_tools_cursor_offset`, `mcp_add_tool_def`, `cbm_mcp_text_result`, and upstream MCP tests.
 - Verification evidence: rustfmt and Clippy `-D warnings` exited 0; fourteen MCP tests and sixteen workspace tests passed with zero failures.
 
 ## Compliance Notes

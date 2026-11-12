@@ -6,17 +6,17 @@ Status: Approved
 ## Purpose
 
 Add a fast, explicitly non-canonical benchmark mode that performs exactly one
-model invocation while preserving repository isolation, ACK warm-state setup,
+model invocation while preserving repository isolation, GCAL warm-state setup,
 telemetry collection, and one held-out grader execution.
 
 The mode removes qualification-smoke overhead, agent-initiated build/test loops,
-and report-ID collisions. It does not limit ACK discovery calls.
+and report-ID collisions. It does not limit GCAL discovery calls.
 
 ## Goals
 
 - Execute exactly one task, one engine, one cache mode, and one repetition.
 - Invoke Codex exactly once.
-- Automatically refresh a missing or stale ACK snapshot without invoking Codex.
+- Automatically refresh a missing or stale GCAL snapshot without invoking Codex.
 - Skip qualification smoke.
 - Ask the agent not to run build, compile, test, lint, or check commands.
 - Retain one held-out grader as the correctness authority.
@@ -26,7 +26,7 @@ and report-ID collisions. It does not limit ACK discovery calls.
 
 ## Non-Goals
 
-- No ACK-call budget or ACK-call limit.
+- No GCAL-call budget or GCAL-call limit.
 - No replacement for canonical scored reports.
 - No inclusion in the four-run benchmark audit.
 - No hard interception of commands inside the Codex process.
@@ -81,7 +81,7 @@ parse and validate one-shot CLI
   -> invoke Codex exactly once
   -> collect patch, status, telemetry, and compliance data
   -> run held-out grader exactly once
-  -> clean worktree, cache, and ACK daemon
+  -> clean worktree, cache, and GCAL daemon
   -> write standalone one-shot report
 ```
 
@@ -89,11 +89,11 @@ No branch in this flow may invoke Codex more than once.
 
 ## Snapshot Behavior
 
-Vanilla one-shot runs do not require ACK preparation.
+Vanilla one-shot runs do not require GCAL preparation.
 
-Warm ACK one-shot runs verify the configured ready snapshot. When it is missing,
+Warm GCAL one-shot runs verify the configured ready snapshot. When it is missing,
 ineligible, or stale, the runner executes snapshot preparation without smoke.
-Snapshot preparation may initialize ACK and Goldeneye, copy files, checkpoint
+Snapshot preparation may initialize GCAL and Goldeneye, copy files, checkpoint
 SQLite, and write manifests, but it must not spawn Codex.
 
 One-shot mode accepts a successfully prepared snapshot even though canonical
@@ -146,16 +146,16 @@ An agent verification attempt:
 - does not suppress the held-out grader;
 - does not alone change grader-based success.
 
-## ACK Policy
+## GCAL Policy
 
-ACK discovery remains unrestricted. Existing protocol rules still require ACK as
-the code-discovery surface in the ACK lane. No new counter, maximum, timeout, or
-prompt instruction limits ACK calls.
+GCAL discovery remains unrestricted. Existing protocol rules still require GCAL as
+the code-discovery surface in the GCAL lane. No new counter, maximum, timeout, or
+prompt instruction limits GCAL calls.
 
-Existing ACK telemetry remains present:
+Existing GCAL telemetry remains present:
 
-- `ack_calls`;
-- `ack_failures`;
+- `gcal_calls`;
+- `gcal_failures`;
 - action counts;
 - protocol violations.
 
@@ -235,13 +235,13 @@ Test-first coverage:
 2. One-shot rejects matrices with more than one run.
 3. One-shot rejects incompatible workflow flags.
 4. Dry-run performs no snapshot refresh or Codex invocation.
-5. Vanilla one-shot bypasses ACK preparation.
-6. Warm ACK one-shot reuses a valid snapshot.
-7. Warm ACK one-shot refreshes a stale snapshot without spawning Codex.
+5. Vanilla one-shot bypasses GCAL preparation.
+6. Warm GCAL one-shot reuses a valid snapshot.
+7. Warm GCAL one-shot refreshes a stale snapshot without spawning Codex.
 8. Snapshot refresh failure produces zero model invocations.
 9. Prompt places verification prohibition after task text.
 10. Verification command classification covers supported build/test tools.
-11. ACK commands are never classified or limited.
+11. GCAL commands are never classified or limited.
 12. Exactly one Codex invocation and one grader invocation occur.
 13. Model or grader failure produces no retry.
 14. Attempt IDs and default output paths are unique.
@@ -250,10 +250,10 @@ Test-first coverage:
 
 ## Acceptance Criteria
 
-- One Level 0 ACK Luna one-shot command produces exactly one Codex invocation.
+- One Level 0 GCAL Luna one-shot command produces exactly one Codex invocation.
 - Missing/stale snapshot refresh occurs automatically without Codex.
 - Agent receives explicit no-build/no-test instruction.
 - Held-out grader runs once.
-- ACK calls remain unlimited.
+- GCAL calls remain unlimited.
 - Repeating the same command creates a new artifact root without duplicate IDs.
 - Canonical benchmark workflows and reports remain unchanged.

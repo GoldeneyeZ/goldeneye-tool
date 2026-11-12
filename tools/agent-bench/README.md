@@ -36,34 +36,34 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --config tools/agent-bench/configs/spring-sensitive-value-redaction-level0.json `
   --one-shot `
   --task spring-sensitive-value-redaction-level0 `
-  --engine goldeneye-ack `
+  --engine goldeneye-code-agent-layer `
   --cache-modes warm `
   --repetitions 1 `
   --model gpt-5.6-luna
 ```
 
-One-shot attempts are standalone and unqualified. They skip agent-side build, compile, test, lint, and check commands; ACK discovery calls remain unlimited. A missing or stale warm ACK snapshot is refreshed locally without a smoke/model run. By default, output is isolated at `target/agent-bench/<task-id>/one-shot/<attempt-id>/report.json`; use `--attempt-id <id>` for a stable name or `--out <path>` for an explicit report. Canonical scored reports are never read or merged.
+One-shot attempts are standalone and unqualified. They skip agent-side build, compile, test, lint, and check commands; GCAL discovery calls remain unlimited. A missing or stale warm GCAL snapshot is refreshed locally without a smoke/model run. By default, output is isolated at `target/agent-bench/<task-id>/one-shot/<attempt-id>/report.json`; use `--attempt-id <id>` for a stable name or `--out <path>` for an explicit report. Canonical scored reports are never read or merged.
 
 ### Operation-level run (no model)
 
-`benchmark:ops` compares ACK with plain shell discovery one information need at a time, without invoking a model. Each scenario in `ops/<corpus>.json` names a need, the evidence that proves it was met, and one scripted command chain per lane; a lane stops at the first step whose cumulative output holds all evidence. It runs in seconds and costs nothing, so use it to find and verify surface-level regressions before spending model tokens on an agent run.
+`benchmark:ops` compares GCAL with plain shell discovery one information need at a time, without invoking a model. Each scenario in `ops/<corpus>.json` names a need, the evidence that proves it was met, and one scripted command chain per lane; a lane stops at the first step whose cumulative output holds all evidence. It runs in seconds and costs nothing, so use it to find and verify surface-level regressions before spending model tokens on an agent run.
 
 ```powershell
 node tools/agent-bench/bin/benchmark-ops.mjs `
   --scenarios tools/agent-bench/ops/spring.json `
   --repo D:\path\to\spring-framework `
   --state target/ops-bench/spring `
-  --ack-entry C:\path\to\agent-context-kernel\dist\main.js `
+  --gcal-entry C:\path\to\goldeneye-code-agent-layer\dist\main.js `
   --goldeneye target/release/goldeneye.exe `
   --rg-dir C:\path\to\dir-containing-rg `
   --label optimized
 ```
 
-`--state` must hold an `ack-home/` in which the repository was registered with `ack init` (run with `ACK_HOME=<state>/ack-home` and `GOLDENEYE_DB_PATH=<state>/goldeneye.db`). Reports are written to `<state>/report-<label>.json` and `.md`. Run it once per ACK build or Goldeneye binary and compare labels.
+`--state` must hold an `gcal-home/` in which the repository was registered with `gcal init` (run with `GCAL_HOME=<state>/gcal-home` and `GOLDENEYE_DB_PATH=<state>/goldeneye.db`). Reports are written to `<state>/report-<label>.json` and `.md`. Run it once per GCAL build or Goldeneye binary and compare labels.
 
 Reported per lane: calls, failed calls, output tokens (characters / 4), wall time, and a cost in uncached-token equivalents: `calls x 25000 x 0.1 + output tokens x 2`. The first term is the cached context a model re-reads on the extra turn each call causes; the second is the output read once uncached and re-read cached on about ten later turns. Under this model one extra call costs as much as roughly 5 KB of output, which is why call count, not output size, decides most scenarios.
 
-A step written as `{ "cmd": ..., "when": "after-failure" }` is a recovery attempt and runs only once an earlier step of the chain exited non-zero. ACK chains start from the name an agent would naturally type; vanilla chains are deliberately tight (`rg` with bounded context and exact globs), so the comparison is conservative for ACK.
+A step written as `{ "cmd": ..., "when": "after-failure" }` is a recovery attempt and runs only once an earlier step of the chain exited non-zero. GCAL chains start from the name an agent would naturally type; vanilla chains are deliberately tight (`rg` with bounded context and exact globs), so the comparison is conservative for GCAL.
 
 ### Task variants
 

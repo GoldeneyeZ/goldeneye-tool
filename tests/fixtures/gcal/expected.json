@@ -72,5 +72,5 @@
   "ambiguity_error": "MCP tool error: symbol is ambiguous: duplicate; candidates: <project>.src.billing.duplicate, <project>.src.shipping.duplicate",
   "suggestion_error": "MCP tool error: symbol was not found: helpe; suggestions: <project>.src.lib.helper",
   "missing_project_error": "MCP tool error: project not found or not indexed: missing-project",
-  "unselected_project_error": "ACK_PROJECT is required for codebase-memory commands"
+  "unselected_project_error": "GCAL_PROJECT is required for codebase-memory commands"
 }

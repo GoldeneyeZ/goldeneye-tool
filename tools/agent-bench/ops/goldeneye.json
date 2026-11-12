@@ -1,7 +1,7 @@
 {
   "corpus": "goldeneye-tool (Rust workspace, TypeScript UI)",
   "lanes": [
-    "ack",
+    "gcal",
     "vanilla"
   ],
   "env": {
@@ -15,7 +15,7 @@
   },
   "notes": [
     "Same rules as spring.json. Names are written the way a Rust or TypeScript agent would type them (path::Type::method, bare function names, file paths).",
-    "search_code.rs was edited after this corpus was indexed, so the two tightest_node scenarios exercise reads against a stale index; their ack chains end with the raw read an agent falls back to."
+    "search_code.rs was edited after this corpus was indexed, so the two tightest_node scenarios exercise reads against a stale index; their gcal chains end with the raw read an agent falls back to."
   ],
   "scenarios": [
     {
@@ -26,14 +26,14 @@
         "return Err(\"invalid cursor\");",
         "next_cursor: (end < self.tools.len())"
       ],
-      "ack": [
-        "ack get 'goldeneye_mcp::tools::ToolRegistry::page'",
+      "gcal": [
+        "gcal get 'goldeneye_mcp::tools::ToolRegistry::page'",
         {
-          "cmd": "ack search 'page' --label Method --limit 5",
+          "cmd": "gcal search 'page' --label Method --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${M}.tools.ToolRegistry.page'",
+          "cmd": "gcal get '${M}.tools.ToolRegistry.page'",
           "when": "after-failure"
         }
       ],
@@ -49,14 +49,14 @@
         ".min_by(|left, right|",
         "left.id.cmp(&right.id)"
       ],
-      "ack": [
-        "ack get 'tightest_node'",
+      "gcal": [
+        "gcal get 'tightest_node'",
         {
-          "cmd": "ack search 'tightest_node' --limit 5",
+          "cmd": "gcal search 'tightest_node' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${Q}.search_code.tightest_node'",
+          "cmd": "gcal get '${Q}.search_code.tightest_node'",
           "when": "after-failure"
         },
         {
@@ -76,14 +76,14 @@
         "const fetchOverview = useCallback(",
         "return { data, loading, error, progress, fetchOverview, fetchDetail };"
       ],
-      "ack": [
-        "ack get 'useGraphData'",
+      "gcal": [
+        "gcal get 'useGraphData'",
         {
-          "cmd": "ack search 'useGraphData' --limit 5",
+          "cmd": "gcal search 'useGraphData' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${P}.ui.src.hooks.useGraphData.useGraphData'",
+          "cmd": "gcal get '${P}.ui.src.hooks.useGraphData.useGraphData'",
           "when": "after-failure"
         }
       ],
@@ -100,14 +100,14 @@
         "Some(\"text\") => Ok(Self::Text),",
         "let mut frames = FrameReader::new(BufReader::new(reader));"
       ],
-      "ack": [
-        "ack get 'ToolRegistry::page' 'ToolResponseMode::parse' 'run_session_with_server'",
+      "gcal": [
+        "gcal get 'ToolRegistry::page' 'ToolResponseMode::parse' 'run_session_with_server'",
         {
-          "cmd": "ack search 'page|parse|run_session_with_server' --limit 20",
+          "cmd": "gcal search 'page|parse|run_session_with_server' --limit 20",
           "when": "after-failure"
         },
         {
-          "cmd": "ack get '${M}.tools.ToolRegistry.page' '${M}.tools.ToolResponseMode.parse' '${CLI}.lib.run_session_with_server'",
+          "cmd": "gcal get '${M}.tools.ToolRegistry.page' '${M}.tools.ToolResponseMode.parse' '${CLI}.lib.run_session_with_server'",
           "when": "after-failure"
         }
       ],
@@ -126,9 +126,9 @@
           "regex": "\\bpage\\b"
         }
       ],
-      "ack": [
-        "ack get 'ToolRegistry'",
-        "ack symbol '.*' --qn '.*tools\\.ToolRegistry\\.[^.]+$' --limit 20"
+      "gcal": [
+        "gcal get 'ToolRegistry'",
+        "gcal symbol '.*' --qn '.*tools\\.ToolRegistry\\.[^.]+$' --limit 20"
       ],
       "vanilla": [
         "rg -n 'struct ToolRegistry|impl.*ToolRegistry|^    pub (const )?fn |^    tools:' ${TOOLS}"
@@ -142,8 +142,8 @@
         "quiesce_database(&database_path)",
         "let mut frames = FrameReader::new(BufReader::new(reader));"
       ],
-      "ack": [
-        "ack get 'crates/delivery/goldeneye-cli/src/lib.rs'",
+      "gcal": [
+        "gcal get 'crates/delivery/goldeneye-cli/src/lib.rs'",
         {
           "cmd": "Get-Content crates/delivery/goldeneye-cli/src/lib.rs",
           "when": "after-failure"
@@ -160,14 +160,14 @@
       "evidence": [
         "record_match"
       ],
-      "ack": [
-        "ack callers 'tightest_node'",
+      "gcal": [
+        "gcal callers 'tightest_node'",
         {
-          "cmd": "ack search 'tightest_node' --limit 5",
+          "cmd": "gcal search 'tightest_node' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack callers '${Q}.search_code.tightest_node'",
+          "cmd": "gcal callers '${Q}.search_code.tightest_node'",
           "when": "after-failure"
         },
         {
@@ -189,14 +189,14 @@
         "next_frame",
         "parse_error"
       ],
-      "ack": [
-        "ack callees 'run_session_with_server'",
+      "gcal": [
+        "gcal callees 'run_session_with_server'",
         {
-          "cmd": "ack search 'run_session_with_server' --limit 5",
+          "cmd": "gcal search 'run_session_with_server' --limit 5",
           "when": "after-failure"
         },
         {
-          "cmd": "ack callees '${CLI}.lib.run_session_with_server'",
+          "cmd": "gcal callees '${CLI}.lib.run_session_with_server'",
           "when": "after-failure"
         }
       ],
@@ -211,8 +211,8 @@
       "evidence": [
         "QueryStore"
       ],
-      "ack": [
-        "ack search 'impl QueryRepository for' --limit 10",
+      "gcal": [
+        "gcal search 'impl QueryRepository for' --limit 10",
         "rg -n 'impl.*QueryRepository for' --glob '*.rs' crates"
       ],
       "vanilla": [
@@ -229,8 +229,8 @@
           "regex": "goldeneye-mcp[\\\\/]src[\\\\/]tools\\.rs"
         }
       ],
-      "ack": [
-        "ack search 'GOLDENEYE_MCP_RESPONSE_MODE' --limit 5",
+      "gcal": [
+        "gcal search 'GOLDENEYE_MCP_RESPONSE_MODE' --limit 5",
         "rg -n 'GOLDENEYE_MCP_RESPONSE_MODE' --glob '*.rs' crates"
       ],
       "vanilla": [
@@ -249,8 +249,8 @@
           "regex": "goldeneye-mcp[\\\\/]src[\\\\/]tools\\.rs"
         }
       ],
-      "ack": [
-        "ack search 'QueryEngine|ToolRegistry' --limit 6"
+      "gcal": [
+        "gcal search 'QueryEngine|ToolRegistry' --limit 6"
       ],
       "vanilla": [
         "rg -n 'pub struct (QueryEngine|ToolRegistry)\\b' --glob '*.rs' crates"
@@ -271,8 +271,8 @@
           "regex": "\\bui[\\\\/]src"
         }
       ],
-      "ack": [
-        "ack arch"
+      "gcal": [
+        "gcal arch"
       ],
       "vanilla": [
         "git ls-files | ForEach-Object { (($_ -split '/')[0..2]) -join '/' } | Group-Object | Sort-Object Count -Descending | Select-Object -First 45 | ForEach-Object { \"$($_.Count) $($_.Name)\" }"

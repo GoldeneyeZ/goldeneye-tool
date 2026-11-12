@@ -22,7 +22,7 @@ function scoredRun(id, engine, repetition) {
     verified_e2e_ms: 125,
     dirty_paths: 2,
     patch_files: 2,
-    snapshot: engine === "goldeneye-ack" ? { manifest_sha256: "snapshot" } : null,
+    snapshot: engine === "goldeneye-code-agent-layer" ? { manifest_sha256: "snapshot" } : null,
     pre_run_verification: {
       candidate_unchanged: true,
       source_repository_clean: true,
@@ -37,7 +37,7 @@ function fixtureReport({ candidateRuns = 3, vanillaRuns = 1 }) {
     runs: [
       ...Array.from(
         { length: candidateRuns },
-        (_, index) => scoredRun(`ack-${index + 1}`, "goldeneye-ack", index + 1),
+        (_, index) => scoredRun(`gcal-${index + 1}`, "goldeneye-code-agent-layer", index + 1),
       ),
       ...Array.from(
         { length: vanillaRuns },
@@ -51,15 +51,15 @@ function expectedLimitations({ candidateCount, vanillaCount, randomized }) {
   return `This benchmark contains ${candidateCount} candidate and ${vanillaCount} vanilla ` +
     `${randomized ? "randomized serial" : "serial"} runs. Results are descriptive; ` +
     "the sample is too small for inferential significance. Provider prefix caching is " +
-    "reported separately from ACK snapshot caching.";
+    "reported separately from GCAL snapshot caching.";
 }
 
 test("mergeReportRuns appends split lanes and rejects duplicate run IDs", () => {
   const merged = mergeReportRuns(
     [scoredRun("vanilla-1", "vanilla", 1)],
-    [scoredRun("ack-1", "goldeneye-ack", 1)],
+    [scoredRun("gcal-1", "goldeneye-code-agent-layer", 1)],
   );
-  assert.deepEqual(merged.map((run) => run.id), ["vanilla-1", "ack-1"]);
+  assert.deepEqual(merged.map((run) => run.id), ["vanilla-1", "gcal-1"]);
   assert.throws(() => mergeReportRuns(merged, [merged[0]]), /Duplicate scored run ID/);
 });
 
@@ -67,11 +67,11 @@ test("renderMarkdownReport includes descriptive comparison and required limitati
   const report = {
     runs: [
       scoredRun("vanilla-1", "vanilla", 1),
-      scoredRun("ack-1", "goldeneye-ack", 1),
+      scoredRun("gcal-1", "goldeneye-code-agent-layer", 1),
     ],
   };
   const markdown = renderMarkdownReport(report, {
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     vanillaEngine: "vanilla",
   });
   assert.match(markdown, /cached descriptive comparison/i);
@@ -85,19 +85,19 @@ test("renderMarkdownReport includes descriptive comparison and required limitati
 test("auditBenchmarkReport enforces four traceable scored runs and timing invariants", () => {
   const runs = [
     scoredRun("vanilla-1", "vanilla", 1),
-    scoredRun("ack-1", "goldeneye-ack", 1),
-    scoredRun("ack-2", "goldeneye-ack", 2),
-    scoredRun("ack-3", "goldeneye-ack", 3),
+    scoredRun("gcal-1", "goldeneye-code-agent-layer", 1),
+    scoredRun("gcal-2", "goldeneye-code-agent-layer", 2),
+    scoredRun("gcal-3", "goldeneye-code-agent-layer", 3),
   ];
   const report = { runs };
   const markdown = renderMarkdownReport(report, {
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     vanillaEngine: "vanilla",
   });
   const audit = auditBenchmarkReport(report, {
     dirtyPathPolicy: compileDirtyPathPolicy({ exact: ["Main.java", "MainTests.java"] }),
     artifactExists: () => true,
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     markdown,
     readArtifact: () => " M Main.java\n M MainTests.java\n",
     vanillaEngine: "vanilla",
@@ -109,7 +109,7 @@ test("auditBenchmarkReport enforces four traceable scored runs and timing invari
       auditBenchmarkReport({ runs: runs.slice(1) }, {
         dirtyPathPolicy: compileDirtyPathPolicy({ exact: ["Main.java", "MainTests.java"] }),
         artifactExists: () => true,
-        candidateEngine: "goldeneye-ack",
+        candidateEngine: "goldeneye-code-agent-layer",
         markdown,
         readArtifact: () => " M Main.java\n M MainTests.java\n",
         vanillaEngine: "vanilla",
@@ -128,9 +128,9 @@ test("audits a randomized three by three report", () => {
     expectedVanillaRuns: 3,
     dirtyPathPolicy: compileDirtyPathPolicy({ prefixes: ["spring-context/"] }),
     artifactExists: () => true,
-    candidateEngine: "goldeneye-ack",
+    candidateEngine: "goldeneye-code-agent-layer",
     markdown: renderMarkdownReport(report, {
-      candidateEngine: "goldeneye-ack",
+      candidateEngine: "goldeneye-code-agent-layer",
       vanillaEngine: "vanilla",
     }),
     readArtifact: () => " M spring-context/src/main/java/A.java\n",

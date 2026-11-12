@@ -102,7 +102,7 @@ Use this manifest schema:
   "byte_count": 123,
   "files": [
     {
-      "path": "ack-state/goldeneye.db",
+      "path": "gcal-state/goldeneye.db",
       "bytes": 123,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }

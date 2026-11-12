@@ -18,11 +18,11 @@
 - One-shot rejects `--prepare-snapshot`, `--verify-only`, `--smoke`, `--calibration`, and `--audit-report`.
 - `--attempt-id` is valid only with `--one-shot` and is sanitized with existing ID rules.
 - `--dry-run --one-shot` validates and prints only; zero Codex/grader invocations.
-- Vanilla one-shot bypasses ACK snapshot preparation.
-- ACK one-shot reuses a valid snapshot; missing/stale snapshot refreshes automatically without Codex smoke.
+- Vanilla one-shot bypasses GCAL snapshot preparation.
+- GCAL one-shot reuses a valid snapshot; missing/stale snapshot refreshes automatically without Codex smoke.
 - Snapshot refresh failures stop before Codex.
 - Agent prompt ends with explicit no-build/no-test/no-lint/no-check policy when verification is skipped.
-- ACK discovery calls stay unlimited.
+- GCAL discovery calls stay unlimited.
 - Telemetry records detected agent verification calls and compliance; it does not intercept commands.
 - One-shot report is standalone under `target/agent-bench/<task-id>/one-shot/<attempt-id>/report.json` unless `--out` is explicit.
 - One-shot never reads or merges a canonical report.
@@ -99,7 +99,7 @@ Use `sanitizeId` and `path.resolve`/`path.join`. Never overwrite canonical outpu
 
 **Step 6: Add failing prompt/classifier tests**
 
-Cover shell variants for Maven, Gradle, Cargo, npm/pnpm/yarn test/build/lint/check, direct compiler commands, and false positives such as ACK `status`, `git status`, edits, or ordinary discovery.
+Cover shell variants for Maven, Gradle, Cargo, npm/pnpm/yarn test/build/lint/check, direct compiler commands, and false positives such as GCAL `status`, `git status`, edits, or ordinary discovery.
 
 **Step 7: Implement policy and classifier**
 
@@ -111,7 +111,7 @@ export function isAgentVerificationCommand(command) { /* conservative classifier
 export function analyzeAgentVerificationCalls(commandCalls) { /* call list + compliant */ }
 ```
 
-Classifier records only clear build/compile/test/lint/check commands. Preserve unlimited ACK calls.
+Classifier records only clear build/compile/test/lint/check commands. Preserve unlimited GCAL calls.
 
 **Step 8: Run focused test; verify GREEN**
 
@@ -184,8 +184,8 @@ Run same targeted command. Expected: all matching tests pass.
 Cover:
 
 - vanilla one-shot never reads/requires preparation;
-- ACK one-shot accepts valid frozen snapshot even when smoke qualification is absent;
-- missing/stale ACK snapshot invokes existing preparation once, without smoke/Codex;
+- GCAL one-shot accepts valid frozen snapshot even when smoke qualification is absent;
+- missing/stale GCAL snapshot invokes existing preparation once, without smoke/Codex;
 - preparation failure yields zero model invocations;
 - canonical scored run still requires `eligible_for_scoring`.
 
@@ -204,7 +204,7 @@ Add runner-local orchestration:
 ```js
 async function resolveOneShotPreparation({ baseCommit, config, expectedCandidate, repoName, engine }) {
   // vanilla => null
-  // valid ACK snapshot => existing preparation, snapshot_refreshed=false
+  // valid GCAL snapshot => existing preparation, snapshot_refreshed=false
   // missing/stale => prepareReadySnapshot(), verifyPreparedSnapshot(), snapshot_refreshed=true
 }
 ```
@@ -233,7 +233,7 @@ Fixture Codex emits JSONL and writes a trivial patch; fixture grader returns suc
 - one selected matrix item produces one Codex launch and one grader launch;
 - no retry or second pass occurs;
 - prompt final block forbids agent build/compile/test/lint/check;
-- ACK command count is unrestricted and does not affect compliance;
+- GCAL command count is unrestricted and does not affect compliance;
 - detected verification command makes `one_shot_compliant=false` and records command/exit status;
 - no detected verification makes `one_shot_compliant=true`.
 
@@ -270,7 +270,7 @@ After Codex JSONL parsing, feed command calls to `analyzeAgentVerificationCalls`
 }
 ```
 
-Do not block or limit ACK calls.
+Do not block or limit GCAL calls.
 
 **Step 6: Verify focused tests GREEN**
 
@@ -335,7 +335,7 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
   --repetitions 1 --model gpt-5.6-luna
 ```
 
-State: standalone, unqualified, skips agent-side verification, ACK calls unlimited, auto-refresh may still perform local snapshot initialization, and canonical scored reports are untouched.
+State: standalone, unqualified, skips agent-side verification, GCAL calls unlimited, auto-refresh may still perform local snapshot initialization, and canonical scored reports are untouched.
 
 **Step 2: Run all bench unit/integration tests**
 
@@ -360,7 +360,7 @@ Expected: zero errors.
 Compare implementation against every invariant in this plan and `docs/superfastpowers/specs/2026-07-30-agent-bench-one-shot-design.md`. Confirm:
 
 - canonical paths unchanged;
-- no ACK call cap added;
+- no GCAL call cap added;
 - no real benchmark/model run occurred during tests;
 - pre-existing daemon/timing changes remain intact;
 - dirty unrelated files were not overwritten.

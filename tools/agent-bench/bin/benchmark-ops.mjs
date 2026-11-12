@@ -6,7 +6,7 @@ import {
   DEFAULT_COST_MODEL,
   createShellExecutor,
   expandPlaceholders,
-  prepareAckShim,
+  prepareGcalShim,
   renderMarkdown,
   resolveProjectName,
   runChain,
@@ -14,7 +14,7 @@ import {
 } from '../ops.mjs';
 
 const USAGE = `Usage: benchmark-ops.mjs --scenarios <file> --repo <dir> --state <dir>
-         --ack-entry <dist/main.js> --goldeneye <binary> [options]
+         --gcal-entry <dist/main.js> --goldeneye <binary> [options]
 
 Options:
   --out <file>        JSON report path (default: <state>/report-<label>.json)
@@ -43,7 +43,7 @@ function parseArgs(argv) {
     options[arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = argv[index + 1];
     index += 1;
   }
-  for (const required of ['scenarios', 'repo', 'state', 'ackEntry', 'goldeneye']) {
+  for (const required of ['scenarios', 'repo', 'state', 'gcalEntry', 'goldeneye']) {
     if (!options[required]) throw new Error(`missing --${required.replace(/[A-Z]/g, (l) => `-${l.toLowerCase()}`)}`);
   }
   return options;
@@ -54,33 +54,33 @@ function main() {
   const suite = JSON.parse(readFileSync(options.scenarios, 'utf8'));
   const repo = path.resolve(options.repo);
   const state = path.resolve(options.state);
-  const ackHome = path.join(state, 'ack-home');
-  const shimDir = prepareAckShim(state, path.resolve(options.ackEntry));
+  const gcalHome = path.join(state, 'gcal-home');
+  const shimDir = prepareGcalShim(state, path.resolve(options.gcalEntry));
   const lanes = options.lanes ? options.lanes.split(',') : suite.lanes;
   const only = options.only ? new Set(options.only.split(',')) : null;
 
   const env = { ...process.env, ...suite.env };
-  delete env.ACK_PROJECT;
+  delete env.GCAL_PROJECT;
   Object.assign(env, {
-    ACK_HOME: ackHome,
-    ACK_BACKEND: 'goldeneye',
-    ACK_GOLDENEYE_COMMAND: path.resolve(options.goldeneye),
-    ACK_DAEMON: 'auto',
-    ACK_DAEMON_IDLE: '60s',
+    GCAL_HOME: gcalHome,
+    GCAL_BACKEND: 'goldeneye',
+    GCAL_GOLDENEYE_COMMAND: path.resolve(options.goldeneye),
+    GCAL_DAEMON: 'auto',
+    GCAL_DAEMON_IDLE: '60s',
     GOLDENEYE_DB_PATH: path.join(state, 'goldeneye.db'),
     PATH: [shimDir, options.rgDir, process.env.PATH].filter(Boolean).join(path.delimiter),
   });
 
   const execute = createShellExecutor({ cwd: repo, env });
-  const placeholders = { P: resolveProjectName(ackHome, repo) };
+  const placeholders = { P: resolveProjectName(gcalHome, repo) };
   for (const [key, template] of Object.entries(suite.placeholders ?? {})) {
     placeholders[key] = expandPlaceholders(template, placeholders);
   }
 
-  // Start the ACK daemon outside the measured chains; report its cold cost once.
-  const warmup = execute('ack status');
+  // Start the GCAL daemon outside the measured chains; report its cold cost once.
+  const warmup = execute('gcal status');
   if (warmup.exitCode !== 0) {
-    throw new Error(`ack warm-up failed: ${warmup.output.trim()}`);
+    throw new Error(`gcal warm-up failed: ${warmup.output.trim()}`);
   }
 
   const scenarios = [];
@@ -125,7 +125,7 @@ function main() {
     label: options.label,
     corpus: suite.corpus,
     repo,
-    ack_entry: path.resolve(options.ackEntry),
+    gcal_entry: path.resolve(options.gcalEntry),
     goldeneye: path.resolve(options.goldeneye),
     lanes,
     cost_model: DEFAULT_COST_MODEL,

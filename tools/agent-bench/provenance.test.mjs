@@ -100,7 +100,7 @@ test("Goldeneye candidate provenance rejects an unrelated tracked diff change", 
   assert.equal(compareProvenance(baseline, observed).field, "tracked_diff_sha256");
 });
 
-test("ACK provenance selects deterministic dependency lock and rejects lock mutation", async (t) => {
+test("GCAL provenance selects deterministic dependency lock and rejects lock mutation", async (t) => {
   const repo = await fixture(t);
   assert.equal(selectDependencyLock(repo), "package-lock.json");
   const selectedFiles = ["dist/main.js", selectDependencyLock(repo)];

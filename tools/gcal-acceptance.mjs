@@ -16,27 +16,27 @@ import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const workspace = resolve(scriptDirectory, "..");
-const fixture = join(workspace, "tests", "fixtures", "ack", "rust-project");
+const fixture = join(workspace, "tests", "fixtures", "gcal", "rust-project");
 const expected = JSON.parse(
-  readFileSync(join(workspace, "tests", "fixtures", "ack", "expected.json"), "utf8"),
+  readFileSync(join(workspace, "tests", "fixtures", "gcal", "expected.json"), "utf8"),
 );
 const argumentsMap = parseArguments(process.argv.slice(2));
-const ackRoot = resolve(
-  argumentsMap.get("--ack-root") ?? process.env.ACK_ROOT ?? fail("--ack-root or ACK_ROOT is required"),
+const gcalRoot = resolve(
+  argumentsMap.get("--gcal-root") ?? process.env.GCAL_ROOT ?? fail("--gcal-root or GCAL_ROOT is required"),
 );
-const ackMain = join(ackRoot, "dist", "main.js");
+const gcalMain = join(gcalRoot, "dist", "main.js");
 const server = resolve(
   argumentsMap.get("--goldeneye-bin") ??
     join(workspace, "target", "debug", `goldeneye${process.platform === "win32" ? ".exe" : ""}`),
 );
-const temporaryRoot = mkdtempSync(join(tmpdir(), "goldeneye-ack-acceptance-"));
+const temporaryRoot = mkdtempSync(join(tmpdir(), "goldeneye-code-agent-layer-acceptance-"));
 const temporaryProject = join(temporaryRoot, "fixture");
 const database = join(temporaryRoot, "state", "goldeneye.db");
 const results = [];
 
 try {
-  assert.ok(existsSync(ackMain), `ACK dist entry point does not exist: ${ackMain}`);
-  assert.ok(existsSync(fixture), `ACK fixture does not exist: ${fixture}`);
+  assert.ok(existsSync(gcalMain), `GCAL dist entry point does not exist: ${gcalMain}`);
+  assert.ok(existsSync(fixture), `GCAL fixture does not exist: ${fixture}`);
 
   if (!argumentsMap.has("--goldeneye-bin")) {
     const build = spawnSync("cargo", ["build", "--quiet", "-p", "goldeneye"], {
@@ -51,22 +51,22 @@ try {
   cpSync(fixture, temporaryProject, { recursive: true });
   const isolatedEnvironment = {
     ...process.env,
-    ACK_MCP_COMMAND: server,
+    GCAL_MCP_COMMAND: server,
     CBM_ALLOWED_ROOT: temporaryRoot,
     GOLDENEYE_DB_PATH: database,
     GOLDENEYE_PROJECT_ROOT: temporaryRoot,
     PATH: "",
   };
-  delete isolatedEnvironment.ACK_MCP_URL;
-  delete isolatedEnvironment.ACK_PROJECT;
+  delete isolatedEnvironment.GCAL_MCP_URL;
+  delete isolatedEnvironment.GCAL_PROJECT;
 
   const version = run(server, ["--version"], isolatedEnvironment);
   assert.equal(version.status, 0, commandFailure("goldeneye --version", version));
   assert.match(version.stdout.trim(), /^goldeneye \d+\.\d+\.\d+$/);
   results.push(result("server identity", version));
 
-  const indexed = runAck("index", ["index", temporaryProject], isolatedEnvironment);
-  assert.equal(indexed.status, 0, commandFailure("ack index", indexed));
+  const indexed = runGcal("index", ["index", temporaryProject], isolatedEnvironment);
+  assert.equal(indexed.status, 0, commandFailure("gcal index", indexed));
   const indexPayload = JSON.parse(indexed.stdout);
   const project = indexPayload.project;
   const canonicalRoot = indexPayload.root_path;
@@ -76,7 +76,7 @@ try {
   assert.ok(existsSync(database), "Rust server did not create isolated database");
   assert.ok(statSync(database).size > 0, "isolated database is empty");
 
-  const projectEnvironment = { ...isolatedEnvironment, ACK_PROJECT: project };
+  const projectEnvironment = { ...isolatedEnvironment, GCAL_PROJECT: project };
   const qualifiedHelper = `${project}.src.lib.helper`;
   const qualifiedEntry = `${project}.src.lib.entry`;
 
@@ -145,16 +145,16 @@ try {
     "missing project",
     ["status"],
     expected.missing_project_error,
-    { ...isolatedEnvironment, ACK_PROJECT: "missing-project" },
+    { ...isolatedEnvironment, GCAL_PROJECT: "missing-project" },
     project,
   );
 
-  const unselected = runAck("unselected project", ["status"], isolatedEnvironment);
-  assert.equal(unselected.status, 2, commandFailure("ack status without project", unselected));
+  const unselected = runGcal("unselected project", ["status"], isolatedEnvironment);
+  assert.equal(unselected.status, 2, commandFailure("gcal status without project", unselected));
   assert.equal(unselected.stderr.trimEnd(), expected.unselected_project_error);
 
-  const help = runAck("help", ["--help"], isolatedEnvironment);
-  assert.equal(help.status, 0, commandFailure("ack --help", help));
+  const help = runGcal("help", ["--help"], isolatedEnvironment);
+  assert.equal(help.status, 0, commandFailure("gcal --help", help));
   assert.doesNotMatch(help.stdout, /\belect\b/);
   assert.match(help.stdout, /\bstatus\b/);
   assert.match(help.stdout, /\barch\b/);
@@ -164,7 +164,7 @@ try {
   }
   console.log(`PASS Rust-only isolation project=${project} database_bytes=${statSync(database).size}`);
 } catch (error) {
-  console.error(`ACK acceptance failed: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`GCAL acceptance failed: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 } finally {
   rmSync(temporaryRoot, { force: true, recursive: true });
@@ -174,7 +174,7 @@ function parseArguments(values) {
   const parsed = new Map();
   for (let index = 0; index < values.length; index += 1) {
     const name = values[index];
-    if (name !== "--ack-root" && name !== "--goldeneye-bin") {
+    if (name !== "--gcal-root" && name !== "--goldeneye-bin") {
       fail(`unknown argument: ${name}`);
     }
     const value = values[index + 1];
@@ -205,9 +205,9 @@ function run(executable, args, environment) {
   };
 }
 
-function runAck(name, args, environment) {
-  const completed = run(process.execPath, [ackMain, ...args], environment);
-  results.push(result(`ack ${name}`, completed));
+function runGcal(name, args, environment) {
+  const completed = run(process.execPath, [gcalMain, ...args], environment);
+  results.push(result(`gcal ${name}`, completed));
   return completed;
 }
 
@@ -220,16 +220,16 @@ function result(name, completed) {
 }
 
 function expectText(name, args, wanted, environment, project) {
-  const completed = runAck(name, args, environment);
-  assert.equal(completed.status, 0, commandFailure(`ack ${name}`, completed));
+  const completed = runGcal(name, args, environment);
+  assert.equal(completed.status, 0, commandFailure(`gcal ${name}`, completed));
   assert.equal(normalizeText(completed.stdout.trimEnd(), project), wanted);
   assert.equal(completed.stderr, "");
   assert.ok(Buffer.byteLength(completed.stdout) <= 4096, `${name} output is not compact`);
 }
 
 function expectJson(name, args, wanted, environment, project, canonicalRoot) {
-  const completed = runAck(name, args, environment);
-  assert.equal(completed.status, 0, commandFailure(`ack ${name}`, completed));
+  const completed = runGcal(name, args, environment);
+  assert.equal(completed.status, 0, commandFailure(`gcal ${name}`, completed));
   assert.equal(completed.stderr, "");
   assert.deepEqual(
     normalizeValue(JSON.parse(completed.stdout), project, canonicalRoot),
@@ -239,8 +239,8 @@ function expectJson(name, args, wanted, environment, project, canonicalRoot) {
 }
 
 function expectError(name, args, wanted, environment, project) {
-  const completed = runAck(name, args, environment);
-  assert.equal(completed.status, 1, commandFailure(`ack ${name}`, completed));
+  const completed = runGcal(name, args, environment);
+  assert.equal(completed.status, 1, commandFailure(`gcal ${name}`, completed));
   assert.equal(completed.stdout, "");
   assert.equal(normalizeText(completed.stderr.trimEnd(), project), wanted);
   assert.ok(Buffer.byteLength(completed.stderr) <= 4096, `${name} error is not compact`);

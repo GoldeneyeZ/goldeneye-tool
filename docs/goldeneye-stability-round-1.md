@@ -4,7 +4,7 @@ Date: 2026-07-22
 
 ## Scope
 
-Stabilize direct Goldeneye MCP availability before introducing the ACK benchmark lane.
+Stabilize direct Goldeneye MCP availability before introducing the GCAL benchmark lane.
 
 The Abyssal Zenith baseline had one genuine warm-run failure:
 
@@ -80,7 +80,7 @@ Every post-fix run completed correctly, but successful runs still had 2–3 reco
 - `get_code_snippet`: simple class names were ambiguous with same-named constructor nodes.
 - `search_code`: one agent combined regex-like `path_filter` and `file_pattern` values rejected by path validation.
 
-These are tool ergonomics and ACK-routing issues, not MCP startup failures. Next stability round should eliminate them through ACK's single command path and clearer query contracts before comparing tokens or latency.
+These are tool ergonomics and GCAL-routing issues, not MCP startup failures. Next stability round should eliminate them through GCAL's single command path and clearer query contracts before comparing tokens or latency.
 
 ## Verification
 

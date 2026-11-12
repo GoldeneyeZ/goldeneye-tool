@@ -38,7 +38,7 @@ TDD and deterministic evidence:
 - Focused GREEN: the same CI/documentation contract passed 5/5.
 - `python tools/test_export_grammar_lock.py` passed 20/20.
 - Lock reproduction reported reproducible; provider generation and license-ledger generation reported current.
-- The workflow parses as YAML with jobs `rust` and `full-pack`; the full job has nine steps. No `ack elect` text or external GitHub state mutation was introduced.
+- The workflow parses as YAML with jobs `rust` and `full-pack`; the full job has nine steps. No `gcal elect` text or external GitHub state mutation was introduced.
 
 Integration evidence:
 

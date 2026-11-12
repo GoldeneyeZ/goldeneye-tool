@@ -1,13 +1,13 @@
-# ACK feature handoff
+# GCAL feature handoff
 
-This document hands the post-Phase-1 Goldeneye capabilities to ACK. The ACK
+This document hands the post-Phase-1 Goldeneye capabilities to GCAL. The GCAL
 baseline is commit `5bc63b4`, where the Rust-only acceptance harness covered
-`ack search`, `symbol`, `inspect`, `get`, `callers`, `callees`, `arch`,
+`gcal search`, `symbol`, `inspect`, `get`, `callers`, `callees`, `arch`,
 `status`, and `index`. The implementation described here is commit `14cdb59`.
 
 The exact protocol contract is `tests/fixtures/mcp/foundation.expected.jsonl`.
 Use that fixture and HEAD source as the authority; do not infer schemas from a
-possibly stale running development server. Phase 1 still excludes `ack elect`.
+possibly stale running development server. Phase 1 still excludes `gcal elect`.
 
 ## Scope and baseline
 
@@ -42,27 +42,27 @@ Existing contracts also changed:
 - Indexing now refreshes Git history and semantic artifacts. `fast` clears the
   semantic index; `moderate` and `full` rebuild it.
 
-## Recommended ACK surface
+## Recommended GCAL surface
 
-| Goldeneye capability | Suggested ACK surface | Priority | Status |
+| Goldeneye capability | Suggested GCAL surface | Priority | Status |
 | --- | --- | --- | --- |
-| Expanded index modes | Extend `ack index` with `--mode` and `--name` | P0 | Ready with name-collision preflight |
-| Graph-augmented text search | `ack code <pattern>` | P0 | Ready; default to `compact` |
-| Semantic symbol search | `ack search --semantic <keyword>...` | P0 | Ready; environment toggles are not wired and watcher refresh clears vectors |
-| Git change impact | `ack changes` | P0 | Ready |
-| Bounded syntax inspection | `ack syntax <path>` | P0 | Ready; required before node edits |
-| Structural mutations | `ack create`, `replace`, `delete-node`, `insert-before`, `insert-after` | P0 | Ready with locator and operation-ID rules |
-| Project administration | `ack projects`, `ack project delete`, `ack schema` | P1 | Runtime works; `delete_project` advertised schema is malformed |
-| Read-only Cypher | `ack query <cypher>` | P1 | Ready; expose row bounds |
-| Cross-project intelligence | `ack index --mode cross-repo-intelligence` | P1 | Partial; target filtering is not implemented |
-| ADR storage | `ack adr get|update|sections` | P1 | Partial; requested section filtering is ignored |
-| Trace ingestion | `ack traces ingest` | P2/experimental | Storage works; graph-edge materialization does not |
-| Local graph UI | `ack ui` | P2/local only | Ready only on loopback through the Goldeneye binary |
+| Expanded index modes | Extend `gcal index` with `--mode` and `--name` | P0 | Ready with name-collision preflight |
+| Graph-augmented text search | `gcal code <pattern>` | P0 | Ready; default to `compact` |
+| Semantic symbol search | `gcal search --semantic <keyword>...` | P0 | Ready; environment toggles are not wired and watcher refresh clears vectors |
+| Git change impact | `gcal changes` | P0 | Ready |
+| Bounded syntax inspection | `gcal syntax <path>` | P0 | Ready; required before node edits |
+| Structural mutations | `gcal create`, `replace`, `delete-node`, `insert-before`, `insert-after` | P0 | Ready with locator and operation-ID rules |
+| Project administration | `gcal projects`, `gcal project delete`, `gcal schema` | P1 | Runtime works; `delete_project` advertised schema is malformed |
+| Read-only Cypher | `gcal query <cypher>` | P1 | Ready; expose row bounds |
+| Cross-project intelligence | `gcal index --mode cross-repo-intelligence` | P1 | Partial; target filtering is not implemented |
+| ADR storage | `gcal adr get|update|sections` | P1 | Partial; requested section filtering is ignored |
+| Trace ingestion | `gcal traces ingest` | P2/experimental | Storage works; graph-edge materialization does not |
+| Local graph UI | `gcal ui` | P2/local only | Ready only on loopback through the Goldeneye binary |
 | Watcher controls | None yet | Deferred | Watcher starts automatically; no MCP status/control contract |
-| Artifact sharing | `ack artifact ...`, `ack index --persist` | Blocked | Unsafe with the shared multi-project database |
+| Artifact sharing | `gcal artifact ...`, `gcal index --persist` | Blocked | Unsafe with the shared multi-project database |
 | Full grammar runtime | Runtime/provider selection | Blocked | Full pack exists but shipped services use only core grammars |
 
-ACK should retain its compact-first behavior:
+GCAL should retain its compact-first behavior:
 
 - Prefer `structuredContent`; fall back to decoding `result.content[0].text`.
 - Keep `search_code` in `compact` mode unless `--full` is explicit.
@@ -195,7 +195,7 @@ templates, or prompts. `trace_call_path` remains an alias for `trace_path`.
 Strict clients must account for one current schema defect: `delete_project`
 advertises a double-wrapped object schema, but runtime dispatch expects the
 flat payload `{ "project": "..." }`. Prefer fixing Goldeneye before relying on
-schema-generated ACK commands; until then, special-case the flat payload.
+schema-generated GCAL commands; until then, special-case the flat payload.
 
 ## CLI and HTTP contracts
 
@@ -234,8 +234,8 @@ The embedded UI uses:
 | GET | `/api/logs` | Recent process logs |
 | POST | `/api/process-kill` | Terminate a selected process |
 
-`ack ui` can only delegate to a locally configured Goldeneye executable. It
-must report unsupported transport when ACK is configured only with a remote
+`gcal ui` can only delegate to a locally configured Goldeneye executable. It
+must report unsupported transport when GCAL is configured only with a remote
 MCP URL.
 
 ## Configuration and persistence
@@ -274,7 +274,7 @@ integrity before rollback-safe installation.
 
 ## Compatibility and migration notes
 
-Resolve these before presenting every feature as ACK-ready:
+Resolve these before presenting every feature as GCAL-ready:
 
 1. **Block shared artifact import/export and `--persist`.** Export snapshots the
    entire configured multi-project database while metadata describes only one
@@ -295,7 +295,7 @@ Resolve these before presenting every feature as ACK-ready:
    `javascript`, `python`, `rust`, `tsx`, and `typescript`.
 4. **Preflight custom names.** Project names are sanitized and can collide.
    `Store::register_project` updates the existing project's root when an ID
-   already exists. ACK should compare `list_projects` before `--name` and fail
+   already exists. GCAL should compare `list_projects` before `--name` and fail
    on a different existing root unless replacement is explicit.
 5. **Fix or special-case `delete_project` schema.** Its advertised schema is
    nested incorrectly even though flat runtime arguments work.
@@ -306,31 +306,31 @@ Resolve these before presenting every feature as ACK-ready:
    ignored and `sections` mode returns all headings. Trace ingestion persists
    bounded observations but does not yet create runtime graph edges.
 8. **Artifact bootstrap is best-effort.** Import errors are discarded before
-   normal indexing; ACK should not report a successful bootstrap unless it
+   normal indexing; GCAL should not report a successful bootstrap unless it
    independently verifies the imported database.
 9. **Expose watcher effects before watcher controls.** MCP and HTTP indexing
    start watchers automatically. Refresh uses `fast`, which clears semantic
    vectors; non-Git repositories are not refreshed; and a missing root is
    removed from the database after three misses and the prune grace (10 minutes
-   by default). ACK needs watcher status and an explicit prune policy before it
+   by default). GCAL needs watcher status and an explicit prune policy before it
    offers administration commands.
 10. **Surface edit-recovery failures verbatim.** Unresolved durable-journal
     recovery conflicts block MCP startup, and no MCP/CLI recovery command exists
-    yet. ACK must preserve the actionable startup error instead of reporting a
+    yet. GCAL must preserve the actionable startup error instead of reporting a
     generic transport failure.
 11. **Keep UI on loopback.** `goldeneye ui --bind` can expose wildcard-CORS,
-    unauthenticated project deletion and process-kill endpoints. ACK should
+    unauthenticated project deletion and process-kill endpoints. GCAL should
     reject non-loopback binds unless a future explicit unsafe-public option and
     authentication contract are added.
-12. **Reload the server before ACK acceptance.** HEAD advertises
+12. **Reload the server before GCAL acceptance.** HEAD advertises
     `index_repository.name` and does not advertise
-    `get_code_snippet.include_neighbors`. Seeing the reverse means ACK is
+    `get_code_snippet.include_neighbors`. Seeing the reverse means GCAL is
     connected to a stale development binary; rebuild/restart and compare
     `tools/list` with the frozen fixture.
 
 Project-name overrides are otherwise propagated through MCP, HTTP indexing,
 and watcher refresh. The resolved sanitized project ID is returned by indexing
-and should become ACK's canonical project selector.
+and should become GCAL's canonical project selector.
 
 ## Verification evidence
 
@@ -342,7 +342,7 @@ Fresh verification at commit `14cdb59`:
 - Production UI build passed without warnings.
 - Isolated exact-HEAD self-index: 211 files, 15,487 nodes, 22,068 edges,
   0 diagnostics.
-- ACK status and symbol search resolved `GoldeneyeBackend` from
+- GCAL status and symbol search resolved `GoldeneyeBackend` from
   `crates/delivery/goldeneye-http/src/backend.rs`.
 
 ## Source map
@@ -364,4 +364,4 @@ Fresh verification at commit `14cdb59`:
 - `crates/delivery/goldeneye-watcher/src/lib.rs`: watcher behavior and defaults.
 - `crates/delivery/goldeneye-cli/src/main.rs`: direct CLI contract.
 - `ui/HTTP_API_CONTRACT.md`: UI route contract.
-- `docs/ack-acceptance.md`: current ACK Phase-1 baseline.
+- `docs/gcal-acceptance.md`: current GCAL Phase-1 baseline.
