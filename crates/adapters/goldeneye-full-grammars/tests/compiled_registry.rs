@@ -353,9 +353,10 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let temporary = tempfile::tempdir().unwrap();
-        let lock_path = temporary.path().join("full-pack.toml");
-        let generated_path = temporary.path().join("generated.rs");
-        let root = temporary.path().join("materialized");
+        let temporary_root = fs::canonicalize(temporary.path()).unwrap();
+        let lock_path = temporary_root.join("full-pack.toml");
+        let generated_path = temporary_root.join("generated.rs");
+        let root = temporary_root.join("materialized");
         let grammar_root = root.join("alpha");
         fs::create_dir_all(&grammar_root).unwrap();
 

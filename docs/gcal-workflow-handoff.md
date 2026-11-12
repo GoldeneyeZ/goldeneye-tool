@@ -19,7 +19,7 @@ The installed `gcal` command resolves to:
 
 ```text
 C:\Users\Zacha\AppData\Local\pnpm\gcal.ps1
-  -> C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer\dist\main.js
+  -> C:\Users\Zacha\IdeaProjects\goldeneye-tool\agent\dist\main.js
 ```
 
 The implemented command surface agrees with the current `goldeneye-code-agent-layer` skill:
@@ -55,7 +55,7 @@ Two blocking failures were reproduced before that setup:
 
 ### P0: make backend and project selection dependable
 
-Owner: `C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer`
+Owner: `C:\Users\Zacha\IdeaProjects\goldeneye-tool\agent`
 
 - Stop defaulting this installation to `codebase-memory-mcp`. Resolve a stable
   installed Goldeneye executable or a stable wrapper; do not depend on a
@@ -130,7 +130,7 @@ then `get` when exact source was required from the start.
 
 ### P1: harden compact CLI ergonomics
 
-Owner: `C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer`
+Owner: `C:\Users\Zacha\IdeaProjects\goldeneye-tool\agent`
 
 - Either normalize simple file globs (`*.ts`, `*.test.ts`) or reject them with
   a concrete regex replacement. Model runs repeatedly supplied globs where the
@@ -244,7 +244,7 @@ benchmark effects can be measured independently.
 - `target/agent-bench/terax-goldeneye-vs-vanilla-rerun.json`: rerun.
 - `tools/agent-bench/core.mjs`: engine policy, telemetry, and source-read checks.
 - `tools/agent-bench/graders/terax-fuzzy-diacritics.mjs`: frontend task grader.
-- `C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer\README.md`: current GCAL
+- `C:\Users\Zacha\IdeaProjects\goldeneye-tool\agent\README.md`: current GCAL
   configuration contract.
-- `C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer\src\cli\runCli.ts`: current
+- `C:\Users\Zacha\IdeaProjects\goldeneye-tool\agent\src\cli\runCli.ts`: current
   project-selection enforcement.

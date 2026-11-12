@@ -116,7 +116,7 @@ test("one-shot output defaults to task and attempt isolation", () => {
   );
 });
 
-test("verification policy has final, explicit prohibitions without limiting GCAL", () => {
+test("verification policy has final prohibitions and preserves lane discovery budgets", () => {
   const policy = agentVerificationPolicy();
   assert.match(policy, /Do not run/i);
   assert.match(policy, /build/i);
@@ -124,7 +124,7 @@ test("verification policy has final, explicit prohibitions without limiting GCAL
   assert.match(policy, /test/i);
   assert.match(policy, /lint/i);
   assert.match(policy, /check/i);
-  assert.match(policy, /GCAL discovery calls are not limited/i);
+  assert.match(policy, /lane-specific discovery strategy and call budget/i);
 });
 
 test("verification policy is the final prompt block only when requested", () => {

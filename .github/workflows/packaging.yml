@@ -35,8 +35,8 @@ jobs:
   portable-metadata:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: actions/setup-python@v5
@@ -64,7 +64,7 @@ jobs:
   windows-metadata:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Parse Chocolatey metadata and scripts
         shell: pwsh
         run: |
@@ -86,14 +86,14 @@ jobs:
   homebrew-metadata:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Parse Homebrew formula template
         run: ruby -c pkg/homebrew/Formula/goldeneye-tool.rb.tmpl
 
   nix-source:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@main
       - name: Evaluate and build source flake
         run: nix flake check --no-write-lock-file

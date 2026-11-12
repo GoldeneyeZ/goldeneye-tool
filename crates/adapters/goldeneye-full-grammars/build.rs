@@ -1,8 +1,8 @@
 #[cfg(any(feature = "compiled", test))]
-pub use native::{
-    NativePlan, WrapperSpec, compiler_include_path, derive_cobol_scanner_for_msvc,
-    prepare_native_plan,
-};
+pub use native::{NativePlan, WrapperSpec, derive_cobol_scanner_for_msvc, prepare_native_plan};
+
+#[cfg(all(any(feature = "compiled", test), windows))]
+pub use native::compiler_include_path;
 
 #[cfg(any(feature = "compiled", test))]
 pub const STANDARD_SCANNER_SUFFIXES: [&str; 5] =

@@ -1,0 +1,5 @@
+# StoreError carries the identifiers and file paths of both nodes of a duplicate
+# (seven owned strings, 168 bytes), so that the message names what collided.
+# These errors are rare and end an index run; boxing them would complicate every
+# construction site for no measurable gain.
+large-error-threshold = 192

@@ -22,14 +22,14 @@ const expected = JSON.parse(
 );
 const argumentsMap = parseArguments(process.argv.slice(2));
 const gcalRoot = resolve(
-  argumentsMap.get("--gcal-root") ?? process.env.GCAL_ROOT ?? fail("--gcal-root or GCAL_ROOT is required"),
+  argumentsMap.get("--gcal-root") ?? process.env.GCAL_ROOT ?? join(workspace, "agent"),
 );
 const gcalMain = join(gcalRoot, "dist", "main.js");
 const server = resolve(
   argumentsMap.get("--goldeneye-bin") ??
     join(workspace, "target", "debug", `goldeneye${process.platform === "win32" ? ".exe" : ""}`),
 );
-const temporaryRoot = mkdtempSync(join(tmpdir(), "goldeneye-code-agent-layer-acceptance-"));
+const temporaryRoot = mkdtempSync(join(tmpdir(), "gcal-acceptance-"));
 const temporaryProject = join(temporaryRoot, "fixture");
 const database = join(temporaryRoot, "state", "goldeneye.db");
 const results = [];
@@ -51,12 +51,15 @@ try {
   cpSync(fixture, temporaryProject, { recursive: true });
   const isolatedEnvironment = {
     ...process.env,
-    GCAL_MCP_COMMAND: server,
+    GCAL_BACKEND: "goldeneye",
+    GCAL_DAEMON: "off",
+    GCAL_GOLDENEYE_COMMAND: server,
     CBM_ALLOWED_ROOT: temporaryRoot,
     GOLDENEYE_DB_PATH: database,
     GOLDENEYE_PROJECT_ROOT: temporaryRoot,
     PATH: "",
   };
+  delete isolatedEnvironment.GCAL_MCP_COMMAND;
   delete isolatedEnvironment.GCAL_MCP_URL;
   delete isolatedEnvironment.GCAL_PROJECT;
 
@@ -119,6 +122,24 @@ try {
     projectEnvironment,
     project,
   );
+  const workflow = runGcal(
+    "workflow",
+    [
+      "workflow",
+      "--js",
+      `const q = ${JSON.stringify(qualifiedHelper)};
+const source = await gcal.source(q);
+const [callers, callees] = await Promise.all([gcal.callers(q), gcal.callees(q)]);
+return { selected: q, source: source.source, callers, callees };`,
+    ],
+    projectEnvironment,
+  );
+  assert.equal(workflow.status, 0, commandFailure("gcal workflow", workflow));
+  const workflowPayload = normalizeValue(JSON.parse(workflow.stdout), project, canonicalRoot);
+  assert.equal(workflowPayload.selected, "<project>.src.lib.helper");
+  assert.equal(workflowPayload.source, expected.source);
+  assert.equal(workflowPayload.callers.length, 1);
+  assert.deepEqual(workflowPayload.callees, []);
   expectJson(
     "arch",
     ["arch"],
@@ -151,13 +172,17 @@ try {
 
   const unselected = runGcal("unselected project", ["status"], isolatedEnvironment);
   assert.equal(unselected.status, 2, commandFailure("gcal status without project", unselected));
-  assert.equal(unselected.stderr.trimEnd(), expected.unselected_project_error);
+  assert.equal(
+    unselected.stderr.trimEnd().split(workspace).join("<cwd>"),
+    expected.unselected_project_error,
+  );
 
   const help = runGcal("help", ["--help"], isolatedEnvironment);
   assert.equal(help.status, 0, commandFailure("gcal --help", help));
   assert.doesNotMatch(help.stdout, /\belect\b/);
   assert.match(help.stdout, /\bstatus\b/);
   assert.match(help.stdout, /\barch\b/);
+  assert.match(help.stdout, /\bworkflow\b/);
 
   for (const item of results) {
     console.log(`PASS ${item.name} exit=${item.exitCode} bytes=${item.bytes}`);
@@ -255,7 +280,12 @@ function normalizeValue(value, project, canonicalRoot) {
     return normalizeText(value, project).split(canonicalRoot).join("<root>");
   }
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeValue(item, project, canonicalRoot));
+    return value.map((item) => {
+      if (typeof item === "string" && item.startsWith("git_history:")) {
+        return "git_history: unavailable in isolated acceptance environment";
+      }
+      return normalizeValue(item, project, canonicalRoot);
+    });
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(

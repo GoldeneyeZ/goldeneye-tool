@@ -23,10 +23,10 @@ Cold GCAL agents ran `gcal init` inside their turn. Warm GCAL lanes ran `gcal in
 
 ## Artifacts
 
-- GCAL-only raw report: `target/agent-bench/abyssal-zenith-goldeneye-gcal.json`
+- GCAL-only raw report: `target/agent-bench/abyssal-zenith-goldeneye-code-agent-layer.json`
 - Prior raw report: `target/agent-bench/abyssal-zenith-goldeneye-serena-vanilla.json`
-- Merged normalized report: `target/agent-bench/abyssal-zenith-goldeneye-gcal-serena-vanilla-merged.json`
-- GCAL config: `tools/agent-bench/abyssal-zenith-goldeneye-gcal.config.json`
+- Merged normalized report: `target/agent-bench/abyssal-zenith-goldeneye-code-agent-layer-serena-vanilla-merged.json`
+- GCAL config: `tools/agent-bench/abyssal-zenith-goldeneye-code-agent-layer.config.json`
 
 The merged report preserves each input's `raw_success` and recomputes `success` consistently from agent exit, timeout, grader, and current protocol detection. This corrects two harness classifications:
 

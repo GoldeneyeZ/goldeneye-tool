@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goldeneye Code Agent Layer"
+  short_description: "Compact code discovery over Goldeneye: one call per question"
+  default_prompt: "Use $goldeneye-code-agent-layer: name the target directly, batch, and answer each question in one gcal call."

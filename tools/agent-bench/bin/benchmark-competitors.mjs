@@ -480,7 +480,11 @@ function fail(message) {
 
 try {
   if (!config.skipBuild) {
-    const build = spawnSync("cargo", ["build", "--release", "-p", "goldeneye"], {
+    const buildArguments = ["build", "--release", "-p", "goldeneye"];
+    if (process.env.GOLDENEYE_GRAMMAR_PACK_DIR) {
+      buildArguments.push("--features", "full-grammar-pack");
+    }
+    const build = spawnSync("cargo", buildArguments, {
       cwd: workspace,
       stdio: "inherit",
       windowsHide: true,

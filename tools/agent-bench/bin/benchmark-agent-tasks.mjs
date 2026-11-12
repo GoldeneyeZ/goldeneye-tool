@@ -279,7 +279,11 @@ if (!oneShot.enabled && !flags.has("--skip-build") && runEngines.some((engine) =
   if (!process.env.GOLDENEYE_GRAMMAR_PACK_DIR && existsSync(fullGrammarPack)) {
     process.env.GOLDENEYE_GRAMMAR_PACK_DIR = fullGrammarPack;
   }
-  runChecked("cargo", ["build", "--release", "-p", "goldeneye"], workspace);
+  const buildArguments = ["build", "--release", "-p", "goldeneye"];
+  if (process.env.GOLDENEYE_GRAMMAR_PACK_DIR) {
+    buildArguments.push("--features", "full-grammar-pack");
+  }
+  runChecked("cargo", buildArguments, workspace);
 }
 
 if (flags.has("--prepare-snapshot") || flags.has("--verify-only") || flags.has("--smoke")) {
@@ -422,7 +426,9 @@ if (oneShot.enabled) {
       cache_modes: config.cache_modes,
       timeout_ms: config.timeout_ms,
       agent_verification_policy: agentVerificationPolicy(),
-      gcal_call_limit: null,
+      gcal_discovery_strategy: selectedRun.engine.gcal_discovery_strategy ?? null,
+      gcal_call_limit:
+        selectedRun.engine.gcal_discovery_strategy === "single-dossier" ? 1 : null,
       gcal_daemon: gcalLane.daemon,
       gcal_discovery: gcalLane.discovery,
     },
@@ -1135,6 +1141,9 @@ async function executeRun(run, context) {
     telemetry.protocol_violations,
     run.engine.kind === "gcal" && gcalLane.discovery === "hybrid" ? "hybrid" : run.engine.kind,
   );
+  protocolViolations.push(
+    ...gcalStrategyViolations(telemetry.command_events, run.engine),
+  );
   // Paths the overlay left dirty are the task's starting state, not the agent's doing.
   const overlayPathSet = new Set(overlayPaths);
   const dirtyFileNames = status
@@ -1258,10 +1267,21 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
           : "- Cache condition: warm. gcal init completed before this turn; use cwd-based GCAL project resolution. Do not set GCAL_PROJECT."
         : `- Cache condition: ${cacheMode}. Do not make assumptions about whether the repository is indexed; check through MCP when useful.`;
   const gcalInstruction =
-    engine.kind === "gcal" && engine.shellDiscovery
-      ? "- Every tool call costs a full turn: answer each need in one call, batch names in one gcal get, and chain several commands in one shell call. Name gcal targets directly instead of searching for identifiers. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
-      : engine.kind === "gcal"
-      ? "- Answer each discovery need with one GCAL call: name targets directly instead of searching for identifiers, batch names, and chain several gcal commands in one shell call. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
+    engine.kind === "gcal"
+      ? engine.gcalDiscoveryStrategy === "single-dossier"
+        ? [
+            "- GCAL strategy: single dossier workflow.",
+            "- Write the multi-line JavaScript program to /tmp/gcal-single-dossier.js, then make your first code-discovery command exactly gcal workflow --file /tmp/gcal-single-dossier.js. Do not use inline --js for this dossier. Build one structured implementation dossier inside it: ranked production symbols and exact source, propagation path, analogous tests, docs/help/locales, platform variants, and unresolved gaps. Loop over dependent results and parallelize independent reads with Promise.all.",
+            "- Use six initial searches as evidence buckets: option parsing/config, model propagation, layout/copy order, analogous tests, docs/manual, and help/locales/platform variants. Search strings must be exact identifiers/literals or pipe-separated alternatives, never prose. For hyphenated CLI options, search the literal without leading dashes (app-content, not --app-content). Pass { limit: 12 }.",
+            "- Give each initial search a broad stable area/extension filePattern: production Java area, jpackage test Java area, jpackage\\.md$, or resource properties. Never enumerate guessed class basenames or guess an exact directory. If a bucket returns no usable file, retry it once inside the same workflow using a simpler exact term and a broader suffix-only pattern; allow at most four retries total.",
+            "- Within each bucket, deduplicate by filePath and retain up to four distinct files before considering extras; do not let early results or duplicate symbols consume a global quota. Fetch at most twenty exact sources with gcal.trySource so project/module pseudo-symbols or other source misses become explicit gaps instead of rejecting the workflow. Use any remaining backend budget for at most two targeted traces, always through gcal.tryCallers/gcal.tryCallees so a stale trace target cannot reject the workflow. Total backend calls must remain at most 32.",
+            "- A successful gcal.trySource result exposes source fields directly: check result.ok, then read result.source (not result.value). The workflow return value must stay below 36 KiB. Never return raw source responses or complete files: project each fetched source into compact metadata plus a query-centered relevant excerpt of at most 1,000 characters. Report coverage and explicit gaps for every evidence bucket.",
+            "- Plan the complete implementation from the dossier before editing, then batch related file changes. Cover every requested production, documentation/localization, and test category; do not stop after a partial vertical slice.",
+            "- This workflow is the entire GCAL discovery phase. After it returns, do not invoke any GCAL command, including help, status, get, search, or a second workflow. Implement directly from the dossier.",
+          ].join("\n")
+        : engine.shellDiscovery
+          ? "- Every tool call costs a full turn: answer each need in one call, batch names in one gcal get, and chain several commands in one shell call. Name gcal targets directly instead of searching for identifiers. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
+          : "- Answer each discovery need with one GCAL call: name targets directly instead of searching for identifiers, batch names, and chain several gcal commands in one shell call. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}
 
@@ -1311,6 +1331,7 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
     return {
       command,
       args: engine.args ?? [],
+      gcalDiscoveryStrategy: engine.gcal_discovery_strategy ?? "adaptive",
       gcalHome,
       cbmDecoy,
       environment: {
@@ -2144,7 +2165,7 @@ function analyzeDiscoveryTrace(path) {
     ) {
       continue;
     }
-    const action = item.command.match(/\back\s+(status|search|grep|symbol|inspect|get|outline|callers|refs|callees|impls|subtypes|arch)\b/i)?.[1]
+    const action = item.command.match(/\bgcal\s+(status|search|grep|replace|check|symbol|inspect|get|outline|callers|refs|callees|impls|subtypes|arch|workflow)\b/i)?.[1]
       ?.toLowerCase() ?? "other";
     const output = String(item.aggregated_output ?? "");
     commands.push({
@@ -2157,6 +2178,35 @@ function analyzeDiscoveryTrace(path) {
     });
   }
   return summarizeDiscoveryCommands(commands);
+}
+
+function gcalStrategyViolations(commandEvents, engine) {
+  if (engine.kind !== "gcal" || engine.gcal_discovery_strategy !== "single-dossier") return [];
+  const gcalCommands = commandEvents.filter(({ command }) =>
+    /(?:^|[^A-Za-z0-9_.-])gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i.test(command),
+  );
+  const workflows = gcalCommands.filter(({ command }) =>
+    /\bgcal(?:\.(?:exe|cmd|ps1))?\s+workflow\b/i.test(command),
+  );
+  const violations = [];
+  if (workflows.length !== 1) {
+    violations.push({
+      type: "gcal_workflow_budget",
+      expected: 1,
+      actual: workflows.length,
+    });
+  }
+  if (gcalCommands.length > 1) {
+    violations.push({
+      type: "gcal_call_budget",
+      expected_maximum: 1,
+      actual: gcalCommands.length,
+    });
+  }
+  if (gcalCommands.length > 0 && gcalCommands[0] !== workflows[0]) {
+    violations.push({ type: "gcal_workflow_not_first" });
+  }
+  return violations;
 }
 
 function persistNewReport(path, report) {

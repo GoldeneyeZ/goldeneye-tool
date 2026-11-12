@@ -58,7 +58,11 @@ fn audited_label(
     Some(if spec.function_kinds.contains(&kind) {
         if matches!(language, "capnp" | "protobuf" | "smali") {
             "Function"
-        } else if scope.kind == ScopeKind::Type {
+        } else if scope.kind == ScopeKind::Type
+            || (matches!(language, "cpp" | "cuda")
+                && cpp_callable_name_node(node)
+                    .is_some_and(|name| node_text(name, source).contains("::")))
+        {
             "Method"
         } else {
             "Function"
@@ -250,6 +254,15 @@ fn audited_definition_name(
 #[allow(clippy::too_many_lines)]
 fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> Option<Node<'tree>> {
     let kind = node.kind();
+    if matches!(language, "cpp" | "cuda")
+        && kind == "namespace_definition"
+        && node.child_by_field_name("name").is_none()
+    {
+        return None;
+    }
+    if matches!(language, "cpp" | "cuda") && matches!(label, "Function" | "Method") {
+        return cpp_callable_name_node(node);
+    }
     if language == "zig" && kind == "test_declaration" {
         return find_descendant_kind(node, &["string_content"]);
     }
@@ -389,4 +402,27 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
         .find_map(|field| node.child_by_field_name(field))
         .and_then(|candidate| first_name_like(candidate).or(Some(candidate)))
         .or_else(|| first_name_like(node))
+}
+
+fn cpp_callable_name_node(node: Node<'_>) -> Option<Node<'_>> {
+    let declaration = if node.kind() == "template_declaration" {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "function_definition" | "declaration" | "field_declaration"
+            )
+        })?
+    } else {
+        node
+    };
+    let declarator = declaration.child_by_field_name("declarator")?;
+    let function = if declarator.kind() == "function_declarator" {
+        declarator
+    } else {
+        find_descendant_kind(declarator, &["function_declarator"])?
+    };
+    function
+        .child_by_field_name("declarator")
+        .or_else(|| function.named_child(0))
 }

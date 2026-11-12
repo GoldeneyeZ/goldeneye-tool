@@ -66,12 +66,14 @@ const BENCH_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(BENCH_ROOT, "../..");
 const AGENT_RUNNER = join(BENCH_ROOT, "bin", "benchmark-agent-tasks.mjs");
 
-test("codexSandboxArgs grants full access without bypass process-tree mode", () => {
+test("codexSandboxArgs grants full access with the tool host enabled", () => {
   assert.deepEqual(codexSandboxArgs({ fullAccess: true, worktree: "D:\\repo" }), [
     "-s",
     "danger-full-access",
     "-c",
     'approval_policy="never"',
+    "-c",
+    "features.code_mode_host=true",
   ]);
 });
 
@@ -299,7 +301,7 @@ test("GCAL lanes allow GCAL commands while preserving direct source-read violati
         type: "item.completed",
         item: {
           type: "command_execution",
-          command: `pwsh.exe -Command 'gcal search SecurityConfig'`,
+          command: `gcal workflow --js "return await gcal.search('SecurityConfig')"`,
           exit_code: 0,
         },
       },

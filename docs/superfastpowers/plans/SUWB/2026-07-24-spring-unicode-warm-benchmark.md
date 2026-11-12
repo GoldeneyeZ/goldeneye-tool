@@ -24,8 +24,8 @@
 - Allowed cache root: `D:\Dev\IdeaProjects\.gab-cache`
 - Immutable snapshot: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots\spring-stringutils`
 - Allowed snapshot root: `D:\Dev\IdeaProjects\goldeneye-tool\target\agent-bench\snapshots`
-- GCAL repository: `D:\Dev\IdeaProjects\goldeneye-code-agent-layer`
-- GCAL entrypoint: `D:\Dev\IdeaProjects\goldeneye-code-agent-layer\dist\main.js`
+- GCAL repository: `D:\Dev\IdeaProjects\goldeneye-tool\agent`
+- GCAL entrypoint: `D:\Dev\IdeaProjects\goldeneye-tool\agent\dist\main.js`
 - Goldeneye binary: `D:\Dev\IdeaProjects\goldeneye-tool\target\release\goldeneye.exe`
 - Java 17 home: `C:\Users\Zacha\.jdks\openjdk-17.0.2`
 - Persistent Gradle home: `D:\Dev\Caches\gradle-spring-framework-6.2`
@@ -677,7 +677,7 @@ Create configuration containing:
       "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\goldeneye-code-agent-layer\\dist\\main.js"
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "cache_modes": ["warm"]
@@ -918,7 +918,7 @@ Expected: `eligible_for_scoring: true`.
 **Files:**
 
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/vanilla/**`
-- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/goldeneye-code-agent-layer/**`
+- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/gcal/**`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.md`
 

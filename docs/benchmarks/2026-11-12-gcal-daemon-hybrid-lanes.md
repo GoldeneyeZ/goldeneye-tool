@@ -3,6 +3,12 @@
 Date: 2026-11-12. Follows `2026-11-11-agent-task-matrix.md`. Continued in
 `2026-11-12-gcal-tests-and-check-run.md`.
 
+> Naming: when this was measured the agent CLI was a separate repository named
+> ACK and was invoked as `ack`. It is now GCAL, in `agent/` of this repository,
+> and this document uses the current names. Run directories on the machine that
+> produced the numbers keep the old names (`m-goldeneye-ack-*`, engine
+> `goldeneye-ack`).
+
 ## Questions
 
 1. Does the GCAL build v6 (resolver fixes, `gcal replace`) do better than v5 when

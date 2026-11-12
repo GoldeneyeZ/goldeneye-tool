@@ -110,7 +110,7 @@ fn discovery_preserves_unicode_spaces_and_empty_files() {
     assert_eq!(report.files[0].byte_len, 0);
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn discovery_preserves_non_utf8_paths_without_lossy_conversion() {
     use std::ffi::OsString;
@@ -541,7 +541,7 @@ fn unreadable_directory_is_reported_when_permissions_are_enforced() {
     let repo = fixture(&[("locked/inside.rs", "fn inside() {}")]);
     let locked = repo.path().join("locked");
     let original = fs::metadata(&locked).unwrap().permissions();
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o0)).unwrap();
     if fs::read_dir(&locked).is_ok() {
         fs::set_permissions(&locked, original).unwrap();
         return;

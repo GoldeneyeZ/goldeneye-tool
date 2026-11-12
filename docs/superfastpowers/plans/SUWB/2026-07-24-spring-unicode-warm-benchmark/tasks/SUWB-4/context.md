@@ -9,7 +9,7 @@
 - `tools/agent-bench/bin/benchmark-agent-tasks.mjs`: preparation, smoke, and verification entrypoints.
 - `tools/agent-bench/snapshot.mjs`: immutable snapshot implementation.
 - `tools/agent-bench/configs/spring-stringutils-unicode-truncate.json`: frozen benchmark configuration.
-- `D:\Dev\IdeaProjects\goldeneye-code-agent-layer`: frozen GCAL candidate repository.
+- `D:\Dev\IdeaProjects\goldeneye-tool\agent`: frozen GCAL candidate repository.
 - `target\release\goldeneye.exe`: frozen Goldeneye candidate binary.
 
 ## Open Context Rule

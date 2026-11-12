@@ -148,9 +148,9 @@ export function accumulateWaste(waste, event) {
   waste.ambiguous_answers += count(output, /^# ambiguous/gm);
   waste.not_found_answers += count(output, /^# not found/gm);
   waste.no_match_answers += count(output, /^# no (?:text )?match/gm);
-  waste.gcal_replace_calls += count(command, /\back\s+replace\b/g);
-  waste.gcal_check_calls += count(command, /\back\s+check\b/g);
-  waste.gcal_get_tests_calls += count(command, /\back\s+get\b[^;&|]*--tests\b/g);
+  waste.gcal_replace_calls += count(command, /\bgcal\s+replace\b/g);
+  waste.gcal_check_calls += count(command, /\bgcal\s+check\b/g);
+  waste.gcal_get_tests_calls += count(command, /\bgcal\s+get\b[^;&|]*--tests\b/g);
   return waste;
 }
 
@@ -200,7 +200,7 @@ const DIRECT_READ_PATTERN =
 
 const SHELL_WRAPPER_PATTERN = /\s-(?:Command|c)\s+(["'])([\s\S]*)\1\s*$/i;
 const GCAL_INVOCATION_PATTERN = /^[\s"'`(]*gcal(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i;
-const GCAL_SUBCOMMAND_PATTERN = /\back(?:\.(?:exe|cmd|ps1))?\s+grep\b/gi;
+const GCAL_SUBCOMMAND_PATTERN = /\bgcal(?:\.(?:exe|cmd|ps1))?\s+grep\b/gi;
 
 // The script a `pwsh -Command "..."` wrapper runs, or the command itself.
 function shellScript(command) {
@@ -492,7 +492,8 @@ export function tomlInlineTable(object) {
 // model with no tools ("Code Mode is unavailable because code-mode host is
 // disabled"). The Codex default is therefore left alone unless a config asks.
 export function codexSandboxArgs({ fullAccess, worktree, codeModeHost }) {
-  const hostArgs = codeModeHost === false ? ["-c", "features.code_mode_host=false"] : [];
+  // The Codex tool host is on unless a configuration turns it off.
+  const hostArgs = ["-c", `features.code_mode_host=${codeModeHost === false ? "false" : "true"}`];
   if (fullAccess) {
     return ["-s", "danger-full-access", "-c", 'approval_policy="never"', ...hostArgs];
   }

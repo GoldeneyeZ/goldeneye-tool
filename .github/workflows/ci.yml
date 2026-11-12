@@ -5,11 +5,23 @@ on: [push, pull_request]
 jobs:
   rust:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Build embedded UI
+        working-directory: ui
+        run: npm run build
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: rustfmt, clippy
@@ -23,9 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out Goldeneye
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Check out the audited upstream
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: DeusData/codebase-memory-mcp
           ref: 2469ecc3a7a2f80debe296e1f17a1efcfdb9450c

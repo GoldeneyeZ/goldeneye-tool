@@ -26,7 +26,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path().to_path_buf();
+        let root = temporary_root(&temporary);
         let source = root.join("source");
         write(&source.join("alpha/LICENSE"), b"MIT\n");
         write(&source.join("alpha/parser.c"), b"alpha parser\n");
@@ -56,7 +56,8 @@ impl Fixture {
 #[test]
 fn hash_framing_matches_pinned_golden() {
     let temporary = tempfile::tempdir().unwrap();
-    write(&temporary.path().join("one/LICENSE"), b"MIT\n");
+    let root = temporary_root(&temporary);
+    write(&root.join("one/LICENSE"), b"MIT\n");
     let grammar = GrammarRecord {
         name: "one".into(),
         repository: "https://example.invalid/one".into(),
@@ -74,7 +75,7 @@ fn hash_framing_matches_pinned_golden() {
     };
 
     assert_eq!(
-        hash_grammar_assets(temporary.path(), &grammar).unwrap(),
+        hash_grammar_assets(&root, &grammar).unwrap(),
         grammar.source_hash
     );
 }
@@ -104,7 +105,8 @@ fn verify_and_sync_clean_pack_without_mutating_source() {
 #[test]
 fn git_source_uses_lf_blobs_while_directory_source_sees_crlf_smudge() {
     let temporary = tempfile::tempdir().unwrap();
-    let repository = temporary.path().join("repository");
+    let root = temporary_root(&temporary);
+    let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
     git(&repository, &["init", "--quiet"]);
     git(
@@ -131,12 +133,12 @@ fn git_source_uses_lf_blobs_while_directory_source_sees_crlf_smudge() {
     let commit = git(&repository, &["rev-parse", "HEAD"]);
     let source_hash =
         independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", b"alpha parser\n")]);
-    let lock = temporary.path().join("git-pack.toml");
+    let lock = root.join("git-pack.toml");
     write(
         &lock,
         one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
     );
-    let destination = temporary.path().join("pack");
+    let destination = root.join("pack");
 
     let directory_error = verify_grammars(&lock, &source).unwrap_err().to_string();
     assert!(
@@ -164,7 +166,8 @@ fn git_source_uses_lf_blobs_while_directory_source_sees_crlf_smudge() {
 #[test]
 fn git_source_ignores_replacement_refs_for_locked_commit() {
     let temporary = tempfile::tempdir().unwrap();
-    let repository = temporary.path().join("repository");
+    let root = temporary_root(&temporary);
+    let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
     git(&repository, &["init", "--quiet"]);
     git(
@@ -188,12 +191,12 @@ fn git_source_ignores_replacement_refs_for_locked_commit() {
     let replacement = git(&repository, &["rev-parse", "HEAD"]);
     git(&repository, &["replace", &original, &replacement]);
 
-    let lock = temporary.path().join("git-pack.toml");
+    let lock = root.join("git-pack.toml");
     write(
         &lock,
         one_grammar_lock(&original, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
     );
-    let destination = temporary.path().join("pack");
+    let destination = root.join("pack");
 
     verify_git_grammars(&lock, &repository, prefix).unwrap();
     sync_git_grammars(&lock, &repository, prefix, &destination).unwrap();
@@ -206,7 +209,8 @@ fn git_source_ignores_replacement_refs_for_locked_commit() {
 #[test]
 fn git_source_rejects_non_regular_modes() {
     let temporary = tempfile::tempdir().unwrap();
-    let repository = temporary.path().join("repository");
+    let root = temporary_root(&temporary);
+    let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
     git(&repository, &["init", "--quiet"]);
     git(
@@ -230,7 +234,7 @@ fn git_source_rejects_non_regular_modes() {
     git(&repository, &["commit", "--quiet", "-m", "fixture"]);
     let commit = git(&repository, &["rev-parse", "HEAD"]);
     let source_hash = independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", b"outside.c")]);
-    let lock = temporary.path().join("git-pack.toml");
+    let lock = root.join("git-pack.toml");
     write(
         &lock,
         one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
@@ -245,7 +249,8 @@ fn git_source_rejects_non_regular_modes() {
 #[test]
 fn git_source_streams_assets_larger_than_two_copy_buffers() {
     let temporary = tempfile::tempdir().unwrap();
-    let repository = temporary.path().join("repository");
+    let root = temporary_root(&temporary);
+    let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
     git(&repository, &["init", "--quiet"]);
     git(
@@ -264,12 +269,12 @@ fn git_source_streams_assets_larger_than_two_copy_buffers() {
     git(&repository, &["commit", "--quiet", "-m", "fixture"]);
     let commit = git(&repository, &["rev-parse", "HEAD"]);
     let source_hash = independent_hash_bytes(&[("LICENSE", b"MIT\n"), ("parser.c", &large_parser)]);
-    let lock = temporary.path().join("git-pack.toml");
+    let lock = root.join("git-pack.toml");
     write(
         &lock,
         one_grammar_lock(&commit, &source_hash, &["LICENSE", "parser.c"]).as_bytes(),
     );
-    let destination = temporary.path().join("pack");
+    let destination = root.join("pack");
 
     verify_git_grammars(&lock, &repository, "vendor/grammars").unwrap();
     sync_git_grammars(&lock, &repository, "vendor/grammars", &destination).unwrap();
@@ -566,6 +571,10 @@ status = "available"
 grammar = "alpha"
 "#
     )
+}
+
+fn temporary_root(temporary: &TempDir) -> PathBuf {
+    temporary.path().canonicalize().unwrap()
 }
 
 fn independent_hash(root: &Path, assets: &[&str]) -> String {

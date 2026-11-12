@@ -223,6 +223,7 @@ fn configured_walk_builder(
         .git_exclude(true)
         .git_global(options.global_ignore_path.is_none())
         .parents(true)
+        .require_git(false)
         .add_custom_ignore_filename(".cbmignore");
     if let Some(path) = &options.global_ignore_path
         && let Some(source) = builder.add_ignore(path)

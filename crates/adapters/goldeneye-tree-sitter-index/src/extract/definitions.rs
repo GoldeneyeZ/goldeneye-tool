@@ -2,8 +2,8 @@ use super::{
     Definition, ExtractedImport, ExtractedRelation, Extractor, GraphProperties, IndexError,
     MAX_PENDING_IMPORTS_PER_FILE, MAX_PENDING_RELATIONS_PER_FILE, MAX_TYPE_BINDINGS_PER_SCOPE,
     Node, NodeId, Scope, ScopeKind, audited_relations, binding_key, graph_edge, graph_node,
-    import_alias, import_bindings, infer_declared_type, normalize_import_path, qualified_segment,
-    source_span, stable_node_id,
+    import_alias, import_bindings, infer_declared_type, last_identifier, normalize_import_path,
+    qualified_segment, source_span, stable_node_id,
 };
 
 impl Extractor<'_> {
@@ -29,7 +29,7 @@ impl Extractor<'_> {
         let qualified_name = self.next_definition_qualified_name(&definition, scope);
         let id = self.emit_definition_node(node, &definition, scope, &qualified_name)?;
         if matches!(definition.label, "Function" | "Method") {
-            return Ok(Some(self.callable_scope(definition, id, qualified_name)));
+            return Ok(Some(self.callable_scope(&definition, id, qualified_name)));
         }
         if is_type_definition(definition.label) {
             return Ok(Some(self.record_type_scope(
@@ -44,7 +44,20 @@ impl Extractor<'_> {
     }
 
     fn next_definition_qualified_name(&mut self, definition: &Definition, scope: &Scope) -> String {
-        let segment = qualified_segment(&definition.name);
+        let segment = if matches!(self.language.as_str(), "cpp" | "cuda")
+            && matches!(definition.label, "Function" | "Method")
+            && definition.name.contains("::")
+        {
+            definition
+                .name
+                .split("::")
+                .filter(|segment| !segment.is_empty())
+                .map(qualified_segment)
+                .collect::<Vec<_>>()
+                .join(".")
+        } else {
+            qualified_segment(&definition.name)
+        };
         let base = format!("{}.{}", scope.qualified_name, segment);
         let count = self.qualified_name_counts.entry(base.clone()).or_default();
         *count += 1;
@@ -64,12 +77,19 @@ impl Extractor<'_> {
     ) -> Result<NodeId, IndexError> {
         let id = stable_node_id(definition.label, qualified_name)?;
         let span = source_span(node)?;
+        let name = if matches!(self.language.as_str(), "cpp" | "cuda")
+            && matches!(definition.label, "Function" | "Method")
+        {
+            last_identifier(&definition.name)
+        } else {
+            definition.name.clone()
+        };
         let graph_node = graph_node(
             self.project,
             self.path,
             self.language,
             definition.label,
-            &definition.name,
+            &name,
             qualified_name,
             node.kind(),
             span,
@@ -89,12 +109,12 @@ impl Extractor<'_> {
 
     fn callable_scope(
         &mut self,
-        definition: Definition,
+        definition: &Definition,
         id: NodeId,
         qualified_name: String,
     ) -> Scope {
         self.callable_definitions
-            .entry(definition.name)
+            .entry(last_identifier(&definition.name))
             .or_default()
             .push(id.clone());
         Scope {

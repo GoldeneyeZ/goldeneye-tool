@@ -2,3 +2,6 @@
 /.upstream/
 __pycache__/
 *.pyc
+/agent/node_modules/
+/agent/dist/
+/agent/coverage/

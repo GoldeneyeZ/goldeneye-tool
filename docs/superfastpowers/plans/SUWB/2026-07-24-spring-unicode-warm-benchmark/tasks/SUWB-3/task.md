@@ -166,7 +166,7 @@ Create configuration containing:
       "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\goldeneye-code-agent-layer\\dist\\main.js"
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "cache_modes": ["warm"]

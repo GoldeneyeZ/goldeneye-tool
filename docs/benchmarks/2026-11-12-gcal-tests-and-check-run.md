@@ -2,6 +2,12 @@
 
 Date: 2026-11-12. Follows `2026-11-12-gcal-daemon-hybrid-lanes.md`.
 
+> Naming: when this was measured the agent CLI was a separate repository named
+> ACK and was invoked as `ack`. It is now GCAL, in `agent/` of this repository,
+> and this document uses the current names. Run directories on the machine that
+> produced the numbers keep the old names (`m-goldeneye-ack-*`, engine
+> `goldeneye-ack`).
+
 ## Question
 
 The previous run left two places where an agent with GCAL loses to plain shell:

@@ -125,14 +125,14 @@ test("createReadySnapshot copies sorted bytes and writes a stable manifest", asy
     byte_count: Buffer.byteLength("database-bytes") + Buffer.byteLength("{\"cache\":true}\n"),
     files: [
       {
-        path: "gcal-state/goldeneye.db",
-        bytes: Buffer.byteLength("database-bytes"),
-        sha256: "f04766726302b22889d791aa0fe6e41e7342dc71b62ec234dafdc1364d559027",
-      },
-      {
         path: "config.json",
         bytes: Buffer.byteLength("{\"cache\":true}\n"),
         sha256: "1961a91054f256e8eb021fdef318262bfa221403ae6b9e40e4196eef18e0ac9f",
+      },
+      {
+        path: "gcal-state/goldeneye.db",
+        bytes: Buffer.byteLength("database-bytes"),
+        sha256: "f04766726302b22889d791aa0fe6e41e7342dc71b62ec234dafdc1364d559027",
       },
     ],
   });

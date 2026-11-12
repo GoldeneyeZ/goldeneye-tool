@@ -68,7 +68,7 @@
       "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+        "C:\\Users\\Zacha\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../../target/release/goldeneye.exe",
       "env": {

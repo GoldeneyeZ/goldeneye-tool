@@ -5,7 +5,7 @@
 **Files:**
 
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/vanilla/**`
-- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/goldeneye-code-agent-layer/**`
+- Generate: `target/agent-bench/spring-stringutils-unicode-truncate/gcal/**`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.json`
 - Generate: `target/agent-bench/spring-stringutils-unicode-truncate/report.md`
 

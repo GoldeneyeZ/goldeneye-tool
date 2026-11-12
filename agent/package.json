@@ -1,0 +1,39 @@
+{
+  "name": "goldeneye-code-agent-layer",
+  "version": "0.1.0",
+  "description": "Compact code-discovery CLI and workflow layer for coding agents using Goldeneye.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GoldeneyeZ/goldeneye-tool.git",
+    "directory": "agent"
+  },
+  "type": "module",
+  "bin": {
+    "gcal": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "check": "pnpm lint && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.8.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.8.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -11,8 +11,13 @@ fn run_server(input: &[u8]) -> Output {
 }
 
 fn run_server_with_response_mode(input: &[u8], mode: Option<&str>) -> Output {
+    let temp = tempfile::tempdir().expect("temporary server state");
     let mut command = Command::new(env!("CARGO_BIN_EXE_goldeneye"));
     command
+        .env("GOLDENEYE_DB_PATH", temp.path().join("graph.db"))
+        .env("GOLDENEYE_PROJECT_ROOT", temp.path())
+        .env("CBM_ALLOWED_ROOT", temp.path())
+        .env("GOLDENEYE_WATCHER_ENABLED", "off")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

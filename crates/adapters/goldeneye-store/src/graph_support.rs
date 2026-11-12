@@ -1,8 +1,8 @@
 use super::{
-    BTreeSet, Connection, FileId, FileRecord, Generation, GraphEdge, GraphNode, INSERT_EDGE_SQL,
-    INSERT_NODE_SQL, NodeId, OptionalExtension, ProjectId, ProjectRelativePath, Statement,
-    StoreError, Transaction, UPSERT_FILE_SQL, corrupt_syntax, get_project, params, sql_span,
-    sqlite_integer, sqlite_u64,
+    BTreeMap, BTreeSet, Connection, FileId, FileRecord, Generation, GraphEdge, GraphNode,
+    INSERT_EDGE_SQL, INSERT_NODE_SQL, NodeId, OptionalExtension, ProjectId, ProjectRelativePath,
+    Statement, StoreError, Transaction, UPSERT_FILE_SQL, corrupt_syntax, get_project, params,
+    sql_span, sqlite_integer, sqlite_u64,
 };
 
 pub(super) fn project_generation(
@@ -65,8 +65,8 @@ pub(super) fn validate_replacement(
 }
 
 fn validate_replacement_nodes(file: &FileRecord, nodes: &[GraphNode]) -> Result<(), StoreError> {
-    let mut node_ids = BTreeSet::new();
-    let mut qualified_names = BTreeSet::new();
+    let mut node_ids = BTreeMap::new();
+    let mut qualified_names = BTreeMap::new();
     for node in nodes {
         if node.project != file.id.project {
             return Err(StoreError::ProjectMismatch {
@@ -86,13 +86,27 @@ fn validate_replacement_nodes(file: &FileRecord, nodes: &[GraphNode]) -> Result<
                 actual: node.file_path.clone(),
             });
         }
-        if !node_ids.insert(node.id.clone()) {
-            return Err(StoreError::DuplicateNodeId(node.id.clone()));
+        if let Some(first_file_path) = node_ids.insert(node.id.clone(), node.file_path.clone()) {
+            return Err(StoreError::DuplicateNodeId {
+                node_id: node.id.clone(),
+                first_file_path,
+                file_path: node.file_path.clone(),
+                qualified_name: node.qualified_name.clone(),
+            });
         }
-        if !qualified_names.insert(node.qualified_name.clone()) {
-            return Err(StoreError::DuplicateQualifiedName(
-                node.qualified_name.clone(),
-            ));
+        if let Some((first_node_id, first_label, first_file_path)) = qualified_names.insert(
+            node.qualified_name.clone(),
+            (node.id.clone(), node.label.clone(), node.file_path.clone()),
+        ) {
+            return Err(StoreError::DuplicateQualifiedName {
+                qualified_name: node.qualified_name.clone(),
+                first_node_id,
+                first_label,
+                first_file_path,
+                node_id: node.id.clone(),
+                label: node.label.clone(),
+                file_path: node.file_path.clone(),
+            });
         }
     }
     Ok(())
@@ -160,8 +174,8 @@ fn validate_project_nodes(
     file_paths: &BTreeSet<ProjectRelativePath>,
     nodes: &[GraphNode],
 ) -> Result<BTreeSet<NodeId>, StoreError> {
-    let mut node_ids = BTreeSet::new();
-    let mut qualified_names = BTreeSet::new();
+    let mut node_ids = BTreeMap::new();
+    let mut qualified_names = BTreeMap::new();
     for node in nodes {
         if node.project != *project {
             return Err(StoreError::ProjectMismatch {
@@ -177,16 +191,30 @@ fn validate_project_nodes(
                 path.clone(),
             )));
         }
-        if !node_ids.insert(node.id.clone()) {
-            return Err(StoreError::DuplicateNodeId(node.id.clone()));
+        if let Some(first_file_path) = node_ids.insert(node.id.clone(), node.file_path.clone()) {
+            return Err(StoreError::DuplicateNodeId {
+                node_id: node.id.clone(),
+                first_file_path,
+                file_path: node.file_path.clone(),
+                qualified_name: node.qualified_name.clone(),
+            });
         }
-        if !qualified_names.insert(node.qualified_name.clone()) {
-            return Err(StoreError::DuplicateQualifiedName(
-                node.qualified_name.clone(),
-            ));
+        if let Some((first_node_id, first_label, first_file_path)) = qualified_names.insert(
+            node.qualified_name.clone(),
+            (node.id.clone(), node.label.clone(), node.file_path.clone()),
+        ) {
+            return Err(StoreError::DuplicateQualifiedName {
+                qualified_name: node.qualified_name.clone(),
+                first_node_id,
+                first_label,
+                first_file_path,
+                node_id: node.id.clone(),
+                label: node.label.clone(),
+                file_path: node.file_path.clone(),
+            });
         }
     }
-    Ok(node_ids)
+    Ok(node_ids.into_keys().collect())
 }
 
 fn validate_project_edges(

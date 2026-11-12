@@ -2,6 +2,12 @@
 
 Date: 2026-11-11
 
+> Naming: when this was measured the agent CLI was a separate repository named
+> ACK and was invoked as `ack`. It is now GCAL, in `agent/` of this repository,
+> and this document uses the current names. Run directories on the machine that
+> produced the numbers keep the old names (`m-goldeneye-ack-*`, engine
+> `goldeneye-ack`).
+
 ## Question
 
 GCAL over Goldeneye often failed to be faster or more token-efficient than not
@@ -335,7 +341,7 @@ node tools/agent-bench/bin/benchmark-ops.mjs `
   --scenarios tools/agent-bench/ops/spring.json `
   --repo D:\Dev\IdeaProjects\spring-framework `
   --state target/ops-bench/spring `
-  --gcal-entry C:\Users\Zacha\IdeaProjects\goldeneye-code-agent-layer\dist\main.js `
+  --gcal-entry agent\dist\main.js `
   --goldeneye target/release/goldeneye.exe `
   --rg-dir <dir containing rg.exe> --label optimized
 ```

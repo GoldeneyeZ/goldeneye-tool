@@ -1,0 +1,1028 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { GcalBackendClient } from "../src/domain/GcalBackendClient.js";
+import { similarNamePattern, type GraphNode, type ToolClient } from "../src/kernel/codeGraph.js";
+import { displayName, isTestPath } from "../src/kernel/displayName.js";
+import { parseLocator } from "../src/kernel/locator.js";
+import { FreshnessProbe } from "../src/kernel/freshness.js";
+import { locateDeclaration } from "../src/kernel/relocate.js";
+import { SourceReader } from "../src/kernel/sourceFiles.js";
+import {
+  globPattern,
+  grepCode,
+  implementations,
+  pathsPattern,
+  references,
+  sameLanguageFilter,
+  searchCode,
+  separatePaths,
+  testsUsing,
+  summarizeLayout,
+} from "../src/workflows/exploreCode.js";
+import {
+  fairBudgets,
+  leadingDocStart,
+  readLocators,
+  type CodeContext,
+} from "../src/workflows/readCode.js";
+import { resolveSymbol } from "../src/workflows/resolveSymbol.js";
+import { parseSymbolLocator } from "../src/kernel/locator.js";
+
+const PROJECT = "D-Dev-.work-shop";
+const BILLING = "src/main/java/com/shop/Billing.java";
+const LEDGER = "src/main/java/com/shop/Ledger.java";
+const BILLING_TEST = "src/test/java/com/shop/BillingTests.java";
+
+function qn(filePath: string, ...rest: string[]): string {
+  const segments = filePath.replace(/\.java$/, "").split("/");
+  return [PROJECT, ...segments, ...rest].join(".");
+}
+
+function node(
+  filePath: string,
+  label: string,
+  rest: string[],
+  startLine: number,
+  endLine: number,
+): GraphNode {
+  const last = rest[rest.length - 1] ?? "";
+  return {
+    qualifiedName: qn(filePath, ...rest),
+    name: last.replace(/#\d+$/, ""),
+    label,
+    filePath,
+    startLine,
+    endLine,
+  };
+}
+
+const NODES: GraphNode[] = [
+  node(BILLING, "Module", [], 1, 20),
+  node(BILLING, "Class", ["Billing"], 3, 20),
+  node(BILLING, "Method", ["Billing", "Billing"], 4, 4),
+  node(BILLING, "Method", ["Billing", "charge"], 6, 8),
+  node(BILLING, "Method", ["Billing", "charge#2"], 10, 12),
+  node(BILLING, "Method", ["Billing", "refund"], 14, 16),
+  node(LEDGER, "Interface", ["Ledger"], 3, 5),
+  node(LEDGER, "Method", ["Ledger", "record"], 4, 4),
+  node(BILLING_TEST, "Class", ["BillingTests"], 3, 9),
+  node(BILLING_TEST, "Method", ["BillingTests", "refund"], 5, 8),
+];
+
+const BILLING_SOURCE = [
+  "package com.shop;",
+  "",
+  "public class Billing implements Ledger {",
+  "  public Billing() {}",
+  "",
+  "  public void charge(int cents) {",
+  "    record(cents);",
+  "  }",
+  "",
+  "  public void charge(int cents, String note) {",
+  "    record(cents);",
+  "  }",
+  "",
+  "  public void refund(int cents) {",
+  "    record(-cents);",
+  "  }",
+  "",
+  "  public void record(int cents) {}",
+  "",
+  "}",
+].join("\n");
+
+/** Qualified names embed the dotted file path; that is enough to map a symbol to its file. */
+function staleKey(filePath: string): string {
+  return filePath.replace(/\.java$/, "").split("/").join(".");
+}
+
+interface FakeGraphOptions {
+  staleFiles?: string[];
+  textResults?: Array<Record<string, unknown>>;
+  /** Text searches run as a regular expression find nothing. */
+  regexFindsNothing?: boolean;
+  /** Receives the `regex` argument of every text search. */
+  textSearchModes?: boolean[];
+  subtypes?: Record<string, GraphNode[]>;
+  /** Symbols indexed besides the Java fixture. */
+  extraNodes?: GraphNode[];
+}
+
+function fakeGraph(root: string, options: FakeGraphOptions = {}): ToolClient {
+  const nodes = [...NODES, ...(options.extraNodes ?? [])];
+  const quoted = (query: string) => /'([^']*)'/.exec(query)?.[1] ?? "";
+  const row = (item: GraphNode) => [
+    item.qualifiedName,
+    item.name,
+    [item.label],
+    item.filePath,
+    item.startLine,
+    item.endLine,
+  ];
+
+  return {
+    async tool(toolName, args) {
+      if (toolName === "index_status") return { root_path: root };
+      if (toolName === "get_code_snippet") {
+        if (options.staleFiles?.some((path) => String(args.qualified_name).includes(staleKey(path)))) {
+          throw new Error("MCP tool error: indexed source file is stale: " + String(args.qualified_name));
+        }
+        return { code: "" };
+      }
+      if (toolName === "search_code") {
+        options.textSearchModes?.push(args.regex === true);
+        const empty = options.regexFindsNothing === true && args.regex === true;
+        return { results: empty ? [] : (options.textResults ?? []), total_results: 0 };
+      }
+      if (toolName === "search_graph") {
+        const pattern = args.name_pattern === undefined ? undefined : String(args.name_pattern);
+        const name =
+          pattern === undefined
+            ? undefined
+            : pattern.startsWith("(?i)")
+              ? new RegExp(pattern.slice(4), "i")
+              : new RegExp(pattern);
+        const qualified = args.qn_pattern === undefined ? undefined : new RegExp(String(args.qn_pattern));
+        return {
+          results: nodes.filter(
+            (item) =>
+              (name === undefined || name.test(item.name)) &&
+              (qualified === undefined || qualified.test(item.qualifiedName)),
+          ).map((item) => ({
+            qualified_name: item.qualifiedName,
+            name: item.name,
+            label: item.label,
+            file_path: item.filePath,
+            start_line: item.startLine,
+            end_line: item.endLine,
+          })),
+        };
+      }
+      if (toolName === "query_graph") {
+        const query = String(args.query);
+        const value = quoted(query);
+        if (query.includes("DEFINES")) {
+          return {
+            rows: nodes.filter(
+              (item) =>
+                item.qualifiedName.startsWith(`${value}.`) &&
+                !item.qualifiedName.slice(value.length + 1).includes("."),
+            ).map(row),
+          };
+        }
+        if (query.includes("INHERITS")) {
+          return { rows: (options.subtypes?.[value] ?? []).map((item) => [...row(item), "IMPLEMENTS"]) };
+        }
+        if (query.includes("(f:File)")) {
+          const paths = [...new Set(nodes.map((item) => item.filePath))];
+          return { rows: paths.filter((path) => path.endsWith(value)).map((path) => [path]) };
+        }
+        const line = /start_line <= (\d+)/.exec(query);
+        return {
+          rows: nodes.filter(
+            (item) =>
+              item.filePath === value &&
+              (line === null ||
+                (item.startLine <= Number(line[1]) && item.endLine >= Number(line[1]))),
+          ).map(row),
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    },
+  };
+}
+
+let workspace: string | undefined;
+
+async function createContext(options: FakeGraphOptions = {}): Promise<CodeContext> {
+  workspace = await mkdtemp(join(tmpdir(), "gcal-discovery-"));
+  await mkdir(join(workspace, dirname(BILLING)), { recursive: true });
+  await writeFile(join(workspace, BILLING), BILLING_SOURCE);
+  const client = fakeGraph(workspace, options);
+  return {
+    client,
+    project: PROJECT,
+    root: workspace,
+    reader: new SourceReader(workspace),
+    freshness: new FreshnessProbe(client),
+  };
+}
+
+afterEach(async () => {
+  if (workspace !== undefined) await rm(workspace, { recursive: true, force: true });
+  workspace = undefined;
+});
+
+describe("locators", () => {
+  it("separates symbols, files, lines and ranges", () => {
+    expect(parseLocator("com.shop.Billing.charge")).toMatchObject({
+      kind: "symbol",
+      segments: ["com", "shop", "Billing", "charge"],
+      overload: undefined,
+    });
+    expect(parseLocator("Billing#charge(int)")).toMatchObject({ segments: ["Billing", "charge"] });
+    expect(parseLocator("Billing::charge#2")).toMatchObject({ segments: ["Billing", "charge"], overload: 2 });
+    expect(parseLocator("src\\main\\Billing.java")).toMatchObject({ kind: "file", path: "src/main/Billing.java" });
+    expect(parseLocator("Billing.java:42")).toMatchObject({ kind: "file", startLine: 42, endLine: undefined });
+    expect(parseLocator("Billing.java:10-60")).toMatchObject({ kind: "file", startLine: 10, endLine: 60 });
+  });
+
+  it("shortens backend identifiers to what follows the file segment", () => {
+    expect(displayName(NODES[3], PROJECT)).toBe("Billing.charge");
+    expect(displayName(NODES[4], PROJECT)).toBe("Billing.charge#2");
+    expect(displayName(NODES[0], PROJECT)).toBe("Billing");
+    expect(isTestPath(BILLING_TEST)).toBe(true);
+    expect(isTestPath(BILLING)).toBe(false);
+  });
+});
+
+describe("symbol resolution", () => {
+  it("resolves a package-qualified name and returns every overload", async () => {
+    const context = await createContext();
+    const resolution = await resolveSymbol(
+      context.client,
+      PROJECT,
+      parseSymbolLocator("com.shop.Billing.charge"),
+    );
+
+    expect(resolution.kind).toBe("resolved");
+    expect(resolution.kind === "resolved" && resolution.nodes.map((item) => item.startLine)).toEqual([6, 10]);
+  });
+
+  it("picks one overload, the type over its constructor, and production over tests", async () => {
+    const context = await createContext();
+    const resolve = (raw: string) => resolveSymbol(context.client, PROJECT, parseSymbolLocator(raw));
+
+    expect(await resolve("Billing.charge#2")).toMatchObject({ nodes: [{ startLine: 10 }] });
+    expect(await resolve("Billing")).toMatchObject({ kind: "resolved", nodes: [{ label: "Class" }] });
+    expect(await resolve("refund")).toMatchObject({ kind: "resolved", nodes: [{ filePath: BILLING }] });
+    expect(await resolve("wrong.pkg.Billing.refund")).toMatchObject({ kind: "resolved" });
+    expect(await resolve("Billing.missing")).toMatchObject({ kind: "not-found" });
+  });
+});
+
+describe("re-locating declarations in edited files", () => {
+  it("tells declarations from calls and picks the nearest or the nth overload", () => {
+    const java = BILLING_SOURCE.split("\n");
+
+    expect(locateDeclaration(java, "charge", 6)).toEqual({ startLine: 6, endLine: 8 });
+    expect(locateDeclaration(java, "charge", 11)).toEqual({ startLine: 10, endLine: 12 });
+    expect(locateDeclaration(java, "charge", 1, { occurrence: 2 })).toEqual({ startLine: 10, endLine: 12 });
+    // Lines 7, 11 and 15 call record(...); only line 18 declares it.
+    expect(locateDeclaration(java, "record", 7)).toEqual({ startLine: 18, endLine: 18 });
+    expect(locateDeclaration(java, "Billing", 9, { type: true })).toEqual({ startLine: 3, endLine: 20 });
+    expect(locateDeclaration(java, "Billing", 9)).toEqual({ startLine: 4, endLine: 4 });
+    expect(locateDeclaration(java, "missing", 5)).toBeUndefined();
+  });
+
+  it("handles attributes, braces inside literals, and indentation bodies", () => {
+    const rust = [
+      "#[must_use]",
+      "pub fn label(kind: &str) -> String {",
+      '    let open = "{";',
+      "    format!(\"{open}{kind}\")",
+      "}",
+      "fn other() { label(\"x\"); }",
+    ];
+    const python = ["class Job:", "    def run(self):", "        self.step()", "", "    def step(self):", "        pass"];
+
+    expect(locateDeclaration(rust, "label", 4)).toEqual({ startLine: 1, endLine: 5 });
+    expect(locateDeclaration(python, "run", 2)).toEqual({ startLine: 2, endLine: 3 });
+    expect(locateDeclaration(python, "Job", 1, { type: true })).toEqual({ startLine: 1, endLine: 6 });
+  });
+});
+
+describe("reading code", () => {
+  it("follows a symbol to its new lines when the file changed after indexing", async () => {
+    const context = await createContext({ staleFiles: [BILLING] });
+    await writeFile(join(context.root, BILLING), `// moved\n// down\n// by three\n${BILLING_SOURCE}`);
+
+    const result = await readLocators(context, ["Billing.refund"]);
+
+    expect(result.text).toBe(
+      [
+        `# Billing.refund Method ${BILLING}:17-19`,
+        "# note: file changed since indexing; located by text (refresh: gcal index .)",
+        "  public void refund(int cents) {",
+        "    record(-cents);",
+        "  }",
+      ].join("\n"),
+    );
+  });
+
+  it("prints overloads with their location and exact working-tree lines", async () => {
+    const context = await createContext();
+    const result = await readLocators(context, ["com.shop.Billing.charge"]);
+
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain(`# Billing.charge Method ${BILLING}:6-8\n  public void charge(int cents) {`);
+    expect(result.text).toContain(`# Billing.charge#2 Method ${BILLING}:10-12`);
+    expect(result.text).not.toContain(PROJECT);
+  });
+
+  it("reads the symbol at a line, a raw range, and reports misses", async () => {
+    const context = await createContext();
+
+    expect((await readLocators(context, [`${BILLING}:15`])).text).toContain("# Billing.refund Method");
+    expect((await readLocators(context, ["Billing.java:6-7"])).text).toBe(
+      `# ${BILLING}:6-7 of 20 lines\n  public void charge(int cents) {\n    record(cents);`,
+    );
+
+    // One miss in a batch is reported in the text and does not fail the command.
+    const missing = await readLocators(context, ["Billing.refund", "Nope.nothing"]);
+    expect(missing.ok).toBe(true);
+    expect(missing.text).toContain("# Billing.refund Method");
+    expect(missing.text).toContain("# not found: Nope.nothing");
+    expect((await readLocators(context, ["Nope.nothing", "Nope.other"])).ok).toBe(false);
+  });
+
+  it("prefers a C definition to its prototype and forward declarations", async () => {
+    const c = (label: string, filePath: string, rest: string, startLine: number, endLine: number): GraphNode => ({
+      qualifiedName: `${PROJECT}.${filePath.replace(/\.[ch]$/, "").split("/").join(".")}.${rest}`,
+      name: rest.split(".").pop() ?? rest,
+      label,
+      filePath,
+      startLine,
+      endLine,
+    });
+    const context = await createContext({
+      extraNodes: [
+        c("Function", "src/pass.c", "run_pass", 10, 40),
+        c("Function", "src/internal.h", "run_pass", 5, 6),
+        c("Class", "src/mcp.h", "pipeline", 140, 140),
+        c("Class", "src/pipeline.c", "pipeline", 75, 105),
+        c("Class", "src/pipeline.h", "pipeline_t.pipeline", 27, 30),
+        c("Type", "src/graph.h", "gbuf_t", 18, 18),
+        c("Type", "src/pipeline.h", "gbuf_t", 23, 23),
+        c("Class", "src/route.c", "route_ctx_t.gbuf_t", 159, 162),
+      ],
+    });
+    const locate = (raw: string) => resolveSymbol(context.client, PROJECT, parseSymbolLocator(raw));
+
+    expect(await locate("run_pass")).toMatchObject({
+      kind: "resolved",
+      nodes: [{ filePath: "src/pass.c" }],
+      declarations: [{ filePath: "src/internal.h" }],
+    });
+    expect((await readLocators(context, ["run_pass"])).text).toContain("# also declared: src/internal.h:5-6");
+    expect(await locate("pipeline")).toMatchObject({
+      kind: "resolved",
+      nodes: [{ filePath: "src/pipeline.c", startLine: 75 }],
+    });
+    // Two typedefs of one name: neither is a definition, both are listed.
+    const typedefs = await locate("gbuf_t");
+    expect(typedefs.kind).toBe("ambiguous");
+    expect(typedefs.kind === "ambiguous" && typedefs.nodes.map((item) => item.filePath)).toEqual([
+      "src/graph.h",
+      "src/pipeline.h",
+    ]);
+  });
+
+  it("answers a member asked on the wrong owner, or not indexed, without a second call", async () => {
+    const context = await createContext({
+      textResults: [{ file: "src/limits.h", label: "", match_lines: [2, 5] }],
+    });
+    await mkdir(join(context.root, "src"), { recursive: true });
+    await writeFile(
+      join(context.root, "src/limits.h"),
+      ["// limits", "#define MAX_RETRIES \\", "  3", "", "  schedule(MAX_RETRIES, retry_budget);"].join("\n"),
+    );
+    context.reader = new SourceReader(context.root);
+
+    // `refund` exists once outside tests, on Billing.
+    const elsewhere = await readLocators(context, ["Ledger.refund"]);
+    expect(elsewhere.ok).toBe(true);
+    expect(elsewhere.text).toContain("# not found: Ledger.refund; showing the only symbol named refund, Billing.refund");
+    expect(elsewhere.text).toContain("    record(-cents);");
+
+    // `Billing.record` is in the file and not in the index.
+    const unindexed = await readLocators(context, ["Billing.record"]);
+    expect(unindexed.text).toBe(
+      [
+        `# Billing.record ${BILLING}:18-18`,
+        "# note: not in the index; declaration located by text",
+        "  public void record(int cents) {}",
+      ].join("\n"),
+    );
+
+    // A macro is no symbol; its text is found.
+    const macro = await readLocators(context, ["MAX_RETRIES"]);
+    expect(macro.text).toBe(
+      [
+        "# MAX_RETRIES src/limits.h:1-3",
+        "# note: not in the index; declaration located by text",
+        "// limits",
+        "#define MAX_RETRIES \\",
+        "  3",
+      ].join("\n"),
+    );
+
+    // No declaration anywhere: the lines that mention the name.
+    const mentions = await readLocators(context, ["retry_budget"]);
+    expect(mentions.text).toContain("# not found: retry_budget; no symbol with that name is indexed. Text mentions");
+    expect(mentions.text).toContain("src/limits.h:5: schedule(MAX_RETRIES, retry_budget);");
+  });
+
+  it("returns a type whole by default and as an outline on request", async () => {
+    const context = await createContext();
+
+    const whole = await readLocators(context, ["Billing"]);
+    expect(whole.text).toContain("# Billing Class");
+    expect(whole.text).toContain("    record(-cents);");
+
+    const outline = await readLocators(context, ["Billing"], { detail: "outline" });
+    expect(outline.text).toContain("# outline Billing Class");
+    expect(outline.text).not.toContain("record(-cents)");
+    expect(outline.text).toContain("whole: gcal get Billing --full");
+
+    const fileOutline = await readLocators(context, ["Billing.java"], { detail: "outline" });
+    expect(fileOutline.text).toContain(`# outline ${BILLING} lines=20`);
+  });
+
+  it("starts a symbol at the doc comment and annotations above it", () => {
+    const java = ["class A {", "", "  /**", "   * Cuts text.", "   */", "  @Deprecated", "  void cut() {}", "  void other() {}", "}"];
+    expect(leadingDocStart(java, 7)).toBe(3);
+    expect(leadingDocStart(java, 8)).toBe(8);
+
+    const rust = ["use std::fmt;", "/// Cuts text.", "#[inline]", "fn cut() {}"];
+    expect(leadingDocStart(rust, 4)).toBe(2);
+
+    const python = ["x = 1", "# Cuts text.", "@cache", "def cut(): pass"];
+    expect(leadingDocStart(python, 4)).toBe(2);
+  });
+
+  it("reads symbols from files created after indexing", async () => {
+    const context = await createContext();
+    const created = "src/main/java/com/shop/Refunds.java";
+    await writeFile(
+      join(context.root, created),
+      ["package com.shop;", "", "class Refunds {", "  /** Half back. */", "  int half(int cents) {", "    return cents / 2;", "  }", "}"].join("\n"),
+    );
+    context.newFiles = { list: async () => [created], all: async () => [created] } as unknown as CodeContext["newFiles"];
+
+    const type = await readLocators(context, ["Refunds"]);
+    expect(type.ok).toBe(true);
+    expect(type.text).toContain(`# Refunds ${created}:1-8`);
+    expect(type.text).toContain("not indexed yet");
+
+    const member = await readLocators(context, ["Refunds.half"]);
+    expect(member.text).toContain(`# Refunds.half ${created}:4-7`);
+    expect(member.text).not.toContain("class Refunds");
+
+    expect((await readLocators(context, ["half"])).text).toContain(`${created}:4-7`);
+    expect((await readLocators(context, ["Refunds.java:5-5"])).text).toContain("int half(int cents) {");
+    expect((await readLocators(context, ["Nope.nothing"])).ok).toBe(false);
+  });
+
+  it("answers with the only similarly named symbol", async () => {
+    const context = await createContext();
+
+    const result = await readLocators(context, ["Ledgers"]);
+
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("# not found: Ledgers; showing the only similar name, Ledger");
+    expect(result.text).toContain("# Ledger Interface");
+    expect(similarNamePattern("PaymentController")).toBe("(?i)^Payment.{0,3}Controller.{0,3}$");
+    expect(similarNamePattern("Ledgers")).toBe("(?i)^Ledgers?.{0,3}$");
+    expect(new RegExp("^Payment.{0,3}Controller.{0,3}$", "i").test("PaymentsController")).toBe(true);
+  });
+
+  it("lists a directory and reads files the index does not hold", async () => {
+    const context = await createContext();
+    await mkdir(join(context.root, "scripts/ci"), { recursive: true });
+    await writeFile(join(context.root, "scripts/build.sh"), "#!/bin/sh\nmake all");
+    await writeFile(join(context.root, "scripts/ci/lint.sh"), "#!/bin/sh");
+    const files = [BILLING, "scripts/build.sh", "scripts/ci/lint.sh"];
+    context.newFiles = { list: async () => [], all: async () => files } as unknown as CodeContext["newFiles"];
+
+    const directory = await readLocators(context, ["scripts"]);
+    expect(directory.ok).toBe(true);
+    expect(directory.text).toContain("# directory scripts/ files=2");
+    expect(directory.text).toContain("scripts/ci/\t1 files");
+    expect(directory.text).toContain("scripts/build.sh\t2 lines");
+    expect((await readLocators(context, ["scripts/ci/"])).text).toContain("scripts/ci/lint.sh\t1 lines");
+
+    const script = await readLocators(context, ["build.sh"]);
+    expect(script.ok).toBe(true);
+    expect(script.text).toContain("# scripts/build.sh:1-2");
+
+    // A file name without an extension is still a file.
+    await writeFile(join(context.root, "scripts/Makefile"), "all:\n\tcc main.c");
+    files.push("scripts/Makefile");
+    expect((await readLocators(context, ["Makefile"])).text).toContain("# scripts/Makefile:1-2");
+    expect((await readLocators(context, ["missing/dir"])).ok).toBe(false);
+  });
+
+  it("shows every small file a bare file name stands for", async () => {
+    const context = await createContext();
+    await mkdir(join(context.root, "a"));
+    await mkdir(join(context.root, "b"));
+    await writeFile(join(context.root, "a/util.ts"), "export const a = 1;");
+    await writeFile(join(context.root, "b/util.ts"), "export const b = 2;");
+    const files = ["a/util.ts", "b/util.ts"];
+    context.newFiles = { list: async () => [], all: async () => files } as unknown as CodeContext["newFiles"];
+
+    const both = await readLocators(context, ["util.ts"]);
+    expect(both.ok).toBe(true);
+    expect(both.text).toContain("# util.ts names 2 files; all shown");
+    expect(both.text).toContain("export const a = 1;");
+    expect(both.text).toContain("# b/util.ts:1-1");
+
+    await writeFile(join(context.root, "b/util.ts"), Array.from({ length: 600 }, () => "x").join("\n"));
+    context.reader = new SourceReader(context.root);
+    const listed = await readLocators(context, ["util.ts"]);
+    expect(listed.ok).toBe(false);
+    expect(listed.text).toContain("# ambiguous file: util.ts names 2 files; pick one by path\na/util.ts\nb/util.ts");
+  });
+
+  it("finds a Go method by its receiver type", async () => {
+    const engine = "internal/sync/engine.go";
+    const go = (label: string, qualified: string, startLine: number, endLine: number): GraphNode => ({
+      qualifiedName: `${PROJECT}.internal.sync.${qualified}`,
+      name: qualified.split(".").pop() ?? qualified,
+      label,
+      filePath: engine,
+      startLine,
+      endLine,
+    });
+    const context = await createContext({
+      extraNodes: [
+        go("Class", "Engine", 3, 9),
+        go("Struct", "engine.Engine", 3, 9),
+        go("Method", "emit", 11, 13),
+        node(BILLING, "Method", ["Billing", "emit"], 18, 18),
+      ],
+    });
+    const locate = (raw: string) => resolveSymbol(context.client, PROJECT, parseSymbolLocator(raw));
+
+    // One struct indexed as Class and Struct is one symbol.
+    expect(await locate("Engine")).toMatchObject({ kind: "resolved", nodes: [{ startLine: 3 }] });
+    expect(await locate("sync.Engine.emit")).toMatchObject({
+      kind: "resolved",
+      nodes: [{ filePath: engine, startLine: 11 }],
+    });
+    // `Billing.emit` sits beside `Ledger` but belongs to another type.
+    expect((await locate("Ledger.emit")).kind).toBe("not-found");
+  });
+
+  it("picks the Go method in the receiver's own file among same-named package symbols", async () => {
+    const go = (label: string, file: string, qualified: string, startLine: number): GraphNode => ({
+      qualifiedName: `${PROJECT}.internal.sync.${qualified}`,
+      name: qualified.split(".").pop() ?? qualified,
+      label,
+      filePath: `internal/sync/${file}`,
+      startLine,
+      endLine: startLine + 4,
+    });
+    const context = await createContext({
+      extraNodes: [
+        go("Struct", "watcher.go", "Watcher", 10),
+        go("Method", "watcher.go", "flush", 357),
+        go("Function", "engine.go", "NewEngine.flush", 291),
+      ],
+    });
+
+    expect(
+      await resolveSymbol(context.client, PROJECT, parseSymbolLocator("Watcher.flush")),
+    ).toMatchObject({ kind: "resolved", nodes: [{ filePath: "internal/sync/watcher.go", startLine: 357 }] });
+  });
+
+  it("gives small items their full size and splits the rest of the budget", () => {
+    expect(fairBudgets([10, 1000, 100], 300)).toEqual([10, 190, 100]);
+    expect(fairBudgets([50, 60], 300)).toEqual([50, 60]);
+    expect(fairBudgets([400, 400], 300)).toEqual([150, 150]);
+  });
+});
+
+describe("exploring code", () => {
+  const backend = (overrides: Partial<GcalBackendClient>): GcalBackendClient =>
+    ({
+      search: async () => [],
+      callers: async () => [],
+      callees: async () => [],
+      ...overrides,
+    }) as unknown as GcalBackendClient;
+
+  const textHit = (target: GraphNode, lines: number[]) => ({
+    file: target.filePath,
+    label: target.label,
+    node: target.name,
+    qualified_name: target.qualifiedName,
+    start_line: target.startLine,
+    end_line: target.endLine,
+    match_lines: lines,
+  });
+
+  it("collapses overloads into one search row and falls back to text", async () => {
+    const context = await createContext({ textResults: [textHit(NODES[5], [15])] });
+    const search = async (query: string) =>
+      query === "charge"
+        ? [NODES[3], NODES[4]].map((item) => ({
+            qualifiedName: item.qualifiedName,
+            label: item.label,
+            filePath: item.filePath,
+            line: item.startLine,
+            signature: "",
+          }))
+        : [];
+
+    const result = await searchCode(context, backend({ search }), {
+      queries: ["charge", "-cents"],
+      limit: 5,
+    });
+
+    expect(result.text).toContain(
+      `Billing.charge\tMethod\t${BILLING}:6\tpublic void charge(int cents)\t(2 overloads)`,
+    );
+    expect(result.text).toContain('# no symbol named "-cents"; text matches:');
+    // The line keeps its indentation: an edit is written from this text.
+    expect(result.text).toContain(`${BILLING}\n  15\tBilling.refund\t    record(-cents);`);
+  });
+
+  it("adds text references the call graph missed and skips declarations", async () => {
+    const record = NODES.find((item) => item.name === "record")!;
+    const context = await createContext({
+      textResults: [textHit(NODES[3], [7]), textHit({ ...record, filePath: BILLING, startLine: 18, endLine: 18 }, [18])],
+    });
+
+    const result = await references(context, backend({}), {
+      target: "Ledger.record",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+
+    expect(result.text).toBe(
+      [
+        "# callers of Ledger.record: 1 (graph 0, text-only 1)",
+        BILLING,
+        "  7\tBilling.charge\ttext\t    record(cents);",
+      ].join("\n"),
+    );
+  });
+
+  it("lists subtypes from the graph", async () => {
+    const ledger = NODES.find((item) => item.label === "Interface")!;
+    const context = await createContext({ subtypes: { [ledger.qualifiedName]: [NODES[1]] } });
+
+    const result = await implementations(context, "Ledger", 1);
+
+    expect(result.text).toBe(
+      `# subtypes of Ledger: 1\nBilling\tClass\t${BILLING}:3-20\timplements Ledger`,
+    );
+  });
+
+  it("reports when text search finds nothing", async () => {
+    const context = await createContext();
+    expect((await grepCode(context, { pattern: "zzz", regex: false, limit: 10 })).text).toBe(
+      "# no text matches",
+    );
+  });
+
+  it("names the matching files that a cut search does not show", async () => {
+    const context = await createContext({
+      textResults: [textHit(NODES[3], [7]), textHit(NODES[4], [11]), textHit(NODES[5], [15])],
+    });
+    const other = "src/main/java/com/shop/Refunds.java";
+    await mkdir(join(context.root, "docs"));
+    await writeFile(join(context.root, other), "class Refunds {\n  void undo() { record(-1); }\n}");
+    await writeFile(join(context.root, "docs/guide.md"), "Call `record(cents)` to book.");
+    await writeFile(join(context.root, "src/Audit.java"), "class Audit { void log() { record(0); } }");
+    context.newFiles = {
+      list: async () => [],
+      all: async () => [BILLING, other, "src/Audit.java", "docs/guide.md"],
+    } as unknown as CodeContext["newFiles"];
+    const request = { pattern: "record(", regex: true, paths: ["src"], limit: 1 };
+    const footer = [
+      "# ... 4 more matches not shown; give paths or raise --limit",
+      `# matching files not shown (path matching-lines): ${BILLING} 4, src/Audit.java 1`,
+    ];
+
+    const withContext = await grepCode(context, { ...request, context: 0 });
+    expect(withContext.text).toBe([other, "2:  void undo() { record(-1); }", ...footer].join("\n"));
+
+    const rows = await grepCode(context, request);
+    expect(rows.text.split("\n").slice(-2)).toEqual(footer);
+
+    // Files of one directory are listed under it.
+    const scoped = await grepCode(context, { ...request, paths: ["src/main"], limit: 2 });
+    expect(scoped.text).not.toContain("# matching files not shown");
+    context.newFiles = {
+      list: async () => [],
+      all: async () => [other, "src/Audit.java", "src/Extra.java"],
+    } as unknown as CodeContext["newFiles"];
+    await writeFile(join(context.root, "src/Extra.java"), "record(1);\nrecord(2);");
+    const grouped = await grepCode(context, { ...request, paths: ["src"], limit: 1 });
+    expect(grouped.text.split("\n").at(-1)).toBe(
+      "# matching files not shown (path matching-lines): src/{Audit.java 1, Extra.java 2}",
+    );
+
+    // Nothing is cut: no scan and no footer.
+    const whole = await grepCode(context, { ...request, limit: 10 });
+    expect(whole.text).not.toContain("# matching files not shown");
+  });
+
+  it("reads doubled backslashes as single ones when the pattern matches nothing", async () => {
+    const context = await createContext({ textResults: [] });
+    const created = "src/main/java/com/shop/Refunds.java";
+    await writeFile(join(context.root, created), "class Refunds {\n  void undo() { record(-1); }\n}");
+    context.newFiles = {
+      list: async () => [created],
+      all: async () => [BILLING, created],
+    } as unknown as CodeContext["newFiles"];
+
+    const result = await grepCode(context, { pattern: "\\\\brecord\\\\(-1", regex: true, limit: 10, context: 0 });
+
+    expect(result.text).toBe(
+      [
+        "# no match for \\\\brecord\\\\(-1; read as \\brecord\\(-1 (doubled backslashes)",
+        created,
+        "2:  void undo() { record(-1); }",
+      ].join("\n"),
+    );
+    expect((await grepCode(context, { pattern: "\\\\bnothing\\\\b", regex: true, limit: 10 })).text).toBe(
+      "# no text matches",
+    );
+  });
+
+  it("resolves a call target given as a line or as a file-qualified name", async () => {
+    const constant = (filePath: string, startLine: number): GraphNode => ({
+      qualifiedName: [PROJECT, ...filePath.replace(/\.ts$/, "").split("/"), "native"].join("."),
+      name: "native",
+      label: "Variable",
+      filePath,
+      startLine,
+      endLine: startLine + 2,
+    });
+    const bridge = constant("src/lib/native.ts", 4);
+    const context = await createContext({
+      extraNodes: [bridge, constant("src/app/useSwitcher.ts", 9), constant("src/app/shell.ts", 3)],
+    });
+    const callersOf = async (target: string) =>
+      (await references(context, backend({}), { target, depth: 1, limit: 20, includeText: false })).text;
+
+    const ambiguous = await callersOf("native");
+    expect(ambiguous).toContain(
+      "# ambiguous: native matches 3 symbols; name its owner (Type.member, file.ext.member) or give its path:line",
+    );
+    expect(ambiguous).toContain("src/lib/native.ts:4");
+
+    expect(await callersOf("native.ts.native")).toBe("# callers of native: 0 (graph 0, text-only 0)");
+    expect(await callersOf(`${BILLING}:7`)).toBe("# callers of Billing.charge: 0 (graph 0, text-only 0)");
+    expect(await callersOf(`${BILLING}:2`)).toBe(`# not found: no indexed symbol at ${BILLING}:2`);
+  });
+
+  it("lists the text uses of a symbol the call graph does not hold", async () => {
+    const constant: GraphNode = {
+      qualifiedName: `${PROJECT}.src.lib.native.native`,
+      name: "native",
+      label: "Variable",
+      filePath: "src/lib/native.ts",
+      startLine: 4,
+      endLine: 6,
+    };
+    const context = await createContext({ extraNodes: [constant], textResults: [textHit(NODES[3], [7])] });
+    const failing = (message: string) =>
+      backend({
+        callers: async () => {
+          throw new Error(message);
+        },
+      });
+    const request = { target: "native", depth: 1, limit: 20, includeText: true };
+
+    const result = await references(context, failing("MCP tool error: symbol was not found: native"), request);
+    expect(result.text).toBe(
+      ["# callers of native: 1 (graph 0, text-only 1)", BILLING, "  7\tBilling.charge\ttext\t    record(cents);"].join(
+        "\n",
+      ),
+    );
+    await expect(references(context, failing("backend exited"), request)).rejects.toThrow("backend exited");
+
+    expect(new RegExp(sameLanguageFilter("src/lib/native.ts")!).test("src/app/App.tsx")).toBe(true);
+    expect(new RegExp(sameLanguageFilter("src/lib/native.ts")!).test("flake.nix")).toBe(false);
+    expect(sameLanguageFilter("src/lib/store.zig")).toBe("\\.(zig)$");
+    expect(sameLanguageFilter("Makefile")).toBeUndefined();
+  });
+
+  it("prints the tests that use a symbol, whole when they are short", async () => {
+    const testMethod = NODES.find((item) => item.qualifiedName.endsWith("BillingTests.refund"))!;
+    const context = await createContext({
+      // One use in a test, one in production code.
+      textResults: [textHit(NODES[3], [7]), textHit(testMethod, [6])],
+    });
+    await mkdir(join(context.root, dirname(BILLING_TEST)), { recursive: true });
+    await writeFile(
+      join(context.root, BILLING_TEST),
+      [
+        "package com.shop;",
+        "",
+        "class BillingTests {",
+        "  @Test",
+        "  void refund() {",
+        "    new Billing().refund(5);",
+        "    assertEquals(-5, total());",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+
+    const tests = await testsUsing(context, "Billing.refund");
+
+    expect(tests).toBe(
+      [
+        "# tests using Billing.refund: 1 in 1 file",
+        "",
+        `# BillingTests.refund Method ${BILLING_TEST}:4-8`,
+        "  @Test",
+        "  void refund() {",
+        "    new Billing().refund(5);",
+        "    assertEquals(-5, total());",
+        "  }",
+      ].join("\n"),
+    );
+
+    // The backend refuses the lookup of the enclosing test on a very large index:
+    // the symbol the search reported is used as it is.
+    const lookup = context.client.tool.bind(context.client);
+    context.client = {
+      tool: async (name, args) => {
+        if (name === "query_graph" && String(args.query).includes("start_line <=")) {
+          throw new Error("MCP tool error: unsupported Cypher query: query exceeds intermediate binding safety cap");
+        }
+        return lookup(name, args);
+      },
+    };
+    expect(await testsUsing(context, "Billing.refund")).toBe(tests);
+
+    const unused = await createContext({ textResults: [textHit(NODES[3], [7])] });
+    expect(await testsUsing(unused, "Billing.refund")).toBe("# tests using Billing.refund: none found");
+    // A file has no tests of its own to list, and an unknown name is reported by `get` itself.
+    expect(await testsUsing(unused, BILLING)).toBeUndefined();
+    expect(await testsUsing(unused, "Nope.missing")).toBeUndefined();
+  });
+
+  it("prints matching lines with context, merging overlapping windows", async () => {
+    const context = await createContext({
+      textResults: [textHit(NODES[3], [7]), textHit(NODES[4], [11]), textHit(NODES[5], [15])],
+    });
+
+    const result = await grepCode(context, { pattern: "record(", regex: false, limit: 10, context: 1 });
+
+    expect(result.text).toBe(
+      [
+        BILLING,
+        "6-  public void charge(int cents) {",
+        "7:    record(cents);",
+        "8-  }",
+        "--",
+        "10-  public void charge(int cents, String note) {",
+        "11:    record(cents);",
+        "12-  }",
+        "--",
+        "14-  public void refund(int cents) {",
+        "15:    record(-cents);",
+        "16-  }",
+      ].join("\n"),
+    );
+
+    const merged = await grepCode(context, { pattern: "record(", regex: false, limit: 10, context: 2 });
+    expect(merged.text).not.toContain("--");
+    expect(merged.text.split("\n")).toHaveLength(1 + 13);
+  });
+
+  it("reads a pattern as a regex first and as literal text when that fails", async () => {
+    const modes: boolean[] = [];
+    const options = {
+      textResults: [textHit(NODES[5], [15])],
+      textSearchModes: modes,
+      regexFindsNothing: false,
+    };
+    const context = await createContext(options);
+    const modesFor = async (pattern: string, regex: boolean) => {
+      modes.length = 0;
+      const result = await grepCode(context, { pattern, regex, limit: 10 });
+      expect(result.text).toContain(BILLING);
+      return [...modes];
+    };
+
+    // Not a valid regex, and nothing regex-like: one literal search each.
+    expect(await modesFor("record(", true)).toEqual([false]);
+    expect(await modesFor("record", true)).toEqual([false]);
+    expect(await modesFor("rec.rd", false)).toEqual([false]);
+    expect(await modesFor("rec[o]rd", true)).toEqual([true]);
+
+    options.regexFindsNothing = true;
+    expect(await modesFor("rec[o]rd", true)).toEqual([true, false]);
+  });
+
+  it("searches files the index does not hold", async () => {
+    const context = await createContext({ textResults: [] });
+    const created = "src/main/java/com/shop/Refunds.java";
+    await mkdir(join(context.root, "docs"));
+    await writeFile(join(context.root, "docs/guide.md"), "intro\nCall `record(cents)` to book.");
+    await writeFile(join(context.root, created), "class Refunds {\n  void undo() { record(-1); }\n}");
+    context.newFiles = {
+      list: async () => [created],
+      all: async () => [BILLING, created, "docs/guide.md"],
+    } as unknown as CodeContext["newFiles"];
+
+    // A file created after indexing is always searched.
+    const fresh = await grepCode(context, { pattern: "record\\(-1", regex: true, limit: 10 });
+    expect(fresh.text).toContain(created);
+    expect(fresh.text).not.toContain("docs/guide.md");
+
+    // Paths also reach files outside the index.
+    const scoped = await grepCode(context, {
+      pattern: "record(",
+      regex: true,
+      paths: ["docs"],
+      context: 0,
+      limit: 10,
+    });
+    expect(scoped.text).toBe("docs/guide.md\n2:Call `record(cents)` to book.");
+
+    // `.` is the whole repository, not a path that matches nothing.
+    const everywhere = await grepCode(context, { pattern: "record(", regex: false, paths: ["."], limit: 10 });
+    expect(everywhere.text).toContain(created);
+  });
+
+  it("turns rg-style paths into one backend path filter", () => {
+    const filter = new RegExp(pathsPattern("/repo", ["Billing.java", "src/test/", "Ledger"]));
+
+    expect(filter.test(BILLING)).toBe(true);
+    expect(filter.test("src/main/java/com/shop/NotBilling.java")).toBe(false);
+    expect(filter.test(BILLING_TEST)).toBe(true);
+    expect(filter.test(LEDGER)).toBe(true);
+    expect(filter.test("src/main/java/com/shop/LedgerImpl.java")).toBe(false);
+  });
+
+  it("splits a path list that arrived as one argument, and reads rg-style globs", async () => {
+    const context = await createContext();
+    await mkdir(join(context.root, "docs"));
+    await writeFile(join(context.root, "docs/my notes.md"), "text");
+
+    // A PowerShell array passed through a script is one argument joined by spaces.
+    expect(separatePaths(context.root, [`${BILLING} docs`, "src"])).toEqual([BILLING, "docs", "src"]);
+    // So is a list of absolute paths, as `Get-ChildItem | ForEach-Object FullName` gives.
+    const absolute = [join(context.root, BILLING), join(context.root, "docs")];
+    expect(separatePaths(context.root, [absolute.join(" ")])).toEqual(absolute);
+    // A real path with a space, and words that are not all paths, stay as given.
+    expect(separatePaths(context.root, ["docs/my notes.md", `${BILLING} nowhere`])).toEqual([
+      "docs/my notes.md",
+      `${BILLING} nowhere`,
+    ]);
+
+    const matches = (glob: string, path: string) => new RegExp(globPattern(glob)).test(path);
+    expect(matches("*.py", "src/lod/pairs.py")).toBe(true);
+    expect(matches("*.py", "src/lod/pairs.pyc")).toBe(false);
+    expect(matches("src/**/*.ts", "src/app/hooks/use.ts")).toBe(true);
+    expect(matches("src/**/*.ts", "lib/app/use.ts")).toBe(false);
+    expect(matches("*.{ts,tsx}", "src/App.tsx")).toBe(true);
+    expect(matches("tests/*.py", "tests/codec/test_a.py")).toBe(false);
+  });
+
+  it("keeps the rest of a batch when the backend cannot answer one item", async () => {
+    const context = await createContext();
+    const tool = context.client.tool.bind(context.client);
+    context.client = {
+      tool: async (name, args) => {
+        if (name === "query_graph" && String(args.query).includes("Ledger.java")) {
+          throw new Error("MCP tool error: unsupported Cypher query: query exceeds intermediate binding safety cap");
+        }
+        return tool(name, args);
+      },
+    };
+
+    const batch = await readLocators(context, [`${BILLING}:7`, `${LEDGER}:4`]);
+
+    expect(batch.ok).toBe(true);
+    expect(batch.text).toContain("record(cents);");
+    expect(batch.text).toContain(
+      `# failed: ${LEDGER}:4: MCP tool error: unsupported Cypher query: query exceeds intermediate binding safety cap; read it by range: gcal get ${LEDGER}:1-400`,
+    );
+    // Alone, the failure is the command's own.
+    await expect(readLocators(context, [`${LEDGER}:4`])).rejects.toThrow("safety cap");
+  });
+
+  it("summarizes the layout within a row budget, production first", () => {
+    const paths = [
+      ...Array.from({ length: 30 }, (_, index) => `app/src/main/core/a${index}.ts`),
+      ...Array.from({ length: 20 }, (_, index) => `app/src/main/web/b${index}.ts`),
+      ...Array.from({ length: 10 }, (_, index) => `app/src/test/core/c${index}.ts`),
+      "README.md",
+    ];
+
+    expect(summarizeLayout(paths, 3)).toBe(
+      [
+        "# layout: 61 indexed files (ts 60, md 1)",
+        "1\t./*",
+        "30\tapp/src/main/core/",
+        "20\tapp/src/main/web/",
+        "10\tapp/src/test/core/",
+      ].join("\n"),
+    );
+  });
+});

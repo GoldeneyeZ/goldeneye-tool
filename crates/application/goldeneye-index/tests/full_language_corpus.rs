@@ -234,6 +234,135 @@ fn same_stem_properties_and_xml_files_keep_distinct_file_identity() {
 }
 
 #[test]
+fn cpp_header_and_source_can_repeat_a_private_definition() {
+    let temp = TempDir::new().expect("temp repository");
+    let source = r#"
+struct OverrideUI {};
+struct SuppressUI: public OverrideUI {
+    SuppressUI(): OverrideUI() {}
+};
+"#;
+    fs::write(temp.path().join("MsiUtils.cpp"), source).expect("write C++ source");
+    fs::write(temp.path().join("MsiUtils.h"), source).expect("write C++ header");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index repeated C++ definition");
+
+    assert_eq!(result.counts.files, 2);
+    let suppress_ui = service
+        .repository()
+        .search_nodes(&result.project.id, "SuppressUI", 10)
+        .expect("search repeated definition")
+        .into_iter()
+        .filter(|hit| hit.node.label.as_str() == "Class")
+        .collect::<Vec<_>>();
+    assert_eq!(suppress_ui.len(), 1);
+}
+
+#[test]
+fn cpp_nested_constructor_definitions_match_header_declarations() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("ResourceEditor.h"),
+        concat!(
+            "class ResourceEditor { public:\n",
+            "  class FileLock { public:\n",
+            "    explicit FileLock(int);\n",
+            "    explicit FileLock(long);\n",
+            "  };\n",
+            "};\n",
+        ),
+    )
+    .expect("write C++ header");
+    fs::write(
+        temp.path().join("ResourceEditor.cpp"),
+        concat!(
+            "ResourceEditor::FileLock::FileLock(int) {}\n",
+            "ResourceEditor::FileLock::FileLock(long) {}\n",
+        ),
+    )
+    .expect("write C++ source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index nested C++ constructors");
+
+    let hits = service
+        .repository()
+        .search_nodes(&result.project.id, "FileLock", 10)
+        .expect("search nested class and constructors");
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Class")
+            .count(),
+        1
+    );
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Method")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn cpp_anonymous_namespace_does_not_steal_a_descendant_name() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(temp.path().join("CfgFile.h"), "class CfgFile {};\n").expect("write C++ header");
+    fs::write(
+        temp.path().join("CfgFile.cpp"),
+        concat!(
+            "namespace {\n",
+            "template <typename CfgFile> void helper(CfgFile&) {}\n",
+            "}\n",
+        ),
+    )
+    .expect("write C++ source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index anonymous C++ namespace");
+
+    let hits = service
+        .repository()
+        .search_nodes(&result.project.id, "CfgFile", 10)
+        .expect("search CfgFile nodes");
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.node.label.as_str() == "Class")
+            .count(),
+        1
+    );
+    assert!(!hits.iter().any(|hit| {
+        hit.node.label.as_str() == "Module"
+            && hit
+                .node
+                .qualified_name
+                .as_str()
+                .ends_with(".CfgFile.CfgFile")
+    }));
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(

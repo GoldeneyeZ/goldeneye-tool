@@ -28,6 +28,6 @@ test("competitor runner derives repository-root defaults after relocation", () =
   );
   assert.match(
     source,
-    /spawnSync\("cargo", \["build", "--release", "-p", "goldeneye"\], \{\s*cwd: workspace,/,
+    /const buildArguments = \["build", "--release", "-p", "goldeneye"\];[\s\S]*spawnSync\("cargo", buildArguments, \{\s*cwd: workspace,/,
   );
 });

@@ -9,14 +9,14 @@
   "seed": 20260722,
   "timeout_ms": 900000,
   "preindex_timeout_ms": 600000,
-  "output": "../../target/agent-bench/abyssal-zenith-goldeneye-gcal.json",
+  "output": "../../target/agent-bench/abyssal-zenith-goldeneye-code-agent-layer.json",
   "engines": [
     {
       "id": "goldeneye-code-agent-layer",
       "kind": "gcal",
       "command": "C:\\nvm4w\\nodejs\\node.exe",
       "args": [
-        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+        "C:\\Users\\Zacha\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
       ],
       "backend_command": "../../target/release/goldeneye.exe"
     }

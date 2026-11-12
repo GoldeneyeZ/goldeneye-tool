@@ -102,12 +102,29 @@ pub enum StoreError {
     },
     #[error("graph references missing node: {node_id:?}")]
     MissingNode { node_id: NodeId },
-    #[error("duplicate node ID in replacement: {0:?}")]
-    DuplicateNodeId(NodeId),
+    #[error(
+        "duplicate node ID in replacement: {node_id:?} ({qualified_name:?}); first file {first_file_path:?}, duplicate file {file_path:?}"
+    )]
+    DuplicateNodeId {
+        node_id: NodeId,
+        first_file_path: Option<ProjectRelativePath>,
+        file_path: Option<ProjectRelativePath>,
+        qualified_name: QualifiedName,
+    },
     #[error("duplicate file path in replacement: {0:?}")]
     DuplicateFilePath(ProjectRelativePath),
-    #[error("duplicate qualified name in replacement: {0:?}")]
-    DuplicateQualifiedName(QualifiedName),
+    #[error(
+        "duplicate qualified name in replacement: {qualified_name:?}; first {first_node_id:?} ({first_label:?}) in {first_file_path:?}, duplicate {node_id:?} ({label:?}) in {file_path:?}"
+    )]
+    DuplicateQualifiedName {
+        qualified_name: QualifiedName,
+        first_node_id: NodeId,
+        first_label: NodeLabel,
+        first_file_path: Option<ProjectRelativePath>,
+        node_id: NodeId,
+        label: NodeLabel,
+        file_path: Option<ProjectRelativePath>,
+    },
     #[error("duplicate edge identity in replacement")]
     DuplicateEdge,
     #[error("stored {field} is corrupt: {reason}")]
