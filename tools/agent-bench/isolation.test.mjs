@@ -88,9 +88,10 @@ test("bench package is private ESM with stable commands", async () => {
   assert.equal(manifest.engines.node, ">=20");
   assert.deepEqual(manifest.scripts, {
     test: "node --test",
-    check: "node --check ./bin/benchmark-agent-tasks.mjs && node --check ./bin/benchmark-competitors.mjs",
+    check: "node --check ./bin/benchmark-agent-tasks.mjs && node --check ./bin/benchmark-competitors.mjs && node --check ./bin/benchmark-ops.mjs",
     "benchmark:agents": "node ./bin/benchmark-agent-tasks.mjs",
     "benchmark:competitors": "node ./bin/benchmark-competitors.mjs",
+    "benchmark:ops": "node ./bin/benchmark-ops.mjs",
   });
 });
 

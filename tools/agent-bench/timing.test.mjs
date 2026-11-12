@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import {
+  agentMessageText,
   closeWritableStream,
   createAgentCompletionController,
   isAgentProtocolCompletionLine,
@@ -11,6 +12,22 @@ import {
   spawnWithTimer,
   stopTimerAtClose,
 } from "./timing.mjs";
+
+test("agentMessageText returns the text of agent messages only", () => {
+  const message = { type: "item.completed", item: { type: "agent_message", text: "answer" } };
+  assert.equal(agentMessageText(JSON.stringify(message)), "answer");
+  assert.equal(
+    agentMessageText(
+      JSON.stringify({ type: "item.completed", item: { type: "command_execution", text: "x" } }),
+    ),
+    null,
+  );
+  assert.equal(
+    agentMessageText(JSON.stringify({ ...message, type: "item.started" })),
+    null,
+  );
+  assert.equal(agentMessageText("not json"), null);
+});
 
 test("closeWritableStream resolves after an already-ended stream", async () => {
   const stream = new PassThrough();

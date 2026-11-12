@@ -7,13 +7,15 @@
   "reasoning": "high",
   "codex_full_access": true,
   "repetitions": 3,
-  "cache_modes": ["warm"],
+  "cache_modes": [
+    "warm"
+  ],
   "java_home": "C:\\Users\\Zacha\\.jdks\\openjdk-17.0.2",
   "gradle_user_home": "D:\\Dev\\Caches\\gradle-spring-framework-6.2",
   "ready_snapshot": {
-    "root": "../../../target/agent-bench/snapshots/spring-stringutils",
-    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\spring-stringutils-worktree",
-    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\spring-stringutils-live",
+    "root": "../../../target/agent-bench/snapshots/spring-stringutils-modules",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\ssu-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\ssu-live",
     "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
     "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
     "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
@@ -32,6 +34,10 @@
     {
       "id": "spring-stringutils-unicode-truncate",
       "prompt_file": "../tasks/spring-stringutils-unicode-truncate.md",
+      "source_language": "Java",
+      "source_extensions": [
+        ".java"
+      ],
       "grader": {
         "command": "pwsh",
         "args": [
@@ -42,7 +48,9 @@
           "{worktree}"
         ]
       },
-      "extensions": [".java"]
+      "extensions": [
+        ".java"
+      ]
     }
   ],
   "allowed_dirty_paths": [
@@ -60,14 +68,18 @@
       "backend_command": "../../../target/release/goldeneye.exe",
       "env": {
         "GOLDENEYE_GRAMMAR_PACK": "full",
-        "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java/org/springframework/util/StringUtils.java;spring-core/src/test/java/org/springframework/util/StringUtilsTests.java"
+        "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java;spring-core/src/test/java;spring-beans/src/main/java;spring-beans/src/test/java;spring-context/src/main/java;spring-context/src/test/java"
       },
-      "cache_modes": ["warm"]
+      "cache_modes": [
+        "warm"
+      ]
     },
     {
       "id": "vanilla",
       "kind": "vanilla",
-      "cache_modes": ["none"]
+      "cache_modes": [
+        "none"
+      ]
     }
   ]
 }

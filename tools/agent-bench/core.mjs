@@ -95,7 +95,74 @@ export function emptyTelemetry() {
     command_events: [],
     protocol_violations: [],
     event_types: {},
+    waste: emptyWaste(),
   };
+}
+
+/**
+ * Counts of what a run spent without getting an answer. Token totals of one
+ * task differ by up to a factor of two between runs; these counts say why.
+ */
+export function emptyWaste() {
+  return {
+    /** Shell commands that exited non-zero. */
+    failed_commands: 0,
+    /** Of those, the ones that printed nothing (a quoting error swallows the whole line). */
+    silent_failures: 0,
+    /** Outputs that ended a list early and said so. */
+    cut_outputs: 0,
+    ambiguous_answers: 0,
+    not_found_answers: 0,
+    no_match_answers: 0,
+    /** Edits written by hand. */
+    patches: 0,
+    ack_replace_calls: 0,
+    ack_check_calls: 0,
+    ack_get_tests_calls: 0,
+    /** Bytes of command output returned to the model. */
+    output_bytes: 0,
+  };
+}
+
+const count = (text, pattern) => text.match(pattern)?.length ?? 0;
+
+/** Adds one completed Codex item (a shell command or a patch) to the waste counters. */
+export function accumulateWaste(waste, event) {
+  if (event?.type !== "item.completed") return waste;
+  const item = event.item ?? {};
+  if (item.type === "file_change") {
+    waste.patches += 1;
+    return waste;
+  }
+  if (item.type !== "command_execution") return waste;
+
+  const command = Array.isArray(item.command) ? item.command.join(" ") : String(item.command ?? "");
+  const output = String(item.aggregated_output ?? "");
+  const exitCode = Number(item.exit_code);
+  if (Number.isFinite(exitCode) && exitCode !== 0) {
+    waste.failed_commands += 1;
+    if (output.trim().length === 0) waste.silent_failures += 1;
+  }
+  waste.output_bytes += Buffer.byteLength(output);
+  waste.cut_outputs += count(output, /^# \.\.\. \d+ more/gm);
+  waste.ambiguous_answers += count(output, /^# ambiguous/gm);
+  waste.not_found_answers += count(output, /^# not found/gm);
+  waste.no_match_answers += count(output, /^# no (?:text )?match/gm);
+  waste.ack_replace_calls += count(command, /\back\s+replace\b/g);
+  waste.ack_check_calls += count(command, /\back\s+check\b/g);
+  waste.ack_get_tests_calls += count(command, /\back\s+get\b[^;&|]*--tests\b/g);
+  return waste;
+}
+
+/** Waste counters plus the commands a run issued more than once. */
+export function wasteSummary(telemetry) {
+  const seen = new Set();
+  let repeated = 0;
+  for (const { command } of telemetry.command_events ?? []) {
+    if (seen.has(command)) repeated += 1;
+    seen.add(command);
+  }
+  return { ...(telemetry.waste ?? emptyWaste()), repeated_commands: repeated };
 }
 
 export function snapshotAckEnvironment(environment) {
@@ -131,12 +198,46 @@ const NON_SOURCE_FILE_PATTERN =
 const DIRECT_READ_PATTERN =
   /(?:get-content|\bgc\b|\bcat\b|\btype\b|\bhead\b|\btail\b|\bmore\b|\bless\b|\bbat\b|\bsed\b|readfilesync|readalltext|git\s+(?:show|blame))/i;
 
+const SHELL_WRAPPER_PATTERN = /\s-(?:Command|c)\s+(["'])([\s\S]*)\1\s*$/i;
+const ACK_INVOCATION_PATTERN = /^[\s"'`(]*ack(?:\.(?:exe|cmd|ps1))?(?:\s|$)/i;
+const ACK_SUBCOMMAND_PATTERN = /\back(?:\.(?:exe|cmd|ps1))?\s+grep\b/gi;
+
+// The script a `pwsh -Command "..."` wrapper runs, or the command itself.
+function shellScript(command) {
+  const wrapped = SHELL_WRAPPER_PATTERN.exec(command);
+  if (wrapped === null) return command;
+  return wrapped[1] === '"' ? wrapped[2].replace(/\\"/g, '"') : wrapped[2];
+}
+
+// Splits on shell separators outside quotes, so `'a|b'` in an argument stays whole.
+function shellSegments(script) {
+  const segments = [];
+  let current = "";
+  let quote = null;
+  for (const char of script) {
+    if (quote === null && (char === ";" || char === "&" || char === "|")) {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+    if (quote === char) quote = null;
+    else if (quote === null && (char === '"' || char === "'")) quote = char;
+    current += char;
+  }
+  segments.push(current);
+  return segments;
+}
+
 export function isDirectSourceReadCommand(command) {
   const rendered = String(command ?? "");
   const commandHasSourceFile = SOURCE_FILE_PATTERN.test(rendered);
   const commandHasNonSourceFile = NON_SOURCE_FILE_PATTERN.test(rendered);
-  for (const segment of rendered.split(/[;&|]+/)) {
-    if (RAW_SEARCH_PATTERN.test(segment)) {
+  for (const segment of shellSegments(shellScript(rendered))) {
+    // `ack grep Foo.java` is the ACK surface, not a raw search or file read.
+    if (ACK_INVOCATION_PATTERN.test(segment)) continue;
+    // Quotes nested inside a regex argument can split one `ack grep` call in
+    // the middle; the `grep` after `ack` is still the ACK subcommand.
+    if (RAW_SEARCH_PATTERN.test(segment.replace(ACK_SUBCOMMAND_PATTERN, " "))) {
       if (SOURCE_FILE_PATTERN.test(segment) || commandHasSourceFile) return true;
       if (!NON_SOURCE_FILE_PATTERN.test(segment) && !commandHasNonSourceFile) return true;
     }
@@ -151,6 +252,12 @@ export function protocolViolationsForEngine(violations, engineKind) {
   }
   if (engineKind === "ack") {
     return violations.filter((violation) => violation.type !== "ack_cli");
+  }
+  // The hybrid lane may use ack and shell tools alike.
+  if (engineKind === "hybrid") {
+    return violations.filter(
+      (violation) => violation.type !== "ack_cli" && violation.type !== "direct_source_read",
+    );
   }
   return violations;
 }
@@ -168,6 +275,7 @@ export function accumulateCodexLine(telemetry, line) {
   telemetry.events += 1;
   const eventType = String(event.type ?? "unknown");
   telemetry.event_types[eventType] = (telemetry.event_types[eventType] ?? 0) + 1;
+  accumulateWaste(telemetry.waste, event);
 
   const usageObjects = [];
   walk(event, (object, path) => {
@@ -378,16 +486,15 @@ export function tomlInlineTable(object) {
     .join(", ")} }`;
 }
 
-export function codexSandboxArgs({ fullAccess, worktree }) {
+// `codeModeHost: false` passes `features.code_mode_host=false`. It worked around
+// an unstable nested host in mid-2026 Codex builds, but from Codex 0.159 the
+// host is the agent's only way to execute commands: disabling it leaves the
+// model with no tools ("Code Mode is unavailable because code-mode host is
+// disabled"). The Codex default is therefore left alone unless a config asks.
+export function codexSandboxArgs({ fullAccess, worktree, codeModeHost }) {
+  const hostArgs = codeModeHost === false ? ["-c", "features.code_mode_host=false"] : [];
   if (fullAccess) {
-    return [
-      "-s",
-      "danger-full-access",
-      "-c",
-      'approval_policy="never"',
-      "-c",
-      "features.code_mode_host=false",
-    ];
+    return ["-s", "danger-full-access", "-c", 'approval_policy="never"', ...hostArgs];
   }
   return [
     "-s",
@@ -396,8 +503,7 @@ export function codexSandboxArgs({ fullAccess, worktree }) {
     worktree,
     "-c",
     'approval_policy="never"',
-    "-c",
-    "features.code_mode_host=false",
+    ...hostArgs,
   ];
 }
 
@@ -515,6 +621,12 @@ export function loadConfig(configPath) {
     task.prompt_file = resolveRelative(base, task.prompt_file);
     task.grader.command = resolveRelative(base, task.grader.command);
     task.grader.args = (task.grader.args ?? []).map((arg) => resolveRelative(base, arg));
+    if (task.overlay !== undefined) {
+      if (typeof task.overlay?.patch_file !== "string" || task.overlay.patch_file.length === 0) {
+        throw new Error(`Task ${task.id} overlay needs a patch_file`);
+      }
+      task.overlay.patch_file = resolveRelative(base, task.overlay.patch_file);
+    }
   }
   for (const engine of config.engines) {
     engine.kind ??= "mcp";

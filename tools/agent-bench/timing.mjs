@@ -8,6 +8,18 @@ export async function closeWritableStream(stream) {
   await completion;
 }
 
+// Text of an agent message event, or null for any other line. The last one of a
+// run is the final answer; Codex can be stopped before it writes that to `-o`.
+export function agentMessageText(line) {
+  try {
+    const event = JSON.parse(line);
+    if (event.type !== "item.completed" || event.item?.type !== "agent_message") return null;
+    return typeof event.item.text === "string" ? event.item.text : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isAgentProtocolCompletionLine(line) {
   try {
     return JSON.parse(line).type === "turn.completed";

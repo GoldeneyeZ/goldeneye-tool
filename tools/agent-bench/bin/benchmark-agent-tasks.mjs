@@ -34,6 +34,7 @@ import {
   summarizeRuns,
   tomlInlineTable,
   tomlString,
+  wasteSummary,
   accumulateCodexLine,
 } from "../core.mjs";
 import {
@@ -54,6 +55,7 @@ import {
 import {
   closeWritableStream,
   createAgentCompletionController,
+  agentMessageText,
   isAgentProtocolCompletionLine,
   scoreRunDurations,
   spawnWithTimer,
@@ -101,6 +103,8 @@ Options:
   --one-shot               run one standalone, unqualified benchmark attempt
   --skip-agent-verification forbid agent-side build/test/lint/check commands
   --attempt-id <id>         one-shot artifact attempt identifier
+  --ack-daemon              one-shot: the agent's ack calls share one warm Goldeneye daemon
+  --ack-discovery <mode>    one-shot: ack (ack only, default) or hybrid (ack and shell tools)
   --skip-build              use the existing Goldeneye release binary
   --dry-run                 validate and print the matrix only
   --prepare-snapshot        create the immutable ACK ready snapshot and exit
@@ -182,6 +186,18 @@ if (flags.has("--calibration")) {
 const calibrationId = flags.has("--calibration")
   ? sanitizeId(flags.get("--calibration-id"))
   : null;
+// How the ACK lane is exposed to the agent. Preparation (indexing, snapshots)
+// always uses the per-call benchmark backend, whatever these say.
+const ackLane = {
+  daemon: flags.has("--ack-daemon"),
+  discovery: flags.get("--ack-discovery") ?? "ack",
+};
+if (!["ack", "hybrid"].includes(ackLane.discovery)) {
+  fail("--ack-discovery accepts only ack,hybrid");
+}
+if ((ackLane.daemon || ackLane.discovery !== "ack") && !oneShot.enabled) {
+  fail("--ack-daemon and --ack-discovery require --one-shot");
+}
 
 const baseCommit = git(config.repo, ["rev-parse", `${config.base_ref}^{commit}`]).trim();
 const repoName = sanitizeId(config.repo.split(/[\\/]/).filter(Boolean).at(-1));
@@ -407,6 +423,8 @@ if (oneShot.enabled) {
       timeout_ms: config.timeout_ms,
       agent_verification_policy: agentVerificationPolicy(),
       ack_call_limit: null,
+      ack_daemon: ackLane.daemon,
+      ack_discovery: ackLane.discovery,
     },
     model_invocations: result.model_invocations,
     grader_invocations: result.grader_invocations,
@@ -550,7 +568,8 @@ async function prepareReadySnapshot({ baseCommit, config, repoName }) {
       readySnapshot.worktree,
       readySnapshot.live_cache,
       repoName,
-      dirname(config.repo),
+      // The backend only needs the worktree; the source repository may live elsewhere.
+      readySnapshot.allowed_worktree_root,
     );
     activeGate = "ack_initialize";
     initializer = await initializeAckForSnapshot(
@@ -791,6 +810,7 @@ function captureBenchmarkProvenance({ config, configPath: currentConfigPath }) {
     currentConfigPath,
     ...config.tasks.flatMap((task) => [
       task.prompt_file,
+      ...(task.overlay ? [task.overlay.patch_file] : []),
       ...(task.grader?.args ?? []).filter((arg) => /\.(?:mjs|cjs|js|ps1)$/i.test(arg)),
     ]),
   ].map((file) => resolve(file));
@@ -987,6 +1007,7 @@ async function executeRun(run, context) {
   let maintenanceMs = null;
   let setupMs = null;
   let preindexMs = null;
+  let daemonPrewarmMs = null;
   let snapshotManifest = null;
   let agentResult = null;
   let graderResult = null;
@@ -998,6 +1019,7 @@ async function executeRun(run, context) {
   let engineMetrics = {};
   let modelInvocations = 0;
   let graderInvocations = 0;
+  let overlayPaths = [];
   try {
     removeWorktreeIfRegistered(context.config.repo, worktree, worktreeRoot);
     mkdirSync(dirname(worktree), { recursive: true });
@@ -1031,7 +1053,7 @@ async function executeRun(run, context) {
       worktree,
       cacheDir,
       context.repoName,
-      dirname(context.config.repo),
+      worktreeRoot,
     );
     prepareEngine(engine, context.config.preindex_timeout_ms ?? 600_000);
     setupMs = performance.now() - setupStarted;
@@ -1039,6 +1061,15 @@ async function executeRun(run, context) {
       const started = performance.now();
       await primeIndex(engine, worktree, context.config.preindex_timeout_ms ?? 600_000);
       preindexMs = performance.now() - started;
+    }
+
+    if (run.task.overlay) {
+      overlayPaths = applyOverlay(worktree, run.task.overlay.patch_file);
+      writeFileSync(join(runDir, "overlay-status.txt"), `${overlayPaths.join("\n")}\n`);
+    }
+
+    if (engine.kind === "ack" && ackLane.daemon) {
+      daemonPrewarmMs = prewarmAckDaemon(engine, worktree);
     }
 
     const prompt = composePrompt(run.task, run.cacheMode, engine, {
@@ -1057,7 +1088,8 @@ async function executeRun(run, context) {
     });
 
     git(worktree, ["add", "-N", "--", "."]);
-    diff = git(worktree, ["diff", "--binary", "--no-ext-diff"]);
+    // Against HEAD: an agent may stage part of its work (`git mv`, `git rm`).
+    diff = git(worktree, ["diff", "--binary", "--no-ext-diff", "HEAD"]);
     status = git(worktree, ["status", "--short"]);
     patchStats = readPatchStats(worktree);
     writeFileSync(join(runDir, "patch.diff"), diff);
@@ -1083,6 +1115,9 @@ async function executeRun(run, context) {
         goldeneye_db_bytes: existsSync(engine.goldeneyeDb)
           ? statSync(engine.goldeneyeDb).size
           : 0,
+        ack_daemon: ackLane.daemon,
+        ack_discovery: ackLane.discovery,
+        daemon_prewarm_ms: daemonPrewarmMs,
       };
       engineMetrics.daemon_shutdown_verified = await shutdownAckDaemon(engine.ackHome);
     }
@@ -1098,12 +1133,15 @@ async function executeRun(run, context) {
   const compliance = analyzeAgentVerificationCalls(telemetry.command_events);
   const protocolViolations = protocolViolationsForEngine(
     telemetry.protocol_violations,
-    run.engine.kind,
+    run.engine.kind === "ack" && ackLane.discovery === "hybrid" ? "hybrid" : run.engine.kind,
   );
+  // Paths the overlay left dirty are the task's starting state, not the agent's doing.
+  const overlayPathSet = new Set(overlayPaths);
   const dirtyFileNames = status
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => line.slice(3));
+    .map((line) => line.slice(3))
+    .filter((path) => !overlayPathSet.has(path));
   const dirtyPolicy = compileDirtyPathPolicy(
     context.config.allowed_dirty_policy ?? {
       exact: context.config.allowed_dirty_paths ?? [],
@@ -1163,6 +1201,7 @@ async function executeRun(run, context) {
     ack_calls: telemetry.ack_calls,
     ack_failures: telemetry.ack_failures,
     command_calls: telemetry.command_calls,
+    waste: wasteSummary(telemetry),
     ...(context.mode === "one-shot" ? {
       model_invocations: modelInvocations,
       grader_invocations: graderInvocations,
@@ -1188,6 +1227,7 @@ async function executeRun(run, context) {
     patch_insertions: patchStats.insertions,
     patch_deletions: patchStats.deletions,
     dirty_paths: status.split(/\r?\n/).filter(Boolean).length,
+    overlay_paths: overlayPaths.length,
     artifact_dir: runDir,
   };
 }
@@ -1196,11 +1236,18 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
   const taskPrompt = readFileSync(task.prompt_file, "utf8").trim();
   const sourceLanguage = task.source_language ?? "TypeScript, TSX, or Rust";
   const sourceExtensions = (task.source_extensions ?? [".ts", ".tsx", ".rs"]).join(", ");
+  const ackEditCommands =
+    " ack get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows). ack check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status.";
+  const ackSyntax =
+    "ack takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). ack get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). ack grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. ack search falls back to text when no symbol matches. ack callers adds text references to call-graph edges; ack callees and ack impls follow the graph the other way. ack replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express." +
+    ackEditCommands;
   const discoveryInstructions =
     engine.kind === "vanilla"
       ? "- No code-memory MCP is available. Use ordinary local shell and file tools for discovery."
-      : engine.kind === "ack"
-        ? `- Use only the ack CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use ack search/symbol/get/inspect/callers/callees/arch/status instead. git status, git diff, edits, and build/test commands remain allowed.`
+      : engine.kind === "ack" && engine.shellDiscovery
+        ? `- Two discovery surfaces are available: the ack CLI, which queries a code-graph index of this repository, and ordinary shell and file tools (rg, Get-Content, git). Choose per need and never ask the same question through both. Direct Goldeneye MCP tools are not available in this lane.\n- Use ack when the answer spans files: how a flow works, who calls or implements something, the source of several named symbols in one call, every use of a name across the repository, or the same edit in many files.\n- Use shell tools when one known file is enough: reading or editing a file whose path you already have, non-source files, a quick check in one directory.\n- ${ackSyntax}`
+        : engine.kind === "ack"
+        ? `- Use only the ack CLI to discover and read ${sourceLanguage} source. Direct Goldeneye MCP tools are not available in this lane.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Do not inspect compiled artifacts through javap, bytecode, or disassembly tools. Use ack get/search/grep/callers/callees/impls/arch instead. git status, git diff, edits, and build/test commands remain allowed.\n- ack takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). ack get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). ack grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. ack search falls back to text when no symbol matches. ack callers adds text references to call-graph edges. ack replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express.${ackEditCommands}`
         : `- Use only the assigned ${engine.id} MCP tools to discover and read ${sourceLanguage} source.\n- Do not inspect ${sourceExtensions} source through shell/text-search commands or direct file-read tools. Commands such as rg, grep, Select-String, Get-Content, cat, head, tail, sed, and git show are protocol violations. Use the assigned MCP's semantic search and source tools instead. git status, git diff, edits, and build/test commands remain allowed.`;
   const cacheInstructions =
     cacheMode === "none"
@@ -1211,8 +1258,10 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
           : "- Cache condition: warm. ack init completed before this turn; use cwd-based ACK project resolution. Do not set ACK_PROJECT."
         : `- Cache condition: ${cacheMode}. Do not make assumptions about whether the repository is indexed; check through MCP when useful.`;
   const ackInstruction =
-    engine.kind === "ack"
-      ? "- Use one ACK command path per discovery need; stop discovery once enough evidence exists."
+    engine.kind === "ack" && engine.shellDiscovery
+      ? "- Every tool call costs a full turn: answer each need in one call, batch names in one ack get, and chain several commands in one shell call. Name ack targets directly instead of searching for identifiers. Stop discovery once enough evidence exists; do not run ack status or ack --help."
+      : engine.kind === "ack"
+      ? "- Answer each discovery need with one ACK call: name targets directly instead of searching for identifiers, batch names, and chain several ack commands in one shell call. Stop discovery once enough evidence exists; do not run ack status or ack --help."
       : "- Do not invoke the ack CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}
 
@@ -1229,7 +1278,18 @@ ${cacheInstructions}
 Task:
 ${taskPrompt}
 `.trimStart();
-  return applyAgentVerificationPolicy(prompt, skipAgentVerification);
+  const withPolicy = applyAgentVerificationPolicy(prompt, skipAgentVerification);
+  if (!skipAgentVerification || engine.kind !== "ack") return withPolicy;
+  // A parse of the changed files runs no project code and is part of the ACK
+  // product, so the ACK lanes may use it. Naming it as an exception after a
+  // rule that forbids "check" commands was not enough: in 11 of 12 runs the
+  // agent followed the rule. The rule itself now carries the exception.
+  const forbidden = "- Do not run build, compile, test, lint, check, verification, or validation commands.";
+  if (!withPolicy.includes(forbidden)) fail("one-shot policy text changed; update the ACK lane wording");
+  return withPolicy.replace(
+    forbidden,
+    "- Do not run build, compile, test, lint, verification, or validation commands. The one exception is ack check: it only parses the files you changed and runs no project code. Run it once after your last edit, in the same shell call as git status, and fix what it reports.",
+  );
 }
 
 function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
@@ -1263,6 +1323,16 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
         GOLDENEYE_PROJECT_ROOT: worktree,
         ...(engine.env ?? {}),
       },
+      // Only the agent's own calls (and the pre-warm) go through the daemon.
+      agentEnvironment: ackLane.daemon
+        ? {
+            ACK_BACKEND: "goldeneye",
+            ACK_GOLDENEYE_COMMAND: resolveExecutable(engine.backend_command),
+            ACK_DAEMON: "auto",
+            ACK_DAEMON_IDLE: "30m",
+          }
+        : {},
+      shellDiscovery: ackLane.discovery === "hybrid",
       goldeneyeDb,
       id: engine.id,
       kind: engine.kind,
@@ -1319,6 +1389,26 @@ function engineRuntime(engine, worktree, cacheDir, repoName, allowedRoot) {
   };
 }
 
+/** Starts the lane's ACK daemon and loads the project graph; returns the time it took. */
+function prewarmAckDaemon(engine, worktree) {
+  const started = performance.now();
+  const result = spawnSync(engine.command, [...engine.args, "status"], {
+    cwd: worktree,
+    encoding: "utf8",
+    env: processEnvironment(engine, engine.agentEnvironment),
+    shell: false,
+    timeout: 300_000,
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new Error(`ACK daemon pre-warm failed: ${tail(result.stderr || result.stdout)}`);
+  }
+  if (/daemon/i.test(result.stderr ?? "")) {
+    throw new Error(`ACK daemon pre-warm fell back: ${tail(result.stderr)}`);
+  }
+  return performance.now() - started;
+}
+
 function prepareEngine(engine, timeoutMs) {
   if (engine.kind !== "serena") return;
   mkdirSync(engine.serenaHome, { recursive: true });
@@ -1362,6 +1452,7 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   args.push(...codexSandboxArgs({
     fullAccess: config.codex_full_access === true,
     worktree,
+    codeModeHost: config.codex_code_mode_host,
   }));
   args.push("-C", worktree);
   if (engine.kind !== "vanilla" && engine.kind !== "ack") {
@@ -1394,7 +1485,10 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   const measured = spawnWithTimer(() =>
     spawn(codex.command, [...codex.prefixArgs, ...args], {
       cwd: worktree,
-      env: processEnvironment(engine, { AGENT_BENCH_CACHE_MODE: cacheMode }),
+      env: processEnvironment(engine, {
+        ...(engine.agentEnvironment ?? {}),
+        AGENT_BENCH_CACHE_MODE: cacheMode,
+      }),
       shell: false,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1409,9 +1503,11 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   });
   child.stderr.pipe(stderrStream);
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  let lastAgentMessage = null;
   lines.on("line", (line) => {
     jsonlStream.write(`${line}\n`);
     accumulateCodexLine(telemetry, line);
+    lastAgentMessage = agentMessageText(line) ?? lastAgentMessage;
     if (isAgentProtocolCompletionLine(line)) completion.markProtocolCompleted();
   });
   child.stdin.end(prompt);
@@ -1419,6 +1515,11 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   const outcome = await completion.outcome;
   lines.close();
   await Promise.all([closeWritableStream(jsonlStream), closeWritableStream(stderrStream)]);
+  // Codex writes `-o` after the turn completes and can be stopped first; the
+  // same text is already in the event stream.
+  if (!existsSync(finalMessagePath) && lastAgentMessage !== null) {
+    writeFileSync(finalMessagePath, lastAgentMessage);
+  }
   return {
     duration_ms: outcome.durationMs,
     error: outcome.error ? errorMessage(outcome.error) : null,
@@ -1629,8 +1730,19 @@ function runGrader(task, tokens) {
   };
 }
 
+// Puts the worktree in the uncommitted state a "dirty" task starts from. It runs
+// after indexing, so a code-memory engine faces a tree that changed under it.
+// Returns the paths left dirty, as `git status` names them.
+function applyOverlay(worktree, patchFile) {
+  runChecked("git", ["-C", worktree, "apply", "--whitespace=nowarn", patchFile]);
+  return git(worktree, ["status", "--short", "--untracked-files=all"])
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+}
+
 function readPatchStats(worktree) {
-  const output = git(worktree, ["diff", "--numstat"]);
+  const output = git(worktree, ["diff", "--numstat", "HEAD"]);
   let files = 0;
   let insertions = 0;
   let deletions = 0;
@@ -2007,6 +2119,7 @@ function runHashes({ candidate, configPath: resolvedConfigPath, run, runDir, sna
       : null,
     config_sha256: hashFile(resolvedConfigPath),
     task_sha256: hashFile(run.task.prompt_file),
+    overlay_sha256: run.task.overlay ? hashFile(run.task.overlay.patch_file) : null,
     grader_sha256: graderPath ? hashFile(graderPath) : null,
     candidate_provenance_sha256: candidate ? hashJson(candidate) : null,
     snapshot_manifest_sha256: snapshot?.manifest_sha256 ?? null,
@@ -2031,7 +2144,7 @@ function analyzeDiscoveryTrace(path) {
     ) {
       continue;
     }
-    const action = item.command.match(/\back\s+(status|search|symbol|inspect|get|callers|callees|arch)\b/i)?.[1]
+    const action = item.command.match(/\back\s+(status|search|grep|symbol|inspect|get|outline|callers|refs|callees|impls|subtypes|arch)\b/i)?.[1]
       ?.toLowerCase() ?? "other";
     const output = String(item.aggregated_output ?? "");
     commands.push({

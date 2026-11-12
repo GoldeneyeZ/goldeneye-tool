@@ -22,7 +22,45 @@ import {
   snapshotAckEnvironment,
   summarizeRuns,
   tomlInlineTable,
+  wasteSummary,
 } from "./core.mjs";
+
+test("waste counters come from completed commands and patches only", () => {
+  const command = (text, exitCode, output) => ({
+    type: "item.completed",
+    item: { type: "command_execution", command: text, exit_code: exitCode, aggregated_output: output },
+  });
+  const lines = [
+    { ...command("ack grep native src", 0, ""), type: "item.started" },
+    command("ack grep native src", 0, "src/a.ts\n  1\n# ... 86 more matches not shown; give paths\n"),
+    command('ack grep "a|[\\"\']" src', 1, ""),
+    command("ack callers native", 1, "# ambiguous: native matches 13 symbols\n"),
+    command("ack get Nope.x; ack replace 'a' 'b' src", 0, "# not found: Nope.x\n# no match: a in src\n"),
+    command("ack get Billing.charge --tests; ack check; git status --short", 0, "# syntax check: 3 changed files parse\n"),
+    command("ack grep native src", 0, "src/a.ts\n"),
+    { type: "item.completed", item: { type: "file_change", changes: [{ path: "a.ts" }] } },
+    { type: "item.completed", item: { type: "agent_message", text: "# not found: in prose" } },
+  ];
+
+  const telemetry = parseCodexJsonl(lines.map((line) => JSON.stringify(line)).join("\n"));
+
+  assert.deepEqual(wasteSummary(telemetry), {
+    failed_commands: 2,
+    silent_failures: 1,
+    cut_outputs: 1,
+    ambiguous_answers: 1,
+    not_found_answers: 1,
+    no_match_answers: 1,
+    patches: 1,
+    ack_replace_calls: 1,
+    ack_check_calls: 1,
+    ack_get_tests_calls: 1,
+    output_bytes: lines
+      .filter((line) => line.type === "item.completed" && line.item.type === "command_execution")
+      .reduce((sum, line) => sum + Buffer.byteLength(line.item.aggregated_output), 0),
+    repeated_commands: 1,
+  });
+});
 
 const BENCH_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(BENCH_ROOT, "../..");
@@ -34,9 +72,25 @@ test("codexSandboxArgs grants full access without bypass process-tree mode", () 
     "danger-full-access",
     "-c",
     'approval_policy="never"',
-    "-c",
-    "features.code_mode_host=false",
   ]);
+});
+
+test("codexSandboxArgs disables the Code Mode host only on request", () => {
+  const hostFlag = ["-c", "features.code_mode_host=false"];
+
+  assert.deepEqual(
+    codexSandboxArgs({ fullAccess: true, worktree: "D:\\repo", codeModeHost: false }).slice(-2),
+    hostFlag,
+  );
+  assert.deepEqual(
+    codexSandboxArgs({ fullAccess: false, worktree: "D:\\repo", codeModeHost: false }).slice(-2),
+    hostFlag,
+  );
+  assert.ok(
+    !codexSandboxArgs({ fullAccess: false, worktree: "D:\\repo", codeModeHost: true }).includes(
+      hostFlag[1],
+    ),
+  );
 });
 
 test("sanitizeId creates stable filesystem-safe identifiers", () => {
@@ -193,6 +247,38 @@ test("direct Java, TypeScript, and Rust reads are protocol violations for MCP la
     false,
   );
 
+  // ACK's own grep is the assigned surface, also behind the pwsh wrapper and
+  // with a regex alternation or a read-like word in its arguments.
+  assert.equal(isDirectSourceReadCommand("ack grep truncate StringUtils.java -C 3"), false);
+  assert.equal(
+    isDirectSourceReadCommand(
+      `"C:\\\\pwsh.exe" -Command "ack get Foo.java; ack grep \\"type|more\\" src/Foo.java -C 2"`,
+    ),
+    false,
+  );
+  assert.equal(
+    isDirectSourceReadCommand(`"C:\\\\pwsh.exe" -Command "ack get Foo; rg -n type src/Foo.java"`),
+    true,
+  );
+  // Quotes nested in the regex split the first call at a `|`; every piece is still `ack grep`.
+  assert.equal(
+    isDirectSourceReadCommand(
+      `"C:\\\\pwsh.exe" -Command "ack grep 'lib/native|[\\"'\\"']\\.\\.?/lib/native[\\"'\\"']' src -C 1; ack grep '\\bnative\\.(readFile|git)' src -C 1 --limit 200; ack grep 'nativeBridge' src"`,
+    ),
+    false,
+  );
+  assert.equal(
+    isDirectSourceReadCommand(`"C:\\\\pwsh.exe" -Command 'ack get Foo && Get-Content src/Foo.java'`),
+    true,
+  );
+  // ACK's bulk edit is the assigned surface too, whatever words its pattern holds.
+  assert.equal(
+    isDirectSourceReadCommand(
+      `"C:\\\\pwsh.exe" -Command "ack replace 'type\\(|cat\\(' 'kind(' src/Foo.java tests; ack grep kind src -C 0"`,
+    ),
+    false,
+  );
+
   const telemetry = parseCodexJsonl(
     JSON.stringify({
       type: "item.completed",
@@ -235,6 +321,8 @@ test("ACK lanes allow ACK commands while preserving direct source-read violation
     protocolViolationsForEngine(telemetry.protocol_violations, "ack").map((item) => item.type),
     ["direct_source_read"],
   );
+  // The hybrid lane is allowed both surfaces.
+  assert.deepEqual(protocolViolationsForEngine(telemetry.protocol_violations, "hybrid"), []);
 });
 
 test("snapshot ACK initialization disables daemon reuse without dropping engine env", () => {
@@ -404,6 +492,34 @@ test("loadConfig normalizes and validates ready snapshot paths", () => {
     config.ready_snapshot.live_cache = config.ready_snapshot.allowed_cache_root;
     writeFileSync(configPath, JSON.stringify(config));
     assert.throws(() => loadConfig(configPath), /live cache must be a strict descendant/);
+  } finally {
+    rmSync(configPath, { force: true });
+  }
+});
+
+test("loadConfig resolves a task overlay patch and rejects one without a file", () => {
+  const configPath = join(BENCH_ROOT, `overlay-${process.pid}.json`);
+  const config = {
+    repo: "../spring-framework",
+    output: "out/report.json",
+    tasks: [
+      {
+        id: "task",
+        prompt_file: "task.md",
+        grader: { command: "grader.mjs" },
+        overlay: { patch_file: "./overlays/task.patch" },
+      },
+    ],
+    engines: [{ id: "vanilla", kind: "vanilla" }],
+  };
+  try {
+    writeFileSync(configPath, JSON.stringify(config));
+    const { config: normalized } = loadConfig(configPath);
+    assert.equal(normalized.tasks[0].overlay.patch_file, resolve(BENCH_ROOT, "overlays/task.patch"));
+
+    config.tasks[0].overlay = {};
+    writeFileSync(configPath, JSON.stringify(config));
+    assert.throws(() => loadConfig(configPath), /overlay needs a patch_file/);
   } finally {
     rmSync(configPath, { force: true });
   }
