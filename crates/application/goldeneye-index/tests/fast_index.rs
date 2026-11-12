@@ -780,3 +780,53 @@ fn go_files_in_one_directory_share_a_directory_qualified_module() {
             .any(|edge| edge.target == test_main.id)
     );
 }
+
+#[test]
+fn files_sharing_a_scope_may_define_the_same_name() {
+    let temp = TempDir::new().expect("temp repo");
+    // One Go package with platform variants of a type and a function.
+    write(
+        temp.path(),
+        "net/conn_unix.go",
+        "package net\ntype Conn struct {}\nfunc Dial() {}\n",
+    );
+    write(
+        temp.path(),
+        "net/conn_windows.go",
+        "package net\ntype Conn struct {\n\thandle int\n\tname string\n}\nfunc Dial() {\n\tprintln(\"dial\")\n}\n",
+    );
+    // The same stem in two languages: both files own the module `util`.
+    write(temp.path(), "web/util.js", "class Box {}\n");
+    write(temp.path(), "web/util.ts", "class Box {\n  size = 1;\n}\n");
+    let mut index = service(IndexOptions::default());
+
+    let result = index
+        .index_repository(temp.path())
+        .expect("index files that share a scope");
+    let prefix = result.project.id.as_str();
+    let nodes = index
+        .repository()
+        .list_nodes(&result.project.id)
+        .expect("project nodes");
+
+    for (qualified_name, path) in [
+        (format!("{prefix}.net.Conn"), "net/conn_windows.go"),
+        (format!("{prefix}.net.Dial"), "net/conn_windows.go"),
+        (format!("{prefix}.web.util.Box"), "web/util.ts"),
+    ] {
+        let matching = nodes
+            .iter()
+            .filter(|node| node.qualified_name.as_str() == qualified_name)
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 1, "{qualified_name}");
+        // Of two definitions the longer one is kept.
+        assert_eq!(
+            matching[0]
+                .file_path
+                .as_ref()
+                .map(ProjectRelativePath::as_str),
+            Some(path),
+            "{qualified_name}"
+        );
+    }
+}

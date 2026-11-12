@@ -1,7 +1,7 @@
 use super::{
-    Arc, BTreeMap, BTreeSet, ExtractedFile, FileGraph, FileRecord, IndexError, IndexRepository,
-    IndexService, ProjectGraph, ProjectRecord, ProjectRelativePath, branch_node,
-    deduplicate_shared_modules, project_contains_file, project_has_branch, project_node,
+    Arc, BTreeMap, ExtractedFile, FileGraph, FileRecord, IndexError, IndexRepository, IndexService,
+    ProjectGraph, ProjectRecord, ProjectRelativePath, branch_node, merge_duplicate_nodes,
+    project_contains_file, project_has_branch, project_node, retain_valid_edges,
 };
 
 impl<R> IndexService<R>
@@ -48,12 +48,8 @@ where
             nodes.extend(graph.nodes);
             edges.extend(graph.edges);
         }
-        deduplicate_shared_modules(&mut nodes);
-        let node_ids = nodes
-            .iter()
-            .map(|node| node.id.clone())
-            .collect::<BTreeSet<_>>();
-        edges.retain(|edge| node_ids.contains(&edge.source) && node_ids.contains(&edge.target));
+        merge_duplicate_nodes(&mut nodes);
+        retain_valid_edges(&nodes, &mut edges);
         crate::hybrid::resolve_project(
             &project.id,
             &nodes,
@@ -70,6 +66,9 @@ where
             &pending_imports,
             &source_files,
         )?;
+        // Resolution and enrichment add edges; one whose endpoint was merged
+        // away or that repeats an existing identity must not reach the store.
+        retain_valid_edges(&nodes, &mut edges);
         Ok((files, nodes, edges))
     }
 }

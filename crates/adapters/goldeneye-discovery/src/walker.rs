@@ -11,6 +11,14 @@ use crate::{
 
 pub const MAX_IGNORED_DETAILS: usize = 500;
 
+/// Largest data document that is indexed. Above this size a JSON, YAML, TOML,
+/// XML or CSV file is a dataset, a fixture or generated output: each of its
+/// keys would become a graph node, which costs minutes of indexing and
+/// gigabytes of storage without helping anyone navigate code.
+pub const MAX_DATA_FILE_BYTES: u64 = 256 * 1024;
+
+const DATA_LANGUAGES: [&str; 6] = ["csv", "json", "json5", "toml", "xml", "yaml"];
+
 /// Discovers supported source files below a repository root.
 ///
 /// # Errors
@@ -170,6 +178,10 @@ impl<'a> RepositoryWalker<'a> {
             self.record_ignored(relative, IgnoreReason::UnsupportedLanguage, None);
             return;
         };
+        if byte_len > MAX_DATA_FILE_BYTES && DATA_LANGUAGES.contains(&language.as_str()) {
+            self.record_ignored(relative, IgnoreReason::Oversized, None);
+            return;
+        }
         let absolute_path = match fs::canonicalize(absolute) {
             Ok(path) => path,
             Err(error) => {

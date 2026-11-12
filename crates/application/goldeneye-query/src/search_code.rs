@@ -17,11 +17,18 @@ const FULL_SOURCE_LINES: u64 = 60;
 const FULL_SOURCE_LEAD: u64 = 5;
 const SLOW_SEARCH_MS: u64 = 5_000;
 
+pub(crate) fn validate(request: &SearchCodeRequest) -> Result<(), QueryError> {
+    pipeline::validate_request(request)
+}
+
+/// `node_degrees` comes from the engine's cached project graph; rebuilding it
+/// from every edge on each call used to dominate search latency.
 pub(crate) fn execute(
     repository: &dyn QueryRepository,
     request: &SearchCodeRequest,
+    node_degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<SearchCodeResult, QueryError> {
-    pipeline::execute(repository, request)
+    pipeline::execute(repository, request, node_degrees)
 }
 
 struct ClassifiedMatch {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use goldeneye_discovery::{
     DiscoveryError, DiscoveryOptions, DiscoveryReport, IgnoreReason, IndexMode,
-    MAX_IGNORED_DETAILS, discover,
+    MAX_DATA_FILE_BYTES, MAX_IGNORED_DETAILS, discover,
 };
 use tempfile::TempDir;
 
@@ -139,6 +139,33 @@ fn discovery_applies_inclusive_size_cap_from_metadata() {
     assert_eq!(discovered_paths(&report), [PathBuf::from("exact.rs")]);
     assert_eq!(report.files[0].byte_len, 5);
     assert!(has_ignored(&report, "large.rs", IgnoreReason::Oversized));
+}
+
+#[test]
+fn discovery_skips_data_documents_above_the_data_size_cap() {
+    let cap = usize::try_from(MAX_DATA_FILE_BYTES).expect("cap fits in usize");
+    let dataset = format!("[{}]", "1,".repeat(cap / 2));
+    let source = format!("// {}\nfn main() {{}}\n", "x".repeat(cap));
+    let repo = fixture(&[
+        ("config.json", "{\"name\": \"app\"}"),
+        ("data/episodes.json", &dataset),
+        ("src/generated.rs", &source),
+    ]);
+
+    let report = discover(repo.path(), &DiscoveryOptions::default()).unwrap();
+
+    assert_eq!(
+        discovered_paths(&report),
+        [
+            PathBuf::from("config.json"),
+            PathBuf::from("src/generated.rs")
+        ]
+    );
+    assert!(has_ignored(
+        &report,
+        "data/episodes.json",
+        IgnoreReason::Oversized
+    ));
 }
 
 #[test]

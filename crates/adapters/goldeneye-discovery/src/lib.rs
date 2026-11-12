@@ -15,7 +15,7 @@ pub use ignore_rules::IgnoreRules;
 pub use language::{LanguageRegistry, LanguageSpec};
 pub use policy::{directory_policy, file_policy};
 pub use port::FileSystemDiscovery;
-pub use walker::{MAX_IGNORED_DETAILS, discover};
+pub use walker::{MAX_DATA_FILE_BYTES, MAX_IGNORED_DETAILS, discover};
 
 /// Shared tool-neutral language identifier.
 ///

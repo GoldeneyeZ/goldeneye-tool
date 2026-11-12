@@ -272,7 +272,11 @@ impl QueryEngine {
     ///
     /// Returns a query error for invalid patterns, missing projects, unsafe paths, or source I/O.
     pub fn search_code(&self, request: &SearchCodeRequest) -> Result<SearchCodeResult, QueryError> {
-        crate::search_code::execute(self.repository.as_ref(), request)
+        // Request shape is rejected before the project graph is loaded, so an
+        // invalid request never pays for (or is masked by) a graph load.
+        crate::search_code::validate(request)?;
+        let graph = self.cached_graph(&request.project)?;
+        crate::search_code::execute(self.repository.as_ref(), request, &graph.degrees)
     }
 
     /// Ranks callable/type nodes by the minimum cosine across semantic keywords.

@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    fs, io,
+    num::NonZeroUsize,
+    panic,
     path::PathBuf,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -14,21 +17,21 @@ use super::{
     build_hit, compile_content_pattern, compile_file_pattern, compile_optional_pattern,
     directory_distribution, file_matches, tightest_node, valid_search_path_argument,
 };
-use crate::{
-    engine::degrees,
-    types::{
-        QueryError, RawCodeMatch, SearchCodeFilesResult, SearchCodeMatchesResult, SearchCodeMode,
-        SearchCodeRequest, SearchCodeResult,
-    },
+use crate::types::{
+    QueryError, RawCodeMatch, SearchCodeFilesResult, SearchCodeMatchesResult, SearchCodeMode,
+    SearchCodeRequest, SearchCodeResult,
 };
 
-struct PreparedSearch {
+const MAX_SCAN_WORKERS: usize = 8;
+const MIN_FILES_PER_WORKER: usize = 64;
+
+struct PreparedSearch<'a> {
     pattern: Regex,
     path_filter: Option<Regex>,
     file_pattern: Option<Regex>,
     root: PathBuf,
     canonical_root: PathBuf,
-    node_degrees: BTreeMap<NodeId, (usize, usize)>,
+    node_degrees: &'a BTreeMap<NodeId, (usize, usize)>,
 }
 
 #[derive(Default)]
@@ -42,10 +45,11 @@ struct SearchScan {
 pub(super) fn execute(
     repository: &dyn QueryRepository,
     request: &SearchCodeRequest,
+    node_degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<SearchCodeResult, QueryError> {
     let started = Instant::now();
     validate_request(request)?;
-    let prepared = prepare_search(repository, request)?;
+    let prepared = prepare_search(repository, request, node_degrees)?;
     let scan = scan_repository(repository, request, &prepared)?;
     let SearchScan {
         classified,
@@ -67,7 +71,7 @@ pub(super) fn execute(
     ))
 }
 
-fn validate_request(request: &SearchCodeRequest) -> Result<(), QueryError> {
+pub(super) fn validate_request(request: &SearchCodeRequest) -> Result<(), QueryError> {
     if request.pattern.is_empty() {
         return Err(QueryError::EmptySearchPattern);
     }
@@ -80,10 +84,11 @@ fn validate_request(request: &SearchCodeRequest) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn prepare_search(
+fn prepare_search<'a>(
     repository: &dyn QueryRepository,
     request: &SearchCodeRequest,
-) -> Result<PreparedSearch, QueryError> {
+    node_degrees: &'a BTreeMap<NodeId, (usize, usize)>,
+) -> Result<PreparedSearch<'a>, QueryError> {
     let project = repository
         .get_project(&request.project)?
         .ok_or_else(|| QueryError::ProjectNotFound(request.project.clone()))?;
@@ -103,7 +108,6 @@ fn prepare_search(
         path: root.clone(),
         source,
     })?;
-    let node_degrees = degrees(&repository.list_edges(&request.project)?);
     Ok(PreparedSearch {
         pattern,
         path_filter,
@@ -117,33 +121,97 @@ fn prepare_search(
 fn scan_repository(
     repository: &dyn QueryRepository,
     request: &SearchCodeRequest,
-    prepared: &PreparedSearch,
+    prepared: &PreparedSearch<'_>,
 ) -> Result<SearchScan, QueryError> {
+    let files = repository.list_files(&request.project)?;
+    let selected = files
+        .iter()
+        .filter(|file| file_selected(prepared, file.id.path.as_str()))
+        .collect::<Vec<_>>();
+
+    // Reading and matching is the bulk of the work and touches no shared
+    // state, so it fans out. Graph lookups stay on this thread, in file
+    // order, and only for the few files that actually contain a match.
     let mut scan = SearchScan::default();
-    for file in repository.list_files(&request.project)? {
-        scan_file(repository, prepared, &file, &mut scan)?;
+    for (file, matched) in selected.iter().zip(grep_files(prepared, &selected)) {
+        let Some(source) = matched? else {
+            continue;
+        };
+        let relative = file.id.path.as_str();
+        let file_nodes = repository.nodes_for_file(&file.id)?;
+        classify_source(relative, &source, &file_nodes, prepared, &mut scan);
+        scan.sources.insert(relative.to_owned(), source);
     }
     Ok(scan)
 }
 
-fn scan_file(
-    repository: &dyn QueryRepository,
-    prepared: &PreparedSearch,
-    file: &FileRecord,
-    scan: &mut SearchScan,
-) -> Result<(), QueryError> {
-    let relative = file.id.path.as_str();
-    if !file_selected(prepared, relative) {
-        return Ok(());
+type GrepOutcome = Result<Option<String>, QueryError>;
+
+fn grep_files(prepared: &PreparedSearch<'_>, files: &[&FileRecord]) -> Vec<GrepOutcome> {
+    let grep_all = |part: &[&FileRecord]| {
+        part.iter()
+            .map(|file| grep_file(prepared, file.id.path.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let workers = thread::available_parallelism()
+        .map_or(1, NonZeroUsize::get)
+        .min(MAX_SCAN_WORKERS)
+        .min(files.len() / MIN_FILES_PER_WORKER);
+    if workers <= 1 {
+        return grep_all(files);
     }
-    let source = read_project_source(prepared, relative)?;
-    let file_nodes = repository.nodes_for_file(&file.id)?;
-    classify_source(relative, &source, &file_nodes, prepared, scan);
-    scan.sources.insert(relative.to_owned(), source);
-    Ok(())
+
+    let chunk_size = files.len().div_ceil(workers);
+    thread::scope(|scope| {
+        let handles = files
+            .chunks(chunk_size)
+            .map(|part| scope.spawn(move || grep_all(part)))
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|payload| panic::resume_unwind(payload))
+            })
+            .collect()
+    })
 }
 
-fn file_selected(prepared: &PreparedSearch, relative: &str) -> bool {
+/// Returns the file's source when at least one of its lines matches.
+///
+/// A file that disappeared after indexing is skipped rather than failing the
+/// whole search: the index is allowed to lag behind the working tree.
+fn grep_file(prepared: &PreparedSearch<'_>, relative: &str) -> GrepOutcome {
+    let absolute = prepared.root.join(relative);
+    let bytes = match fs::read(&absolute) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(QueryError::SourceRead {
+                path: absolute,
+                source,
+            });
+        }
+    };
+    let source = String::from_utf8_lossy(&bytes).into_owned();
+    if !source.lines().any(|line| prepared.pattern.is_match(line)) {
+        return Ok(None);
+    }
+
+    // Containment is verified before any match is reported, so a link that
+    // escapes the project can never surface content or even match counts.
+    let canonical = fs::canonicalize(&absolute).map_err(|source| QueryError::SourceRead {
+        path: absolute,
+        source,
+    })?;
+    if !canonical.starts_with(&prepared.canonical_root) {
+        return Err(QueryError::SourceOutsideProject { path: canonical });
+    }
+    Ok(Some(source))
+}
+
+fn file_selected(prepared: &PreparedSearch<'_>, relative: &str) -> bool {
     prepared
         .path_filter
         .as_ref()
@@ -154,27 +222,11 @@ fn file_selected(prepared: &PreparedSearch, relative: &str) -> bool {
             .is_none_or(|filter| file_matches(filter, relative))
 }
 
-fn read_project_source(prepared: &PreparedSearch, relative: &str) -> Result<String, QueryError> {
-    let absolute = prepared.root.join(relative);
-    let canonical = fs::canonicalize(&absolute).map_err(|source| QueryError::SourceRead {
-        path: absolute,
-        source,
-    })?;
-    if !canonical.starts_with(&prepared.canonical_root) {
-        return Err(QueryError::SourceOutsideProject { path: canonical });
-    }
-    let bytes = fs::read(&canonical).map_err(|source| QueryError::SourceRead {
-        path: canonical,
-        source,
-    })?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
 fn classify_source(
     relative: &str,
     source: &str,
     file_nodes: &[GraphNode],
-    prepared: &PreparedSearch,
+    prepared: &PreparedSearch<'_>,
     scan: &mut SearchScan,
 ) {
     for (line_index, line) in source.lines().enumerate() {
@@ -192,14 +244,14 @@ fn record_match(
     line: &str,
     line_number: u64,
     file_nodes: &[GraphNode],
-    prepared: &PreparedSearch,
+    prepared: &PreparedSearch<'_>,
     scan: &mut SearchScan,
 ) {
     if let Some(node) = tightest_node(file_nodes, line_number) {
         let entry = scan
             .classified
             .entry(node.id.clone())
-            .or_insert_with(|| ClassifiedMatch::new(node.clone(), &prepared.node_degrees));
+            .or_insert_with(|| ClassifiedMatch::new(node.clone(), prepared.node_degrees));
         if entry.match_lines.len() < MAX_MATCH_LINES {
             entry.match_lines.push(line_number);
         }
