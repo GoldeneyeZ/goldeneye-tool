@@ -1,0 +1,406 @@
+{
+  "corpus": "spring-framework (core, beans, context)",
+  "lanes": [
+    "ack",
+    "vanilla"
+  ],
+  "env": {
+    "GOLDENEYE_GRAMMAR_PACK": "full",
+    "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java;spring-core/src/test/java;spring-beans/src/main/java;spring-beans/src/test/java;spring-context/src/main/java;spring-context/src/test/java"
+  },
+  "placeholders": {
+    "V": "${P}.spring_context.src.main.java.org.springframework.validation",
+    "B": "${P}.spring_beans.src.main.java.org.springframework.beans",
+    "C": "${P}.spring_core.src.main.java.org.springframework.core",
+    "VDIR": "spring-context/src/main/java/org/springframework/validation"
+  },
+  "scenarios": [
+    {
+      "id": "read-method-known-class",
+      "category": "read-symbol",
+      "need": "Body of DefaultBindingErrorProcessor.processPropertyAccessException",
+      "evidence": [
+        "getArgumentsForBindError(bindingResult.getObjectName(), field)",
+        "ex.getValue()"
+      ],
+      "ack": [
+        "ack get 'org.springframework.validation.DefaultBindingErrorProcessor.processPropertyAccessException'",
+        {
+          "cmd": "ack search 'processPropertyAccessException' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${V}.DefaultBindingErrorProcessor.DefaultBindingErrorProcessor.processPropertyAccessException'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 30 'public void processPropertyAccessException' spring-context/src/main/java"
+      ]
+    },
+    {
+      "id": "read-method-unknown-location",
+      "category": "read-symbol",
+      "need": "How DefaultMessageCodesResolver builds codes for a field (4-argument overload)",
+      "evidence": [
+        "buildFieldList(field, fieldList)",
+        "addCodes(codeList, errorCode, objectName, fieldList)"
+      ],
+      "ack": [
+        "ack search 'resolveMessageCodes' --snippets 5",
+        "ack symbol 'resolveMessageCodes.*' --qn '.*DefaultMessageCodesResolver.*' --limit 10",
+        "ack get '${V}.DefaultMessageCodesResolver.DefaultMessageCodesResolver.resolveMessageCodes#2'"
+      ],
+      "vanilla": [
+        "rg -n 'String\\[\\] resolveMessageCodes\\(' --glob '*.java' spring-context/src/main",
+        "rg -n -A 16 'public String\\[\\] resolveMessageCodes\\(String errorCode, String objectName, String field' ${VDIR}/DefaultMessageCodesResolver.java"
+      ]
+    },
+    {
+      "id": "read-nested-class-method",
+      "category": "read-symbol",
+      "need": "Body of BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor",
+      "evidence": [
+        "return this.pd.getTypeDescriptor();"
+      ],
+      "ack": [
+        "ack get 'org.springframework.beans.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
+        {
+          "cmd": "ack search 'toTypeDescriptor' --limit 10",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${B}.BeanWrapperImpl.BeanWrapperImpl.BeanPropertyHandler.toTypeDescriptor'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 6 'TypeDescriptor toTypeDescriptor\\(\\)' spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java"
+      ]
+    },
+    {
+      "id": "read-all-overloads",
+      "category": "read-symbol",
+      "need": "All three BindException.rejectValue overloads",
+      "evidence": [
+        "this.bindingResult.rejectValue(field, errorCode);",
+        "this.bindingResult.rejectValue(field, errorCode, defaultMessage);",
+        "this.bindingResult.rejectValue(field, errorCode, errorArgs, defaultMessage);"
+      ],
+      "ack": [
+        "ack get 'org.springframework.validation.BindException.rejectValue'",
+        {
+          "cmd": "ack symbol 'rejectValue.*' --qn '.*BindException.*' --limit 10",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${V}.BindException.BindException.rejectValue' '${V}.BindException.BindException.rejectValue#2' '${V}.BindException.BindException.rejectValue#3'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 6 'public void rejectValue\\(' ${VDIR}/BindException.java"
+      ]
+    },
+    {
+      "id": "read-batch-related-methods",
+      "category": "read-batch",
+      "need": "Four related methods across three classes in one go",
+      "evidence": [
+        "FieldError fe = new FieldError(getObjectName(), fixedField, newVal, false",
+        "return getPropertyAccessor().getPropertyValue(field);",
+        "PropertyEditor customEditor = getCustomEditor(fixedField);",
+        "return this.bindingResult;"
+      ],
+      "ack": [
+        "ack get 'org.springframework.validation.AbstractBindingResult.rejectValue' 'org.springframework.validation.AbstractPropertyBindingResult.getActualFieldValue' 'org.springframework.validation.AbstractPropertyBindingResult.formatFieldValue' 'org.springframework.validation.DataBinder.getInternalBindingResult'",
+        {
+          "cmd": "ack search 'rejectValue|getActualFieldValue|formatFieldValue|getInternalBindingResult' --limit 20",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${V}.AbstractBindingResult.AbstractBindingResult.rejectValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.getActualFieldValue' '${V}.AbstractPropertyBindingResult.AbstractPropertyBindingResult.formatFieldValue' '${V}.DataBinder.DataBinder.getInternalBindingResult'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 18 'public void rejectValue\\(|Object getActualFieldValue\\(|Object formatFieldValue\\(|BindingResult getInternalBindingResult\\(' ${VDIR}/AbstractBindingResult.java ${VDIR}/AbstractPropertyBindingResult.java ${VDIR}/DataBinder.java"
+      ]
+    },
+    {
+      "id": "class-outline-large",
+      "category": "outline",
+      "need": "Member overview of the 1500-line DataBinder class",
+      "evidence": [
+        "initDirectFieldAccess",
+        "setAllowedFields",
+        "doBind",
+        "getBindingResult",
+        "applyPropertyValues"
+      ],
+      "ack": [
+        "ack get 'org.springframework.validation.DataBinder'",
+        "ack inspect 'DataBinder'",
+        "ack symbol '.*' --qn '.*\\.validation\\.DataBinder\\.DataBinder\\.[^.]+$' --label Method --limit 120"
+      ],
+      "vanilla": [
+        "rg -n '^\\t(public|protected) [^=]*\\(' ${VDIR}/DataBinder.java"
+      ]
+    },
+    {
+      "id": "annotation-definition",
+      "category": "outline",
+      "need": "Attributes declared by the @AliasFor annotation",
+      "evidence": [
+        "String attribute() default",
+        "Class<? extends Annotation> annotation() default"
+      ],
+      "ack": [
+        "ack get 'org.springframework.core.annotation.AliasFor'",
+        "ack search 'AliasFor' --limit 5",
+        "ack get '${C}.annotation.AliasFor.AliasFor'"
+      ],
+      "vanilla": [
+        "Get-Content spring-core/src/main/java/org/springframework/core/annotation/AliasFor.java"
+      ]
+    },
+    {
+      "id": "callers-through-interface",
+      "category": "relations",
+      "need": "Every production call site of BindingResult.addError",
+      "evidence": [
+        "DefaultBindingErrorProcessor",
+        "SpringValidatorAdapter",
+        {
+          "regex": "DataBinder(\\.java|\\.DataBinder)"
+        }
+      ],
+      "ack": [
+        "ack callers 'org.springframework.validation.BindingResult.addError' --limit 40",
+        {
+          "cmd": "ack search 'addError' --limit 10",
+          "when": "after-failure"
+        },
+        "ack callers '${V}.BindingResult.BindingResult.addError' --limit 40",
+        "ack callers '${V}.AbstractBindingResult.AbstractBindingResult.addError' --limit 40",
+        "rg -n '\\baddError\\(' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
+      ],
+      "vanilla": [
+        "rg -n '\\baddError\\(' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
+      ]
+    },
+    {
+      "id": "callees-direct",
+      "category": "relations",
+      "need": "What DataBinder.doBind calls",
+      "evidence": [
+        "checkAllowedFields",
+        "checkRequiredFields",
+        "applyPropertyValues"
+      ],
+      "ack": [
+        "ack callees 'org.springframework.validation.DataBinder.doBind'",
+        {
+          "cmd": "ack search 'doBind' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack callees '${V}.DataBinder.DataBinder.doBind'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 8 'protected void doBind\\(' ${VDIR}/DataBinder.java"
+      ]
+    },
+    {
+      "id": "call-chain-multi-hop",
+      "category": "relations",
+      "need": "Call chain from DataBinder.bind down to the property accessor write",
+      "evidence": [
+        "doBind",
+        "applyPropertyValues",
+        "setPropertyValues"
+      ],
+      "ack": [
+        "ack callees 'org.springframework.validation.DataBinder.bind' --depth 3 --limit 60",
+        {
+          "cmd": "ack search 'bind' --qn '.*validation\\.DataBinder\\.DataBinder\\.bind$' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack callees '${V}.DataBinder.DataBinder.bind' --depth 3 --limit 60",
+          "when": "after-failure"
+        },
+        "ack get '${V}.DataBinder.DataBinder.applyPropertyValues'"
+      ],
+      "vanilla": [
+        "rg -n -A 10 'public void bind\\(PropertyValues' ${VDIR}/DataBinder.java",
+        "rg -n -A 16 'protected void doBind\\(|protected void applyPropertyValues\\(' ${VDIR}/DataBinder.java"
+      ]
+    },
+    {
+      "id": "tests-exercising-method",
+      "category": "relations",
+      "need": "Test classes that exercise DataBinder.initDirectFieldAccess",
+      "evidence": [
+        "DataBinderFieldAccessTests",
+        "DataBinderTests",
+        "DateTimeFormattingTests"
+      ],
+      "ack": [
+        "ack search 'initDirectFieldAccess' --file '.*src/test/.*' --limit 20",
+        "ack search 'initDirectFieldAccess' --limit 5",
+        "ack callers '${V}.DataBinder.DataBinder.initDirectFieldAccess' --limit 50"
+      ],
+      "vanilla": [
+        "rg -c 'initDirectFieldAccess' --glob '*Tests.java' spring-context spring-beans spring-core"
+      ]
+    },
+    {
+      "id": "interface-implementations",
+      "category": "hierarchy",
+      "need": "Classes implementing BindingErrorProcessor",
+      "evidence": [
+        "DefaultBindingErrorProcessor"
+      ],
+      "ack": [
+        "ack search 'implements BindingErrorProcessor' --limit 10",
+        "ack symbol '.*BindingErrorProcessor' --label Class --limit 10"
+      ],
+      "vanilla": [
+        "rg -n 'implements .*\\bBindingErrorProcessor\\b' --glob '*.java' spring-context spring-beans spring-core"
+      ]
+    },
+    {
+      "id": "subclasses",
+      "category": "hierarchy",
+      "need": "Direct subclasses of AbstractPropertyBindingResult",
+      "evidence": [
+        "BeanPropertyBindingResult",
+        "DirectFieldBindingResult"
+      ],
+      "ack": [
+        "ack search 'extends AbstractPropertyBindingResult' --limit 10",
+        "ack symbol '.*BindingResult' --label Class --limit 20"
+      ],
+      "vanilla": [
+        "rg -n 'extends AbstractPropertyBindingResult' --glob '*.java' spring-context spring-beans spring-core"
+      ]
+    },
+    {
+      "id": "string-literal",
+      "category": "text",
+      "need": "Where the \"typeMismatch\" error code constant is defined",
+      "evidence": [
+        "TypeMismatchException",
+        "ERROR_CODE"
+      ],
+      "ack": [
+        "ack search 'typeMismatch' --limit 10",
+        "rg -n '\"typeMismatch\"' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
+      ],
+      "vanilla": [
+        "rg -n '\"typeMismatch\"' --glob '*.java' spring-context/src/main spring-beans/src/main spring-core/src/main"
+      ]
+    },
+    {
+      "id": "constant-value",
+      "category": "text",
+      "need": "Value of DataBinder.DEFAULT_AUTO_GROW_COLLECTION_LIMIT",
+      "evidence": [
+        {
+          "regex": "DEFAULT_AUTO_GROW_COLLECTION_LIMIT\\s*=\\s*256"
+        }
+      ],
+      "ack": [
+        "ack search 'DEFAULT_AUTO_GROW_COLLECTION_LIMIT' --limit 5",
+        "ack get '${V}.DataBinder.DataBinder.DEFAULT_AUTO_GROW_COLLECTION_LIMIT'"
+      ],
+      "vanilla": [
+        "rg -n 'DEFAULT_AUTO_GROW_COLLECTION_LIMIT\\s*=' --glob '*.java' spring-context/src/main"
+      ]
+    },
+    {
+      "id": "locate-types",
+      "category": "locate",
+      "need": "Files defining MergedAnnotations and TypeDescriptor",
+      "evidence": [
+        {
+          "regex": "core[\\\\/]annotation[\\\\/]MergedAnnotations\\.java"
+        },
+        {
+          "regex": "core[\\\\/]convert[\\\\/]TypeDescriptor\\.java"
+        }
+      ],
+      "ack": [
+        "ack search 'MergedAnnotations|TypeDescriptor' --label Class --limit 6"
+      ],
+      "vanilla": [
+        "rg --files spring-core spring-beans spring-context | rg '[\\\\/](MergedAnnotations|TypeDescriptor)\\.java$'"
+      ]
+    },
+    {
+      "id": "architecture-overview",
+      "category": "overview",
+      "need": "Main packages of the indexed modules and their relative size",
+      "evidence": [
+        {
+          "regex": "springframework[./\\\\]beans[./\\\\]factory"
+        },
+        {
+          "regex": "springframework[./\\\\]core[./\\\\]annotation"
+        },
+        {
+          "regex": "springframework[./\\\\]validation"
+        }
+      ],
+      "ack": [
+        "ack arch"
+      ],
+      "vanilla": [
+        "git ls-files 'spring-core/src/main/java' 'spring-beans/src/main/java' 'spring-context/src/main/java' | ForEach-Object { (($_ -split '/')[0..7]) -join '/' } | Group-Object | Sort-Object Count -Descending | Select-Object -First 45 | ForEach-Object { \"$($_.Count) $($_.Name)\" }"
+      ]
+    },
+    {
+      "id": "read-midsize-type-whole",
+      "category": "read-symbol",
+      "need": "Whole 400-line AbstractBindingResult: how rejectValue builds a FieldError and how field values are recorded",
+      "evidence": [
+        "new FieldError(getObjectName(), fixedField, newVal, false,",
+        "public void recordFieldValue(String field, Class<?> type, @Nullable Object value)"
+      ],
+      "ack": [
+        "ack get AbstractBindingResult",
+        "ack get AbstractBindingResult.rejectValue AbstractBindingResult.recordFieldValue"
+      ],
+      "vanilla": [
+        "Get-Content ${VDIR}/AbstractBindingResult.java"
+      ]
+    },
+    {
+      "id": "usages-with-context",
+      "category": "text",
+      "need": "Every use of StringUtils.truncate in main and test source, with surrounding lines",
+      "evidence": [
+        "return truncate(charSequence, DEFAULT_TRUNCATION_THRESHOLD);",
+        "assertThat(StringUtils.truncate(text, 10)).isEqualTo(truncated);",
+        ".isThrownBy(() -> StringUtils.truncate(\"foo\", 0))"
+      ],
+      "ack": [
+        "ack grep 'truncate(' StringUtils.java StringUtilsTests.java -C 5",
+        "ack get StringUtils.truncate spring-core/src/test/java/org/springframework/util/StringUtilsTests.java",
+        "ack get spring-core/src/test/java/org/springframework/util/StringUtilsTests.java:774-802"
+      ],
+      "vanilla": [
+        "rg -n -C 5 'truncate\\(' spring-core/src/main/java/org/springframework/util/StringUtils.java spring-core/src/test/java/org/springframework/util/StringUtilsTests.java"
+      ]
+    }
+  ],
+  "notes": [
+    "Each lane is a scripted command chain; it stops at the first step whose cumulative output holds all evidence.",
+    "A step with when=after-failure is a recovery attempt and runs only once an earlier step exited non-zero.",
+    "ack chains start from the name an agent would naturally type (package-qualified or Type.member), as observed in recorded agent runs.",
+    "vanilla chains are deliberately tight (bounded -A windows, exact globs); real agents usually read more."
+  ]
+}

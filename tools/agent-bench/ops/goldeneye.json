@@ -1,0 +1,282 @@
+{
+  "corpus": "goldeneye-tool (Rust workspace, TypeScript UI)",
+  "lanes": [
+    "ack",
+    "vanilla"
+  ],
+  "env": {
+    "GOLDENEYE_GRAMMAR_PACK": "full"
+  },
+  "placeholders": {
+    "M": "${P}.crates.delivery.goldeneye_mcp.src",
+    "Q": "${P}.crates.application.goldeneye_query.src",
+    "CLI": "${P}.crates.delivery.goldeneye_cli.src",
+    "TOOLS": "crates/delivery/goldeneye-mcp/src/tools.rs"
+  },
+  "notes": [
+    "Same rules as spring.json. Names are written the way a Rust or TypeScript agent would type them (path::Type::method, bare function names, file paths).",
+    "search_code.rs was edited after this corpus was indexed, so the two tightest_node scenarios exercise reads against a stale index; their ack chains end with the raw read an agent falls back to."
+  ],
+  "scenarios": [
+    {
+      "id": "read-method-rust-path",
+      "category": "read-symbol",
+      "need": "Body of goldeneye_mcp::tools::ToolRegistry::page",
+      "evidence": [
+        "return Err(\"invalid cursor\");",
+        "next_cursor: (end < self.tools.len())"
+      ],
+      "ack": [
+        "ack get 'goldeneye_mcp::tools::ToolRegistry::page'",
+        {
+          "cmd": "ack search 'page' --label Method --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${M}.tools.ToolRegistry.page'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 18 'pub fn page\\(' ${TOOLS}"
+      ]
+    },
+    {
+      "id": "read-free-function",
+      "category": "read-symbol",
+      "need": "Body of the free function tightest_node, location unknown (its file was edited after indexing)",
+      "evidence": [
+        ".min_by(|left, right|",
+        "left.id.cmp(&right.id)"
+      ],
+      "ack": [
+        "ack get 'tightest_node'",
+        {
+          "cmd": "ack search 'tightest_node' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${Q}.search_code.tightest_node'",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "rg -n -A 22 'fn tightest_node' --glob '*.rs' crates",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 22 'fn tightest_node' --glob '*.rs' crates"
+      ]
+    },
+    {
+      "id": "read-typescript-hook",
+      "category": "read-symbol",
+      "need": "Body of the React hook useGraphData",
+      "evidence": [
+        "const fetchOverview = useCallback(",
+        "return { data, loading, error, progress, fetchOverview, fetchDetail };"
+      ],
+      "ack": [
+        "ack get 'useGraphData'",
+        {
+          "cmd": "ack search 'useGraphData' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${P}.ui.src.hooks.useGraphData.useGraphData'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 44 'export function useGraphData' ui/src"
+      ]
+    },
+    {
+      "id": "read-batch-across-crates",
+      "category": "read-batch",
+      "need": "Three functions from two crates in one go",
+      "evidence": [
+        "return Err(\"invalid cursor\");",
+        "Some(\"text\") => Ok(Self::Text),",
+        "let mut frames = FrameReader::new(BufReader::new(reader));"
+      ],
+      "ack": [
+        "ack get 'ToolRegistry::page' 'ToolResponseMode::parse' 'run_session_with_server'",
+        {
+          "cmd": "ack search 'page|parse|run_session_with_server' --limit 20",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack get '${M}.tools.ToolRegistry.page' '${M}.tools.ToolResponseMode.parse' '${CLI}.lib.run_session_with_server'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 18 'pub fn page\\(|fn parse\\(value: Option<&str>\\)|pub fn run_session_with_server' ${TOOLS} crates/delivery/goldeneye-cli/src/lib.rs"
+      ]
+    },
+    {
+      "id": "struct-with-impl-members",
+      "category": "outline",
+      "need": "Fields and methods of ToolRegistry (methods live in impl blocks)",
+      "evidence": [
+        "tools: Vec<ToolDefinition>",
+        "implemented",
+        {
+          "regex": "\\bpage\\b"
+        }
+      ],
+      "ack": [
+        "ack get 'ToolRegistry'",
+        "ack symbol '.*' --qn '.*tools\\.ToolRegistry\\.[^.]+$' --limit 20"
+      ],
+      "vanilla": [
+        "rg -n 'struct ToolRegistry|impl.*ToolRegistry|^    pub (const )?fn |^    tools:' ${TOOLS}"
+      ]
+    },
+    {
+      "id": "small-file",
+      "category": "outline",
+      "need": "Whole content of the 70-line CLI library file",
+      "evidence": [
+        "quiesce_database(&database_path)",
+        "let mut frames = FrameReader::new(BufReader::new(reader));"
+      ],
+      "ack": [
+        "ack get 'crates/delivery/goldeneye-cli/src/lib.rs'",
+        {
+          "cmd": "Get-Content crates/delivery/goldeneye-cli/src/lib.rs",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "Get-Content crates/delivery/goldeneye-cli/src/lib.rs"
+      ]
+    },
+    {
+      "id": "callers-free-function",
+      "category": "relations",
+      "need": "Call sites of tightest_node (its file was edited after indexing)",
+      "evidence": [
+        "record_match"
+      ],
+      "ack": [
+        "ack callers 'tightest_node'",
+        {
+          "cmd": "ack search 'tightest_node' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack callers '${Q}.search_code.tightest_node'",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "rg -n -B 12 'tightest_node(' --glob '*.rs' crates",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n 'tightest_node\\(' --glob '*.rs' crates",
+        "rg -n -B 12 'tightest_node\\(file_nodes' crates/application/goldeneye-query/src/search_code/pipeline.rs"
+      ]
+    },
+    {
+      "id": "callees-free-function",
+      "category": "relations",
+      "need": "What run_session_with_server calls",
+      "evidence": [
+        "handle_line",
+        "next_frame",
+        "parse_error"
+      ],
+      "ack": [
+        "ack callees 'run_session_with_server'",
+        {
+          "cmd": "ack search 'run_session_with_server' --limit 5",
+          "when": "after-failure"
+        },
+        {
+          "cmd": "ack callees '${CLI}.lib.run_session_with_server'",
+          "when": "after-failure"
+        }
+      ],
+      "vanilla": [
+        "rg -n -A 24 'pub fn run_session_with_server' crates/delivery/goldeneye-cli/src/lib.rs"
+      ]
+    },
+    {
+      "id": "trait-implementors",
+      "category": "hierarchy",
+      "need": "Types implementing the QueryRepository trait",
+      "evidence": [
+        "QueryStore"
+      ],
+      "ack": [
+        "ack search 'impl QueryRepository for' --limit 10",
+        "rg -n 'impl.*QueryRepository for' --glob '*.rs' crates"
+      ],
+      "vanilla": [
+        "rg -n 'impl.*QueryRepository for' --glob '*.rs' crates"
+      ]
+    },
+    {
+      "id": "env-var-literal",
+      "category": "text",
+      "need": "Where the GOLDENEYE_MCP_RESPONSE_MODE variable name is defined",
+      "evidence": [
+        "ENVIRONMENT_VARIABLE",
+        {
+          "regex": "goldeneye-mcp[\\\\/]src[\\\\/]tools\\.rs"
+        }
+      ],
+      "ack": [
+        "ack search 'GOLDENEYE_MCP_RESPONSE_MODE' --limit 5",
+        "rg -n 'GOLDENEYE_MCP_RESPONSE_MODE' --glob '*.rs' crates"
+      ],
+      "vanilla": [
+        "rg -n 'GOLDENEYE_MCP_RESPONSE_MODE' --glob '*.rs' crates"
+      ]
+    },
+    {
+      "id": "locate-types",
+      "category": "locate",
+      "need": "Files defining QueryEngine and ToolRegistry",
+      "evidence": [
+        {
+          "regex": "goldeneye-query[\\\\/]src[\\\\/]engine[\\\\/]mod\\.rs"
+        },
+        {
+          "regex": "goldeneye-mcp[\\\\/]src[\\\\/]tools\\.rs"
+        }
+      ],
+      "ack": [
+        "ack search 'QueryEngine|ToolRegistry' --limit 6"
+      ],
+      "vanilla": [
+        "rg -n 'pub struct (QueryEngine|ToolRegistry)\\b' --glob '*.rs' crates"
+      ]
+    },
+    {
+      "id": "architecture-overview",
+      "category": "overview",
+      "need": "Crates per layer and other top-level areas",
+      "evidence": [
+        {
+          "regex": "crates[\\\\/]application[\\\\/]goldeneye-query"
+        },
+        {
+          "regex": "crates[\\\\/]adapters[\\\\/]goldeneye-store"
+        },
+        {
+          "regex": "\\bui[\\\\/]src"
+        }
+      ],
+      "ack": [
+        "ack arch"
+      ],
+      "vanilla": [
+        "git ls-files | ForEach-Object { (($_ -split '/')[0..2]) -join '/' } | Group-Object | Sort-Object Count -Descending | Select-Object -First 45 | ForEach-Object { \"$($_.Count) $($_.Name)\" }"
+      ]
+    }
+  ]
+}
