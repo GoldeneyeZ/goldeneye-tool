@@ -10,13 +10,17 @@ use goldeneye_edit::{
     path_auth::{PathAuthorizer, PathIntent},
 };
 use goldeneye_ports::{
-    EditSyntaxInspect, EditSyntaxInspectRequest, LanguageClassifier, ServiceSyntax,
+    EditSyntaxInspect, EditSyntaxInspectRequest, InspectRequest, LanguageClassifier, ServiceSyntax,
 };
 
-use crate::{Generation, LanguageId, NodeLocator, ServiceError, ServiceErrorCode};
+use crate::{
+    Generation, LanguageId, NodeLocator, ProjectId, ProjectRelativePath, ServiceError,
+    ServiceErrorCode,
+};
 
 use super::{
-    BYTES_PER_APPROXIMATE_TOKEN, InspectSyntaxRequest, InspectSyntaxResult, InspectionSize,
+    BYTES_PER_APPROXIMATE_TOKEN, CheckSyntaxRequest, CheckSyntaxResult, CheckedFile,
+    CheckedFileStatus, InspectSyntaxRequest, InspectSyntaxResult, InspectionSize,
     results::edit_diagnostic_result,
 };
 
@@ -91,6 +95,125 @@ fn read_authorized_source(
             source,
         })
         .map_err(ServiceError::from)
+}
+
+/// Parses each requested working-tree file and each supplied text, and reports
+/// their diagnostics.
+///
+/// A file that cannot be read or has no grammar is reported in place, so one
+/// bad path does not hide the result of the others.
+pub(super) fn check_files(
+    project_root: &str,
+    generation: Generation,
+    request: &CheckSyntaxRequest,
+    allowed_roots: &[PathBuf],
+    languages: &dyn LanguageClassifier,
+    syntax: &dyn ServiceSyntax,
+) -> CheckSyntaxResult {
+    let from_disk = request.paths.iter().map(|path| {
+        let Some(language_id) = languages.classify(Path::new(path.as_str())) else {
+            return unchecked_file(path, CheckedFileStatus::Unsupported, None, None);
+        };
+        match read_authorized_source(project_root, path.as_str(), allowed_roots.to_vec()) {
+            Ok(source) => check_source(
+                generation,
+                &request.project,
+                path,
+                language_id,
+                source,
+                syntax,
+            ),
+            Err(error) => unchecked_file(
+                path,
+                CheckedFileStatus::Unreadable,
+                Some(language_id),
+                Some(error.to_string()),
+            ),
+        }
+    });
+    let supplied = request.contents.iter().map(|item| {
+        let Some(language_id) = languages.classify(Path::new(item.path.as_str())) else {
+            return unchecked_file(&item.path, CheckedFileStatus::Unsupported, None, None);
+        };
+        check_source(
+            generation,
+            &request.project,
+            &item.path,
+            language_id,
+            item.content.clone().into_bytes(),
+            syntax,
+        )
+    });
+    CheckSyntaxResult {
+        project: request.project.clone(),
+        files: from_disk.chain(supplied).collect(),
+    }
+}
+
+fn unchecked_file(
+    path: &ProjectRelativePath,
+    status: CheckedFileStatus,
+    language_id: Option<LanguageId>,
+    detail: Option<String>,
+) -> CheckedFile {
+    CheckedFile {
+        path: path.clone(),
+        status,
+        language_id,
+        diagnostic_total: 0,
+        diagnostics_truncated: false,
+        diagnostics: Vec::new(),
+        detail,
+    }
+}
+
+fn check_source(
+    generation: Generation,
+    project: &ProjectId,
+    path: &ProjectRelativePath,
+    language_id: LanguageId,
+    source: Vec<u8>,
+    syntax: &dyn ServiceSyntax,
+) -> CheckedFile {
+    let parsed = syntax.inspect(EditSyntaxInspectRequest {
+        language_id: language_id.clone(),
+        source: Arc::<[u8]>::from(source),
+        generation,
+        file_context: FileContext::new(project.clone(), path.clone()),
+        // Only the diagnostics are wanted; one node keeps the traversal minimal.
+        inspection: InspectRequest {
+            max_depth: 0,
+            max_nodes: 1,
+            preview_chars: 0,
+            byte_range: None,
+            node_kinds: Vec::new(),
+        },
+    });
+    match parsed {
+        Ok(parsed) => CheckedFile {
+            path: path.clone(),
+            status: if parsed.diagnostic_total == 0 {
+                CheckedFileStatus::Clean
+            } else {
+                CheckedFileStatus::Errors
+            },
+            language_id: Some(language_id),
+            diagnostic_total: parsed.diagnostic_total,
+            diagnostics_truncated: parsed.diagnostics_truncated,
+            diagnostics: parsed
+                .diagnostics
+                .iter()
+                .map(edit_diagnostic_result)
+                .collect(),
+            detail: None,
+        },
+        Err(error) => unchecked_file(
+            path,
+            CheckedFileStatus::Unreadable,
+            Some(language_id),
+            Some(error.to_string()),
+        ),
+    }
 }
 
 fn inspection_language(

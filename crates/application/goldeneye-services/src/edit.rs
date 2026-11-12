@@ -60,6 +60,79 @@ impl InspectSyntaxRequest {
     }
 }
 
+/// Most files one syntax check accepts.
+pub const MAX_CHECK_SYNTAX_PATHS: usize = 500;
+
+/// Parse check of working-tree files of one indexed project.
+///
+/// Unlike inspection, the files need not be indexed or unchanged since the
+/// last index run: this is the check to run after editing them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckSyntaxRequest {
+    pub project: ProjectId,
+    /// Files read from the working tree.
+    #[serde(default)]
+    pub paths: Vec<ProjectRelativePath>,
+    /// Text supplied by the caller, parsed with the grammar of its path: another
+    /// version of a file, such as the committed one, to compare against.
+    #[serde(default)]
+    pub contents: Vec<CheckSyntaxContent>,
+}
+
+/// One caller-supplied source text and the path that selects its grammar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckSyntaxContent {
+    pub path: ProjectRelativePath,
+    pub content: String,
+}
+
+impl CheckSyntaxRequest {
+    #[must_use]
+    pub const fn new(project: ProjectId, paths: Vec<ProjectRelativePath>) -> Self {
+        Self {
+            project,
+            paths,
+            contents: Vec::new(),
+        }
+    }
+}
+
+/// Outcome of parsing one file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckedFileStatus {
+    Clean,
+    Errors,
+    /// No grammar is selected for the path.
+    Unsupported,
+    /// The file is missing, outside the allowed roots, or could not be parsed at all.
+    Unreadable,
+}
+
+/// Parse diagnostics of one checked file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckedFile {
+    pub path: ProjectRelativePath,
+    pub status: CheckedFileStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_id: Option<LanguageId>,
+    pub diagnostic_total: usize,
+    pub diagnostics_truncated: bool,
+    pub diagnostics: Vec<SyntaxDiagnosticResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Parse diagnostics of every requested file: working-tree paths first, then
+/// supplied contents, each in request order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckSyntaxResult {
+    pub project: ProjectId,
+    pub files: Vec<CheckedFile>,
+}
+
 /// Content-bearing request shared by replace and adjacent insert operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

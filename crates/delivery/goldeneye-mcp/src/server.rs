@@ -3,13 +3,14 @@ use std::sync::{Arc, Mutex};
 
 use goldeneye_bootstrap::BootstrapRuntime;
 use goldeneye_services::{
-    ArchitectureRequest, CancellationToken, CodeSnippetChunkRequest, CodeSnippetManifestRequest,
-    CodeSnippetRequest, CreateFileRequest, DEFAULT_SNIPPET_CHUNK_BYTES, DeleteNodeRequest,
-    DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode, IndexRepositoryRequest,
-    IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest, ManageAdrRequest,
-    NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError, QueryGraphRequest,
-    QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest, SemanticSearchRequest,
-    ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection, TracePathRequest,
+    ArchitectureRequest, CancellationToken, CheckSyntaxRequest, CodeSnippetChunkRequest,
+    CodeSnippetManifestRequest, CodeSnippetRequest, CreateFileRequest, DEFAULT_SNIPPET_CHUNK_BYTES,
+    DeleteNodeRequest, DetectChangesRequest, GraphSchemaRequest, IndexRepositoryMode,
+    IndexRepositoryRequest, IndexStatusRequest, IngestTracesRequest, InspectSyntaxRequest,
+    ManageAdrRequest, NodeContentRequest, OperationHooks, PageRequest, ProjectId, QueryError,
+    QueryGraphRequest, QueryValue, SearchCodeMode, SearchCodeRequest, SearchGraphRequest,
+    SemanticSearchRequest, ServiceConfig, ServiceError, ServiceErrorCode, Services, TraceDirection,
+    TracePathRequest,
 };
 use goldeneye_watcher::Watcher;
 use serde::de::DeserializeOwned;

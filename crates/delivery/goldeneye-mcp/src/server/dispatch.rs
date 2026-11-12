@@ -3,11 +3,11 @@ use super::errors::{
     to_value,
 };
 use super::{
-    ArchitectureArguments, CreateFileRequest, DeleteNodeRequest, EmptyArguments,
-    GraphSchemaRequest, IndexArguments, IndexRepositoryMode, IndexRepositoryRequest,
-    IndexStatusRequest, InspectSyntaxRequest, NodeContentRequest, ProjectArguments, QueryArguments,
-    RequestId, SearchArguments, SearchCodeArguments, Server, SnippetArguments,
-    SnippetChunkArguments, SnippetManifestArguments, TraceArguments, Value, json,
+    ArchitectureArguments, CheckSyntaxRequest, CreateFileRequest, DeleteNodeRequest,
+    EmptyArguments, GraphSchemaRequest, IndexArguments, IndexRepositoryMode,
+    IndexRepositoryRequest, IndexStatusRequest, InspectSyntaxRequest, NodeContentRequest,
+    ProjectArguments, QueryArguments, RequestId, SearchArguments, SearchCodeArguments, Server,
+    SnippetArguments, SnippetChunkArguments, SnippetManifestArguments, TraceArguments, Value, json,
 };
 
 impl Server {
@@ -31,6 +31,7 @@ impl Server {
             "trace_path" | "trace_call_path" => self.dispatch_trace_path(name, arguments),
             "get_architecture" => self.dispatch_get_architecture(name, arguments),
             "inspect_syntax" => self.dispatch_inspect_syntax(name, arguments),
+            "check_syntax" => self.dispatch_check_syntax(name, arguments),
             "create_file" => self.dispatch_create_file(name, arguments),
             "replace_node" => self.dispatch_replace_node(name, arguments),
             "delete_node" => self.dispatch_delete_node(name, arguments),
@@ -202,6 +203,15 @@ impl Server {
         to_value(
             self.services()
                 .inspect_syntax(&request)
+                .map_err(service_error_message)?,
+        )
+    }
+
+    fn dispatch_check_syntax(&self, name: &str, arguments: Value) -> Result<Value, String> {
+        let request: CheckSyntaxRequest = parse_arguments(name, arguments)?;
+        to_value(
+            self.services()
+                .check_syntax(&request)
                 .map_err(service_error_message)?,
         )
     }

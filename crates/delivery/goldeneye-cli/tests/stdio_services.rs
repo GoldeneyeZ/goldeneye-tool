@@ -192,7 +192,7 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
     let second = responses(&run_server(second_input.as_bytes(), &database, temp.path()));
     assert_eq!(second.len(), 5);
     let tools = second[0]["result"]["tools"].as_array().expect("tools");
-    assert_eq!(tools.len(), 23);
+    assert_eq!(tools.len(), 24);
     assert!(tools.iter().any(|tool| tool["name"] == "delete_project"));
     assert!(
         tools
@@ -223,6 +223,92 @@ fn stdio_indexes_then_reopens_persistent_services_with_clean_streams() {
         second[4]["result"]["structuredContent"]["results"][0]["node"],
         "helper"
     );
+}
+
+#[test]
+fn stdio_check_syntax_parses_edited_and_unindexed_working_tree_files() {
+    let temp = TempDir::new().expect("temp directory");
+    let repo = temp.path().join("fixture");
+    fixture(&repo);
+    let database = temp.path().join("state/graph.db");
+    let indexed = call_tool(
+        &database,
+        temp.path(),
+        1,
+        "index_repository",
+        json!({"repo_path": repo, "mode": "fast"}),
+    );
+    let project = successful_content(&indexed)["project"]
+        .as_str()
+        .expect("project")
+        .to_owned();
+
+    // Edited after indexing, created after indexing, and never indexable.
+    fs::write(
+        repo.join("src/lib.rs"),
+        "pub fn helper() -> usize { 1 }\npub fn entry() -> usize { helper( }\n",
+    )
+    .expect("break indexed file");
+    fs::write(repo.join("src/added.rs"), "pub fn added() -> usize { 2 }\n")
+        .expect("write new file");
+    fs::write(repo.join("notes.unknownext"), "free text (\n").expect("write unsupported file");
+
+    let checked = call_tool(
+        &database,
+        temp.path(),
+        2,
+        "check_syntax",
+        json!({
+            "project": project,
+            "paths": ["src/lib.rs", "src/added.rs", "notes.unknownext", "src/missing.rs"]
+        }),
+    );
+    let files = successful_content(&checked)["files"]
+        .as_array()
+        .expect("files")
+        .clone();
+
+    let statuses = files
+        .iter()
+        .map(|file| file["status"].as_str().expect("status"))
+        .collect::<Vec<_>>();
+    assert_eq!(statuses, ["errors", "clean", "unsupported", "unreadable"]);
+    assert!(files[0]["diagnostic_total"].as_u64().expect("total") >= 1);
+    // The second source line holds the unbalanced call.
+    assert_eq!(files[0]["diagnostics"][0]["span"]["start"]["row"], 1);
+    assert_eq!(files[1]["diagnostic_total"], 0);
+    assert!(files[3]["detail"].as_str().is_some());
+
+    // Supplied text is parsed with the grammar of its path and never read from disk.
+    let supplied = call_tool(
+        &database,
+        temp.path(),
+        4,
+        "check_syntax",
+        json!({
+            "project": project,
+            "contents": [
+                {"path": "src/lib.rs", "content": "pub fn helper() -> usize { 1 }\n"},
+                {"path": "src/elsewhere.rs", "content": "pub fn broken( -> usize { 1 }\n"}
+            ]
+        }),
+    );
+    let supplied = successful_content(&supplied)["files"]
+        .as_array()
+        .expect("files")
+        .clone();
+    assert_eq!(supplied[0]["status"], "clean");
+    assert_eq!(supplied[1]["status"], "errors");
+
+    // Inspection still refuses the edited file; the check does not replace it.
+    let stale = call_tool(
+        &database,
+        temp.path(),
+        3,
+        "inspect_syntax",
+        json!({"project": project, "path": "src/lib.rs"}),
+    );
+    assert_eq!(stale["isError"], true);
 }
 
 #[test]

@@ -28,9 +28,10 @@ pub use configuration::{
 };
 pub use dependencies::ServiceDependencies;
 pub use edit::{
+    CheckSyntaxContent, CheckSyntaxRequest, CheckSyntaxResult, CheckedFile, CheckedFileStatus,
     CreateFileRequest, DeleteNodeRequest, EditMutationResult, EditParsePolicy, GraphMutation,
-    InspectSyntaxRequest, InspectSyntaxResult, InspectionSize, MutationDiagnostics, MutationDiff,
-    MutationSize, NodeContentRequest, SyntaxDiagnosticResult,
+    InspectSyntaxRequest, InspectSyntaxResult, InspectionSize, MAX_CHECK_SYNTAX_PATHS,
+    MutationDiagnostics, MutationDiff, MutationSize, NodeContentRequest, SyntaxDiagnosticResult,
 };
 pub use error::{ServiceError, ServiceErrorCode};
 pub use git::{

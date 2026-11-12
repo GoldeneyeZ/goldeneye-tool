@@ -10,12 +10,13 @@ use goldeneye_edit::{
 use goldeneye_index::{IndexOptions, IndexService};
 use goldeneye_ports::EditInspectRequest;
 
-use crate::{LanguageId, ServiceError, ServiceErrorCode, Services};
+use crate::{Generation, IndexStatusRequest, LanguageId, ServiceError, ServiceErrorCode, Services};
 
 use super::{
-    CreateFileRequest, DeleteNodeRequest, EditMutationResult, EditParsePolicy,
-    InspectSyntaxRequest, InspectSyntaxResult, NodeContentRequest,
-    inspection::{edit_error_with_fresh, inspect_file},
+    CheckSyntaxRequest, CheckSyntaxResult, CreateFileRequest, DeleteNodeRequest,
+    EditMutationResult, EditParsePolicy, InspectSyntaxRequest, InspectSyntaxResult,
+    MAX_CHECK_SYNTAX_PATHS, NodeContentRequest,
+    inspection::{check_files, edit_error_with_fresh, inspect_file},
     results::mutation_result,
 };
 
@@ -77,6 +78,40 @@ impl Services {
                 syntax.as_ref(),
             )
         })
+    }
+
+    /// Parses working-tree files of one indexed project and returns their diagnostics.
+    ///
+    /// The files need not be indexed or unchanged since the last index run, and
+    /// no edit state is opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed validation, not-found, storage, or query failures. A file
+    /// that cannot be read is reported in the result, not as an error.
+    pub fn check_syntax(
+        &self,
+        request: &CheckSyntaxRequest,
+    ) -> Result<CheckSyntaxResult, ServiceError> {
+        let requested = request.paths.len().saturating_add(request.contents.len());
+        if requested > MAX_CHECK_SYNTAX_PATHS {
+            return Err(ServiceError::edit(
+                ServiceErrorCode::InvalidInput,
+                format!(
+                    "syntax check accepts at most {MAX_CHECK_SYNTAX_PATHS} files, got {requested}"
+                ),
+            ));
+        }
+        let status = self.index_status(&IndexStatusRequest::new(request.project.clone()))?;
+        let syntax = self.dependencies.edit_syntax();
+        Ok(check_files(
+            &status.root_path,
+            Generation::new(status.generation),
+            request,
+            &self.allowed_roots(),
+            self.dependencies.languages(),
+            syntax.as_ref(),
+        ))
     }
 
     /// Creates one new file without overwriting an existing destination.

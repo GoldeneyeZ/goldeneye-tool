@@ -33,6 +33,7 @@ pub(super) fn tools(project: &Value) -> Vec<ToolDefinition> {
     } = schemas;
     vec![
         inspection_tool(inspection_request, inspection_output),
+        check_tool(project, &path),
         create_tool(
             project,
             operation_id,
@@ -194,6 +195,36 @@ fn inspection_tool(input: Value, output: Value) -> ToolDefinition {
         input,
     )
     .with_output_schema(output)
+}
+
+fn check_tool(project: &Value, path: &Value) -> ToolDefinition {
+    ToolDefinition::new(
+        "check_syntax",
+        "Check syntax",
+        "Parse working-tree files of one indexed project and return their syntax errors. Files need not be indexed or unchanged since indexing. Supplied contents are parsed with the grammar of their path.",
+        object_schema(
+            &json!({
+                "project": project.clone(),
+                "paths": {"type": "array", "maxItems": 500, "items": path.clone()},
+                "contents": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": object_schema(
+                        &json!({"path": path.clone(), "content": {"type": "string"}}),
+                        &["path", "content"],
+                    )
+                }
+            }),
+            &["project"],
+        ),
+    )
+    .with_output_schema(object_schema(
+        &json!({
+            "project": project.clone(),
+            "files": {"type": "array", "items": {"type": "object"}}
+        }),
+        &["project", "files"],
+    ))
 }
 
 // Ownership mirrors the original single builder: these schema values are retired after this tool.
