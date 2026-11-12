@@ -1,0 +1,72 @@
+{
+  "name": "pyfinance-behavior-bug",
+  "output": "../../../target/agent-bench/pyfinance-behavior-bug/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\PyFinance",
+  "base_ref": "24aae900a8a2bcb9e0f788a3db1b3226ae58011c",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/pyfinance-behavior-bug",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\pyf-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\pyf-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "pyfinance-behavior-bug",
+      "prompt_file": "../tasks/pyfinance-behavior-bug.md",
+      "source_language": "Python",
+      "source_extensions": [
+        ".py"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/pyfinance-behavior-bug.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "src/",
+      "tests/"
+    ],
+    "min_paths": 2,
+    "max_paths": 8
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

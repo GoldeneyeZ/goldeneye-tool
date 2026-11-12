@@ -1,0 +1,513 @@
+diff --git a/internal/sync/classify_cortex_test.go b/internal/sync/classify_cortex_test.go
+index 6f3ddc9d..f7662e1b 100644
+--- a/internal/sync/classify_cortex_test.go
++++ b/internal/sync/classify_cortex_test.go
+@@ -75,7 +75,7 @@ func TestClassifyOnePath_Cortex(t *testing.T) {
+ 
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+-			files := eng.classifyPaths([]string{tt.path})
++			files := eng.classifyChangedPaths([]string{tt.path})
+ 			if !tt.want {
+ 				assert.Empty(t, files)
+ 				return
+diff --git a/internal/sync/classify_kimi_test.go b/internal/sync/classify_kimi_test.go
+index cfbd6533..68a2981d 100644
+--- a/internal/sync/classify_kimi_test.go
++++ b/internal/sync/classify_kimi_test.go
+@@ -97,7 +97,7 @@ func TestEngineClassifyKimiPaths(t *testing.T) {
+ 
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+-			files := eng.classifyPaths([]string{tt.path})
++			files := eng.classifyChangedPaths([]string{tt.path})
+ 			if !tt.want {
+ 				assert.Empty(t, files)
+ 				return
+diff --git a/internal/sync/classify_openhands_test.go b/internal/sync/classify_openhands_test.go
+index 580319fd..cdb6ddfb 100644
+--- a/internal/sync/classify_openhands_test.go
++++ b/internal/sync/classify_openhands_test.go
+@@ -84,7 +84,7 @@ func TestClassifyOnePath_OpenHands(t *testing.T) {
+ 
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+-			files := eng.classifyPaths([]string{tt.path})
++			files := eng.classifyChangedPaths([]string{tt.path})
+ 			if !tt.want {
+ 				assert.Empty(t, files)
+ 				return
+diff --git a/internal/sync/engine.go b/internal/sync/engine.go
+index e619144e..9bf00fef 100644
+--- a/internal/sync/engine.go
++++ b/internal/sync/engine.go
+@@ -28,6 +28,12 @@ const (
+ 	projectIdentityCacheTTL = time.Minute
+ )
+ 
++// transientLogThreshold is the number of transient paths a single
++// changed-path pass must drop before the drop earns a log line. A lone
++// editor swap file is not worth one; a burst usually means a tool is
++// rewriting files inside a watched root.
++const transientLogThreshold = 8
++
+ type syncWriteMode int
+ 
+ const (
+@@ -569,10 +575,21 @@ func (e *Engine) SyncPathsContext(ctx context.Context, paths []string) {
+ 	if e.refuseWriteInForceParse("SyncPaths") {
+ 		return
+ 	}
+-	// Capture container states before classifyPaths lists any session rows,
+-	// matching the capture-before-discovery ordering of full syncs.
++	// Editor swap files and atomic-write temp files never name a session
++	// source. Drop them before classification so they do not cost a
++	// per-provider lookup (and a stored-hint query) on every event.
++	kept := dropTransientPaths(paths)
++	if dropped := len(paths) - len(kept); dropped >= transientLogThreshold {
++		log.Printf("sync: ignored %d transient path(s)", dropped)
++	}
++	if len(kept) == 0 {
++		return
++	}
++	// Capture container states before classifyChangedPaths lists any
++	// session rows, matching the capture-before-discovery ordering of
++	// full syncs.
+ 	preContainerStates := e.captureSQLiteContainerStates()
+-	files := e.classifyPaths(paths)
++	files := e.classifyChangedPaths(kept)
+ 	if len(files) == 0 {
+ 		return
+ 	}
+@@ -622,10 +639,10 @@ func (e *Engine) SyncPathsContext(ctx context.Context, paths []string) {
+ 	}
+ }
+ 
+-// classifyPaths maps changed file system paths to
++// classifyChangedPaths maps changed file system paths to
+ // parser.DiscoveredFile structs, filtering out paths that don't
+ // match known session file patterns.
+-func (e *Engine) classifyPaths(
++func (e *Engine) classifyChangedPaths(
+ 	paths []string,
+ ) []parser.DiscoveredFile {
+ 	seen := make(map[string]int, len(paths))
+diff --git a/internal/sync/engine_test.go b/internal/sync/engine_test.go
+index bdf3c7a1..ffcdfd39 100644
+--- a/internal/sync/engine_test.go
++++ b/internal/sync/engine_test.go
+@@ -3354,7 +3354,7 @@ func TestEngine_SyncPathsDoesNotEmitOnNoMatches(t *testing.T) {
+ 	em := &fakeEmitter{}
+ 	fx.engineWithEmitter(em)
+ 
+-	// Path doesn't match any known session pattern — classifyPaths
++	// Path doesn't match any known session pattern — classifyChangedPaths
+ 	// returns zero files and SyncPaths returns early.
+ 	fx.engine.SyncPaths([]string{"/nonexistent/bogus.txt"})
+ 
+@@ -3390,7 +3390,7 @@ func TestEngine_ClassifyOnePathClaudeStatPermissionErrorStillClassifies(
+ 	// the provider's changed-path handling rather than the legacy
+ 	// classifyOnePath Claude block. A transient stat-permission error
+ 	// must still classify the path by shape so the change is not dropped.
+-	files := engine.classifyPaths([]string{path})
++	files := engine.classifyChangedPaths([]string{path})
+ 	require.Len(t, files, 1, "expected path to classify despite stat permission error")
+ 	assert.Equal(t, path, files[0].Path)
+ 	assert.Equal(t, parser.AgentClaude, files[0].Agent)
+@@ -3427,7 +3427,7 @@ func TestEngine_ClassifyPathsDedupesOpenCodeChildPaths(t *testing.T) {
+ 		require.NoError(t, os.WriteFile(path, []byte(content), 0o644), "WriteFile(%q)", path)
+ 	}
+ 
+-	files := engine.classifyPaths([]string{
++	files := engine.classifyChangedPaths([]string{
+ 		messagePath,
+ 		partPath,
+ 	})
+@@ -3466,7 +3466,7 @@ func TestEngine_ClassifyPathsOpenCodeRemovedMessageDir(
+ 	messageDir := filepath.Dir(messagePath)
+ 	require.NoError(t, os.RemoveAll(messageDir), "RemoveAll(%q)", messageDir)
+ 
+-	files := engine.classifyPaths([]string{messageDir})
++	files := engine.classifyChangedPaths([]string{messageDir})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ }
+@@ -3494,7 +3494,7 @@ func TestEngine_ClassifyPathsOpenCodeSQLiteWALFile(
+ 	require.NoError(t, err, "Stat(%q)", walPath)
+ 	require.Greater(t, walInfo.Size(), int64(32), "WAL must contain transaction frames")
+ 
+-	files := engine.classifyPaths([]string{walPath})
++	files := engine.classifyChangedPaths([]string{walPath})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t,
+ 		parser.OpenCodeSQLiteVirtualPath(dbPath, "ses_wal"),
+@@ -3584,7 +3584,7 @@ func TestEngine_ClassifyPathsOpenCodeRemovedMessageFile(
+ 
+ 	require.NoError(t, os.Remove(messagePath), "Remove(%q)", messagePath)
+ 
+-	files := engine.classifyPaths([]string{messagePath})
++	files := engine.classifyChangedPaths([]string{messagePath})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ }
+@@ -3635,7 +3635,7 @@ func TestEngine_ClassifyPathsOpenCodeFamilyRemovedSessionFile(
+ 			)
+ 			require.NoError(t, os.Remove(sessionPath), "Remove(%q)", sessionPath)
+ 
+-			files := engine.classifyPaths([]string{sessionPath})
++			files := engine.classifyChangedPaths([]string{sessionPath})
+ 			assert.Empty(t, files)
+ 		})
+ 	}
+@@ -3678,7 +3678,7 @@ func TestEngine_ClassifyPathsProviderRemoveKeepsDeletedSQLiteSources(
+ 			dbPath := tt.path(root)
+ 			require.NoFileExists(t, dbPath)
+ 
+-			files := engine.classifyPaths([]string{dbPath})
++			files := engine.classifyChangedPaths([]string{dbPath})
+ 			require.Len(t, files, 1)
+ 			assert.Equal(t, dbPath, files[0].Path)
+ 			assert.Equal(t, tt.agent, files[0].Agent)
+@@ -3772,7 +3772,7 @@ func TestEngine_ClassifyPathsOpenCodeRemovedPartDir(
+ 	partDir := filepath.Dir(partPath)
+ 	require.NoError(t, os.RemoveAll(partDir), "RemoveAll(%q)", partDir)
+ 
+-	files := engine.classifyPaths([]string{partDir})
++	files := engine.classifyChangedPaths([]string{partDir})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ }
+@@ -3812,7 +3812,7 @@ func TestEngine_ClassifyPathsOpenCodeRemovedPartFile(
+ 
+ 	require.NoError(t, os.Remove(partPath), "Remove(%q)", partPath)
+ 
+-	files := engine.classifyPaths([]string{partPath})
++	files := engine.classifyChangedPaths([]string{partPath})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ }
+@@ -3853,14 +3853,14 @@ func TestEngine_ClassifyPathsQwenPawRejectsColon(t *testing.T) {
+ 	colonSubdir := write("default", "sessions", "sub:bad", "ok.json")
+ 	colonStem := write("default", "sessions", "foo:bar.json")
+ 
+-	files := engine.classifyPaths([]string{rootPath, subPath})
++	files := engine.classifyChangedPaths([]string{rootPath, subPath})
+ 	require.Len(t, files, 2)
+ 	for _, f := range files {
+ 		assert.Equal(t, parser.AgentQwenPaw, f.Agent)
+ 		assert.Equal(t, "default", f.Project)
+ 	}
+ 
+-	got := engine.classifyPaths([]string{
++	got := engine.classifyChangedPaths([]string{
+ 		colonWorkspace, colonSubdir, colonStem,
+ 	})
+ 	assert.Empty(t, got,
+@@ -3884,7 +3884,7 @@ func TestEngine_ClassifyPathsQwenSession(t *testing.T) {
+ 	sessionPath := filepath.Join(chatsDir, sessionID+".jsonl")
+ 	require.NoError(t, os.WriteFile(sessionPath, []byte("{}\n"), 0o644), "WriteFile(%q)", sessionPath)
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentQwen, files[0].Agent)
+@@ -3904,7 +3904,7 @@ func TestEngine_ClassifyPathsQwenSession(t *testing.T) {
+ 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755), "MkdirAll(%q)", p)
+ 		require.NoError(t, os.WriteFile(p, []byte("{}"), 0o644), "WriteFile(%q)", p)
+ 	}
+-	got := engine.classifyPaths(bogus)
++	got := engine.classifyChangedPaths(bogus)
+ 	assert.Empty(t, got, "expected no Qwen classifications for %v, got %v", bogus, got)
+ }
+ 
+@@ -3922,7 +3922,7 @@ func TestEngine_ClassifyPathsDeepSeekTUISession(t *testing.T) {
+ 	sessionPath := filepath.Join(deepSeekDir, sessionID+".json")
+ 	dbtest.WriteTestFile(t, sessionPath, []byte("{}"))
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentDeepSeekTUI, files[0].Agent)
+@@ -3941,7 +3941,7 @@ func TestEngine_ClassifyPathsDeepSeekTUISession(t *testing.T) {
+ 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755), "MkdirAll(%q)", p)
+ 		dbtest.WriteTestFile(t, p, []byte("{}"))
+ 	}
+-	got := engine.classifyPaths(bogus)
++	got := engine.classifyChangedPaths(bogus)
+ 	assert.Empty(t, got, "expected no DeepSeek TUI classifications for %v, got %v", bogus, got)
+ }
+ 
+@@ -3961,7 +3961,7 @@ func TestEngine_ClassifyPathsCommandCodeSession(t *testing.T) {
+ 	sessionPath := filepath.Join(projectDir, sessionID+".jsonl")
+ 	dbtest.WriteTestFile(t, sessionPath, []byte("{}\n"))
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentCommandCode, files[0].Agent)
+@@ -3982,12 +3982,12 @@ func TestEngine_ClassifyPathsCommandCodeSession(t *testing.T) {
+ 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755), "MkdirAll(%q)", p)
+ 		dbtest.WriteTestFile(t, p, []byte("{}"))
+ 	}
+-	got := engine.classifyPaths(bogus)
++	got := engine.classifyChangedPaths(bogus)
+ 	assert.Empty(t, got, "expected no Command Code classifications for %v, got %v", bogus, got)
+ 
+ 	metaPath := filepath.Join(projectDir, sessionID+".meta.json")
+ 	dbtest.WriteTestFile(t, metaPath, []byte("{}"))
+-	files = engine.classifyPaths([]string{metaPath})
++	files = engine.classifyChangedPaths([]string{metaPath})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentCommandCode, files[0].Agent)
+@@ -4009,7 +4009,7 @@ func TestEngine_ClassifyPathsQClawSession(t *testing.T) {
+ 	sessionPath := filepath.Join(sessionsDir, sessionID+".jsonl")
+ 	dbtest.WriteTestFile(t, sessionPath, []byte("{}\n"))
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentQClaw, files[0].Agent)
+@@ -4023,7 +4023,7 @@ func TestEngine_ClassifyPathsQClawSession(t *testing.T) {
+ 	for _, p := range bogus {
+ 		dbtest.WriteTestFile(t, p, []byte("{}"))
+ 	}
+-	got := engine.classifyPaths(bogus)
++	got := engine.classifyChangedPaths(bogus)
+ 	assert.Empty(t, got, "expected no QClaw classifications for %v, got %v", bogus, got)
+ }
+ 
+@@ -4049,11 +4049,11 @@ func TestEngine_ClassifyPathsQClawArchivedSession(t *testing.T) {
+ 	dbtest.WriteTestFile(t, active, []byte("{}\n"))
+ 	dbtest.WriteTestFile(t, archived, []byte("{}\n"))
+ 
+-	got := engine.classifyPaths([]string{archived})
++	got := engine.classifyChangedPaths([]string{archived})
+ 	require.Empty(t, got, "expected archived file shadowed by active to be ignored, got %v", got)
+ 
+ 	require.NoError(t, os.Remove(active), "Remove(%q)", active)
+-	files := engine.classifyPaths([]string{archived})
++	files := engine.classifyChangedPaths([]string{archived})
+ 	require.Len(t, files, 1, "len(files) = %d, want 1 (%v)", len(files), files)
+ 	assert.Equal(t, archived, files[0].Path)
+ 	assert.Equal(t, parser.AgentQClaw, files[0].Agent)
+@@ -4076,7 +4076,7 @@ func TestEngine_ClassifyOnePathReasonixProjectBareMeta(t *testing.T) {
+ 	dbtest.WriteTestFile(t, sessionPath, []byte(`{"role":"user","content":"hi"}`))
+ 	dbtest.WriteTestFile(t, metaPath, []byte(`{"model":"claude"}`))
+ 
+-	files := engine.classifyPaths([]string{metaPath})
++	files := engine.classifyChangedPaths([]string{metaPath})
+ 	require.Len(t, files, 1, "expected Reasonix sidecar to classify")
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, "proj", files[0].Project)
+@@ -4099,7 +4099,7 @@ func TestEngine_ClassifyOnePathReasonixDeletedMeta(t *testing.T) {
+ 	metaPath := sessionPath + ".meta"
+ 	dbtest.WriteTestFile(t, sessionPath, []byte(`{"role":"user","content":"hi"}`))
+ 
+-	files := engine.classifyPaths([]string{metaPath})
++	files := engine.classifyChangedPaths([]string{metaPath})
+ 	require.Len(t, files, 1, "expected deleted Reasonix sidecar to classify")
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, "proj", files[0].Project)
+@@ -4120,7 +4120,7 @@ func TestEngine_ClassifyOnePathReasonixDeletedTranscriptIgnored(t *testing.T) {
+ 		reasonixDir, "projects", "proj", "sessions", "session-123.jsonl",
+ 	)
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	assert.Empty(t, files, "expected deleted Reasonix transcript to be ignored")
+ }
+ 
+@@ -4931,7 +4931,7 @@ func TestEngine_ClassifyPathsProviderRemoveSkipsMissingGeminiSource(
+ 	dbtest.WriteTestFile(t, sessionPath, []byte("{}"))
+ 	require.NoError(t, os.Remove(sessionPath), "Remove(%q)", sessionPath)
+ 
+-	files := engine.classifyPaths([]string{sessionPath})
++	files := engine.classifyChangedPaths([]string{sessionPath})
+ 	assert.Empty(t, files)
+ }
+ 
+@@ -4958,7 +4958,7 @@ func TestEngine_ClassifyPathsProviderSidecarKeepsExistingGeminiSources(
+ 	)
+ 	dbtest.WriteTestFile(t, sessionPath, []byte("{}"))
+ 
+-	files := engine.classifyPaths([]string{projectsPath})
++	files := engine.classifyChangedPaths([]string{projectsPath})
+ 	require.Len(t, files, 1)
+ 	assert.Equal(t, sessionPath, files[0].Path)
+ 	assert.Equal(t, parser.AgentGemini, files[0].Agent)
+diff --git a/internal/sync/qoder_test.go b/internal/sync/qoder_test.go
+index 9062163f..0fee3a4f 100644
+--- a/internal/sync/qoder_test.go
++++ b/internal/sync/qoder_test.go
+@@ -34,21 +34,21 @@ func TestEngineClassifyQoderPaths(t *testing.T) {
+ 		require.NoError(t, os.WriteFile(path, []byte("{}\n"), 0o644))
+ 	}
+ 
+-	files := engine.classifyPaths([]string{mainPath})
++	files := engine.classifyChangedPaths([]string{mainPath})
+ 	require.Len(t, files, 1, "main path did not classify")
+ 	got := files[0]
+ 	assert.Equal(t, mainPath, got.Path)
+ 	assert.Equal(t, "project", got.Project)
+ 	assert.Equal(t, parser.AgentQoder, got.Agent)
+ 
+-	files = engine.classifyPaths([]string{subPath})
++	files = engine.classifyChangedPaths([]string{subPath})
+ 	require.Len(t, files, 1, "subagent path did not classify")
+ 	got = files[0]
+ 	assert.Equal(t, subPath, got.Path)
+ 	assert.Equal(t, "project", got.Project)
+ 	assert.Equal(t, parser.AgentQoder, got.Agent)
+ 
+-	files = engine.classifyPaths([]string{sidecarPath})
++	files = engine.classifyChangedPaths([]string{sidecarPath})
+ 	require.Len(t, files, 1, "sidecar path did not map to transcript")
+ 	got = files[0]
+ 	assert.Equal(t, mainPath, got.Path)
+@@ -56,7 +56,7 @@ func TestEngineClassifyQoderPaths(t *testing.T) {
+ 	assert.Equal(t, parser.AgentQoder, got.Agent)
+ 
+ 	for _, path := range []string{statsPath, rootAgentPath, nestedPath} {
+-		files = engine.classifyPaths([]string{path})
++		files = engine.classifyChangedPaths([]string{path})
+ 		assert.Emptyf(t, files, "%s classified as %+v", path, files)
+ 	}
+ }
+@@ -75,7 +75,7 @@ func TestEngineClassifyQoderProjectNamedSubagentsAsMainSession(t *testing.T) {
+ 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+ 	require.NoError(t, os.WriteFile(path, []byte("{}\n"), 0o644))
+ 
+-	files := engine.classifyPaths([]string{path})
++	files := engine.classifyChangedPaths([]string{path})
+ 	require.Len(t, files, 1, "path did not classify")
+ 	got := files[0]
+ 	assert.Equal(t, path, got.Path)
+diff --git a/internal/sync/transient_paths.go b/internal/sync/transient_paths.go
+new file mode 100644
+index 00000000..062d54a8
+--- /dev/null
++++ b/internal/sync/transient_paths.go
+@@ -0,0 +1,48 @@
++package sync
++
++import (
++	"path/filepath"
++	"strings"
++)
++
++// transientPathSuffixes are file-name suffixes of editor swap files and
++// atomic-write temp files. A changed path whose base name ends in one of
++// them is never a session source: the writer either renames it onto the
++// real file (which raises its own event) or deletes it.
++var transientPathSuffixes = []string{".tmp", ".swp", ".swx", "~"}
++
++// transientPathNames are exact base names that are never session sources.
++var transientPathNames = []string{".DS_Store"}
++
++// dropTransientPaths returns paths without the entries isTransientPath
++// reports as transient, preserving order. The input slice is not
++// modified.
++func dropTransientPaths(paths []string) []string {
++	kept := make([]string, 0, len(paths))
++	for _, p := range paths {
++		if isTransientPath(p) {
++			continue
++		}
++		kept = append(kept, p)
++	}
++	return kept
++}
++
++// isTransientPath reports whether path names an editor swap file, an
++// atomic-write temp file, or a desktop metadata file. Only the base name
++// is inspected, so a session stored under a directory with such a name
++// is unaffected.
++func isTransientPath(path string) bool {
++	base := filepath.Base(path)
++	for _, name := range transientPathNames {
++		if base == name {
++			return true
++		}
++	}
++	for _, suffix := range transientPathSuffixes {
++		if strings.HasSuffix(base, suffix) {
++			return true
++		}
++	}
++	return false
++}
+diff --git a/internal/sync/watcher.go b/internal/sync/watcher.go
+index 4267581d..9df36846 100644
+--- a/internal/sync/watcher.go
++++ b/internal/sync/watcher.go
+@@ -17,6 +17,15 @@ import (
+ 	"github.com/fsnotify/fsnotify"
+ )
+ 
++// watchedEventOps is the set of fsnotify operations that can change what
++// a session source contains or whether it exists. Everything else (in
++// practice Chmod, which some editors and backup tools emit in bursts) is
++// ignored by handleEvent.
++const watchedEventOps = fsnotify.Write |
++	fsnotify.Create |
++	fsnotify.Remove |
++	fsnotify.Rename
++
+ type RecursiveWatchResult struct {
+ 	Watched             int
+ 	Unwatched           int
+@@ -195,10 +204,7 @@ func (w *Watcher) loop() {
+ // handleEvent processes a single fsnotify event, auto-watching
+ // newly created directories and recording pending changes.
+ func (w *Watcher) handleEvent(event fsnotify.Event) {
+-	if event.Op&(fsnotify.Write|
+-		fsnotify.Create|
+-		fsnotify.Remove|
+-		fsnotify.Rename) == 0 {
++	if event.Op&watchedEventOps == 0 {
+ 		return
+ 	}
+ 
+diff --git a/internal/sync/workbuddy_test.go b/internal/sync/workbuddy_test.go
+index 268adacd..e9d370ab 100644
+--- a/internal/sync/workbuddy_test.go
++++ b/internal/sync/workbuddy_test.go
+@@ -35,21 +35,21 @@ func TestEngineClassifyWorkBuddyPaths(t *testing.T) {
+ 		require.NoError(t, os.WriteFile(path, []byte("{}\n"), 0o644))
+ 	}
+ 
+-	files := engine.classifyPaths([]string{mainPath})
++	files := engine.classifyChangedPaths([]string{mainPath})
+ 	require.Len(t, files, 1, "main path did not classify")
+ 	got := files[0]
+ 	assert.Equal(t, mainPath, got.Path)
+ 	assert.Equal(t, "proj", got.Project)
+ 	assert.Equal(t, parser.AgentWorkBuddy, got.Agent)
+ 
+-	files = engine.classifyPaths([]string{subPath})
++	files = engine.classifyChangedPaths([]string{subPath})
+ 	require.Len(t, files, 1, "subagent path did not classify")
+ 	got = files[0]
+ 	assert.Equal(t, subPath, got.Path)
+ 	assert.Equal(t, "proj", got.Project)
+ 	assert.Equal(t, parser.AgentWorkBuddy, got.Agent)
+ 
+-	files = engine.classifyPaths([]string{toolPath})
++	files = engine.classifyChangedPaths([]string{toolPath})
+ 	assert.Empty(t, files, "tool result classified as %+v", files)
+ }
+ 
+@@ -67,7 +67,7 @@ func TestEngineClassifyWorkBuddyProjectNamedSubagentsAsMainSession(t *testing.T)
+ 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+ 	require.NoError(t, os.WriteFile(path, []byte("{}\n"), 0o644))
+ 
+-	files := engine.classifyPaths([]string{path})
++	files := engine.classifyChangedPaths([]string{path})
+ 	require.Len(t, files, 1, "path did not classify")
+ 	got := files[0]
+ 	assert.Equal(t, path, got.Path)

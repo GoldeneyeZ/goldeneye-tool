@@ -1,0 +1,1172 @@
+diff --git a/src/lod/datasets/audit_curriculum.py b/src/lod/datasets/audit_curriculum.py
+index a780193..b7d96e3 100644
+--- a/src/lod/datasets/audit_curriculum.py
++++ b/src/lod/datasets/audit_curriculum.py
+@@ -7,10 +7,10 @@ import json
+ from pathlib import Path
+ 
+ from lod.datasets.collected import load_targets
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.objective import decoder_messages, encoder_messages
+ from lod.training.learned_codec.replay import load_replay
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ 
+ 
+ def main():
+@@ -33,7 +33,7 @@ def main():
+ 
+     cases = []
+     for row in rows:
+-        target, code = canonical(row["target"]), row["code"]
++        target, code = canonical_json(row["target"]), row["code"]
+         target_tokens = len(tokenizer.encode(target, add_special_tokens=False)) + 1
+         code_tokens = len(tokenizer.encode(code, add_special_tokens=False)) + 1
+         encoder_context = prompt_size(encoder_messages(target)) + code_tokens
+diff --git a/src/lod/datasets/curate_teacher_codes.py b/src/lod/datasets/curate_teacher_codes.py
+index 88f8235..9280653 100644
+--- a/src/lod/datasets/curate_teacher_codes.py
++++ b/src/lod/datasets/curate_teacher_codes.py
+@@ -6,9 +6,8 @@ import json
+ from pathlib import Path
+ 
+ from lod.datasets.collected import load_targets
+-from lod.training.evaluation import reconstruction_metrics
++from lod.training.evaluation import canonical_json, reconstruction_metrics
+ from lod.training.learned_codec.replay import encoder_evidence
+-from lod.training.pairs import canonical
+ 
+ 
+ def select_proofs(targets, requested, candidates, dataset_sha256):
+@@ -22,9 +21,9 @@ def select_proofs(targets, requested, candidates, dataset_sha256):
+         row_id = item.get("id")
+         if row_id not in requested or row_id in selected:
+             continue
+-        target = canonical(training[row_id]["target"])
++        target = canonical_json(training[row_id]["target"])
+         try:
+-            if (item.get("split") != "train" or canonical(item.get("target")) != target
++            if (item.get("split") != "train" or canonical_json(item.get("target")) != target
+                     or item.get("target_sha256") != hashlib.sha256(target.encode()).hexdigest()):
+                 raise ValueError("Target or split mismatch")
+             encoded, decoded = item.get("encoder", {}), item.get("decoder", {})
+diff --git a/src/lod/datasets/expansion/combine.py b/src/lod/datasets/expansion/combine.py
+index 8911980..a54d6f8 100644
+--- a/src/lod/datasets/expansion/combine.py
++++ b/src/lod/datasets/expansion/combine.py
+@@ -8,7 +8,7 @@ import shutil
+ from collections import Counter
+ from pathlib import Path
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ 
+ def combine_manifests(manifests, destination):
+@@ -40,7 +40,7 @@ def combine_manifests(manifests, destination):
+             with gzip.open(copied, "rt", encoding="utf-8") as stream:
+                 for line in stream:
+                     row = json.loads(line)
+-                    fingerprint = hashlib.sha256(canonical(row["target"]).encode()).hexdigest()
++                    fingerprint = hashlib.sha256(canonical_json(row["target"]).encode()).hexdigest()
+                     if row["id"] in seen_ids or fingerprint in seen_targets:
+                         raise ValueError("Duplicate ID or target across combined datasets")
+                     if row["split"] != shard["split"]:
+diff --git a/src/lod/datasets/expansion/token_audit.py b/src/lod/datasets/expansion/token_audit.py
+index 2bb8b0e..ebc2430 100644
+--- a/src/lod/datasets/expansion/token_audit.py
++++ b/src/lod/datasets/expansion/token_audit.py
+@@ -10,7 +10,7 @@ from itertools import chain
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.loading import load_expanded
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ MODEL = "Qwen/Qwen3-4B"
+ REVISION = "1cfa9a7208912126459214e8b04321603b3df60c"
+@@ -46,7 +46,7 @@ def audit_rows(rows, codec, reward, total_rows, *, minimum=1, maximum=12500,
+ 
+     def consume():
+         nonlocal audited, last_progress
+-        texts = [canonical(row["target"]) for row in batch]
++        texts = [canonical_json(row["target"]) for row in batch]
+         encoded = codec(texts, add_special_tokens=False, padding=False, truncation=False)["input_ids"]
+         reward_encoded = reward.encode_batch(texts, disallowed_special=(), num_threads=4)
+         if len(encoded) != len(batch) or len(reward_encoded) != len(batch):
+diff --git a/src/lod/datasets/receiver_expansion_admission.py b/src/lod/datasets/receiver_expansion_admission.py
+index e54b30d..18e5b35 100644
+--- a/src/lod/datasets/receiver_expansion_admission.py
++++ b/src/lod/datasets/receiver_expansion_admission.py
+@@ -9,10 +9,10 @@ from pathlib import Path
+ from lod.datasets.collected import load_targets
+ from lod.datasets.curate_teacher_codes import select_proofs
+ from lod.datasets.teacher_codec import ENCODE
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.objective import decoder_messages, encoder_messages
+ from lod.training.learned_codec.replay import load_replay
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer, tokenizer_policy
+-from lod.training.pairs import canonical
+ 
+ MODEL = 'Qwen/Qwen3-4B'
+ REVISION = '1cfa9a7208912126459214e8b04321603b3df60c'
+@@ -51,12 +51,12 @@ def require_selection(selected, requested, expected):
+ 
+ def require_exact_decodings(records):
+     for row in records:
+-        if row.get('decoder', {}).get('text') != canonical(row['target']):
++        if row.get('decoder', {}).get('text') != canonical_json(row['target']):
+             raise ValueError(f"Independent decoder text is not byte-exact: {row['id']}")
+ 
+ 
+ def context_record(row, tokenizer):
+-    target, code = canonical(row['target']), row['code']
++    target, code = canonical_json(row['target']), row['code']
+     target_tokens = len(tokenizer.encode(target, add_special_tokens=False)) + 1
+     code_tokens = len(tokenizer.encode(code, add_special_tokens=False)) + 1
+     def size(messages):
+diff --git a/src/lod/datasets/reprove_teacher_codes.py b/src/lod/datasets/reprove_teacher_codes.py
+index 5239455..abddcb9 100644
+--- a/src/lod/datasets/reprove_teacher_codes.py
++++ b/src/lod/datasets/reprove_teacher_codes.py
+@@ -9,7 +9,7 @@ from pathlib import Path
+ 
+ from lod.datasets.teacher_codec import DECODE, assess
+ from lod.generation.backend import CodexBackend
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ IDS = {'event_ledger-long-v1-101:2', 'event_ledger-long-v1-102:4',
+        'event_ledger-long-v1-103:0', 'graph_schedule-long-v1-102:2',
+@@ -38,7 +38,7 @@ def proof_record(original, decoded, source, source_hash):
+     result['metrics'] = assess(original['target'], original['encoder']['text'], decoded.get('text', ''))
+     result['reproof'] = {'source': source, 'source_sha256': source_hash,
+                          'encoder_unchanged': result['encoder'] == original['encoder'],
+-                         'encoder_object_sha256': hashlib.sha256(canonical(original['encoder']).encode()).hexdigest(),
++                         'encoder_object_sha256': hashlib.sha256(canonical_json(original['encoder']).encode()).hexdigest(),
+                          'decoder_instructions_sha256': hashlib.sha256(decoder_request(original)[0].encode()).hexdigest(),
+                          'decoder_input': 'Original code only; target and prior decoder output never supplied',
+                          'attempt': 1}
+@@ -61,7 +61,7 @@ def load_jobs(manifest_path, repo):
+             raise ValueError('Original proof source hash changed')
+         row = json.loads(raw)
+         if (row['id'] != item['id'] or row['split'] != 'train'
+-                or row['target_sha256'] != hashlib.sha256(canonical(row['target']).encode()).hexdigest()
++                or row['target_sha256'] != hashlib.sha256(canonical_json(row['target']).encode()).hexdigest()
+                 or row['encoder'].get('status') != 'completed'
+                 or not row['encoder'].get('thread_id') or not row['encoder'].get('text')):
+             raise ValueError('Unchanged completed training encoder proof required')
+diff --git a/src/lod/datasets/verify_codes.py b/src/lod/datasets/verify_codes.py
+index fbd39ef..5eca4d9 100644
+--- a/src/lod/datasets/verify_codes.py
++++ b/src/lod/datasets/verify_codes.py
+@@ -8,9 +8,9 @@ from pathlib import Path
+ 
+ from lod.datasets.teacher_codec import DECODE, assess
+ from lod.generation.backend import CodexBackend
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.payloads import payload_preservation
+ from lod.training.learned_codec.train import load_training_pairs
+-from lod.training.pairs import canonical
+ 
+ 
+ def select_codes(rows, report, dataset_sha256, count):
+@@ -44,7 +44,7 @@ async def run(args):
+     evidence = {"model": report["model"], "revision": report["revision"],
+                 "source_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+                 "dataset_sha256": dataset_sha, "decoder_sft_codes": report["decoder_sft_codes"]}
+-    evidence_bytes = canonical(evidence).encode()
++    evidence_bytes = canonical_json(evidence).encode()
+     evidence_sha = hashlib.sha256(evidence_bytes).hexdigest()
+     for name in ("accepted", "rejected"):
+         directory = args.output / name
+@@ -58,7 +58,7 @@ async def run(args):
+     async def verify(case_number, index, row, encoded):
+         async with semaphore:
+             record = {"id": row["id"], "split": "train", "target": row["target"],
+-                      "target_sha256": hashlib.sha256(canonical(row["target"]).encode()).hexdigest(),
++                      "target_sha256": hashlib.sha256(canonical_json(row["target"]).encode()).hexdigest(),
+                       "encoder": {"text": encoded["code"], "status": "completed", "model": report["model"],
+                                   "source": {"kind": "learned_encoder_report", "file": "encoder-codes.json",
+                                              "sha256": evidence_sha, "index": index}}}
+diff --git a/src/lod/training/campaigns/quality_compression.py b/src/lod/training/campaigns/quality_compression.py
+index e6c791e..f0fcda9 100644
+--- a/src/lod/training/campaigns/quality_compression.py
++++ b/src/lod/training/campaigns/quality_compression.py
+@@ -13,7 +13,7 @@ from pathlib import Path
+ 
+ from lod.training.campaigns.recovery import prepare_stage
+ from lod.training.campaigns.selection import QUALITY_KEYS, promotable
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ DATA_SHA = "4fd1d6ac667b309d1b17dd520e944e9a14204a78227988c09d162f84d5658d31"
+ 
+@@ -30,7 +30,7 @@ def summarize(report, targets):
+     code_tokens = sum(row["reward_code_tokens"] for row in cases)
+     target_tokens = sum(row["reward_target_tokens"] for row in cases)
+     code_chars = sum(len(row["code"]) for row in cases)
+-    target_chars = sum(len(canonical(targets[row["id"]])) for row in cases)
++    target_chars = sum(len(canonical_json(targets[row["id"]])) for row in cases)
+     return {
+         "examples": len(cases),
+         **{key: sum(bool(row[key]) for row in cases) for key in QUALITY_KEYS},
+diff --git a/src/lod/training/evaluation.py b/src/lod/training/evaluation.py
+index 25487a6..120cffb 100644
+--- a/src/lod/training/evaluation.py
++++ b/src/lod/training/evaluation.py
+@@ -3,6 +3,10 @@
+ import json
+ 
+ 
++def canonical_json(value):
++    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
++
++
+ def strict_json(text):
+     def reject(value):
+         raise ValueError(f"Invalid JSON constant: {value}")
+diff --git a/src/lod/training/learned_codec/calibration/replicas.py b/src/lod/training/learned_codec/calibration/replicas.py
+index 31efc53..50aa5f0 100644
+--- a/src/lod/training/learned_codec/calibration/replicas.py
++++ b/src/lod/training/learned_codec/calibration/replicas.py
+@@ -17,6 +17,7 @@ import sys
+ import time
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.calibration.telemetry import ResourceSampler, summarize
+ from lod.training.learned_codec.calibration.memory_curve import fit_memory_curve
+ from lod.training.learned_codec.checkpointing import resolve_checkpoint
+@@ -25,7 +26,6 @@ from lod.training.learned_codec.objective import decoder_messages
+ from lod.training.learned_codec.rollouts.protocol import request_payload, completion_result
+ from lod.training.learned_codec.rollouts.server import RolloutServer
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ 
+ 
+ class Log:
+@@ -59,7 +59,7 @@ def prepare(args):
+     for row in load_expanded(args.manifest):
+         if row['split'] != 'train':
+             continue
+-        target = canonical(row['target'])
++        target = canonical_json(row['target'])
+         ids = tokenizer.encode(target, add_special_tokens=False)
+         for n, rows in buckets.items():
+             if len(rows) < needs[n] and .9*n <= len(ids) <= 1.1*n:
+diff --git a/src/lod/training/learned_codec/diagnostics/base_capability_probe.py b/src/lod/training/learned_codec/diagnostics/base_capability_probe.py
+index 433197b..0aeea98 100644
+--- a/src/lod/training/learned_codec/diagnostics/base_capability_probe.py
++++ b/src/lod/training/learned_codec/diagnostics/base_capability_probe.py
+@@ -63,7 +63,7 @@ def main():
+     def verified_cases(directory, split="train"):
+         cases = original_cases(directory, split)
+         for row in cases:
+-            proof = decode_probe.reconstruction_metrics(row["decoder"]["text"], decode_probe.canonical(row["target"]))
++            proof = decode_probe.reconstruction_metrics(row["decoder"]["text"], decode_probe.canonical_json(row["target"]))
+             if not all(proof[key] for key in ("exact_text", "event_equal", "tool_arguments_equal")):
+                 raise ValueError(f"Independent exact teacher proof required: {row['id']}")
+         evidence["input_manifest"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+diff --git a/src/lod/training/learned_codec/diagnostics/capacity_smoke.py b/src/lod/training/learned_codec/diagnostics/capacity_smoke.py
+index b62a06e..9f0c218 100644
+--- a/src/lod/training/learned_codec/diagnostics/capacity_smoke.py
++++ b/src/lod/training/learned_codec/diagnostics/capacity_smoke.py
+@@ -8,6 +8,7 @@ import time
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.batch_loss import batch_response_loss
+ from lod.training.learned_codec.checkpointing import (
+     atomic_save_checkpoint,
+@@ -20,7 +21,6 @@ from lod.training.learned_codec.objective import decoder_messages
+ from lod.training.learned_codec.precision import frozen_embedding_dtype
+ from lod.training.learned_codec.rollouts import backend as rollout_options
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ from lod.training.progress import Progress
+ 
+ MODEL = "Qwen/Qwen3-4B"
+@@ -76,7 +76,7 @@ def main():
+                 continue
+             if args.case_id and row["id"] != args.case_id:
+                 continue
+-            target = canonical(row["target"])
++            target = canonical_json(row["target"])
+             tokens = tokenizer.encode(target, add_special_tokens=False) + [tokenizer.eos_token_id]
+             if args.stress_target_tokens:
+                 if not 2 <= args.stress_target_tokens <= args.max_target_tokens:
+diff --git a/src/lod/training/learned_codec/diagnostics/copy_stress.py b/src/lod/training/learned_codec/diagnostics/copy_stress.py
+index aff592a..485d2cb 100644
+--- a/src/lod/training/learned_codec/diagnostics/copy_stress.py
++++ b/src/lod/training/learned_codec/diagnostics/copy_stress.py
+@@ -1,6 +1,6 @@
+ """Synthetic literal-copy evaluation; real records remain the training source."""
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ 
+ def stress_event(index, repetitions):
+@@ -14,10 +14,10 @@ def stress_event(index, repetitions):
+                 "call_id": f"copy-stress-{index}",
+                 "name": "write_file",
+                 "arguments_format": "json",
+-                "arguments_raw": canonical(
++                "arguments_raw": canonical_json(
+                     {
+                         "path": f"probe/{index}.json",
+-                        "content": canonical(
++                        "content": canonical_json(
+                             {
+                                 "label": unit,
+                                 "payload": unit * repetitions,
+@@ -40,7 +40,7 @@ def stress_rows(tokenizer):
+         while (
+             len(
+                 tokenizer.encode(
+-                    canonical(stress_event(index, count + 1)), add_special_tokens=False
++                    canonical_json(stress_event(index, count + 1)), add_special_tokens=False
+                 )
+             )
+             + 1
+@@ -48,7 +48,7 @@ def stress_rows(tokenizer):
+         ):
+             count += 1
+         target = stress_event(index, count)
+-        if len(tokenizer.encode(canonical(target), add_special_tokens=False)) + 1 > upper:
++        if len(tokenizer.encode(canonical_json(target), add_special_tokens=False)) + 1 > upper:
+             raise ValueError(f"Minimum full event exceeds {upper} tokens")
+         rows.append(
+             {
+diff --git a/src/lod/training/learned_codec/diagnostics/decode_probe.py b/src/lod/training/learned_codec/diagnostics/decode_probe.py
+index d302bf8..ce298a2 100644
+--- a/src/lod/training/learned_codec/diagnostics/decode_probe.py
++++ b/src/lod/training/learned_codec/diagnostics/decode_probe.py
+@@ -8,7 +8,7 @@ import time
+ from unittest.mock import patch
+ from pathlib import Path
+ 
+-from lod.training.evaluation import reconstruction_metrics
++from lod.training.evaluation import canonical_json, reconstruction_metrics
+ from lod.training.learned_codec.batching import pad_prompts, trim_generated
+ from lod.training.learned_codec.code_layout import arrange_code
+ from lod.training.learned_codec.generation import termination
+@@ -17,7 +17,6 @@ from lod.training.learned_codec.json_constraint import (
+     XGRAMMAR_VERSION, compile_json_constraint, json_processor)
+ from lod.training.learned_codec.objective import decoder_messages
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer, tokenizer_policy
+-from lod.training.pairs import canonical
+ from lod.training.progress import Progress
+ 
+ 
+@@ -38,7 +37,7 @@ def load_cases(directory, split="train"):
+         row = json.loads(path.read_text(encoding="utf-8"))
+         if "encoder" not in row:
+             raise ValueError(f"Missing completed teacher encoding: {path}")
+-        if hashlib.sha256(canonical(row["target"]).encode()).hexdigest() != row["target_sha256"]:
++        if hashlib.sha256(canonical_json(row["target"]).encode()).hexdigest() != row["target_sha256"]:
+             raise ValueError(f"Target hash mismatch: {path}")
+         if row["split"] != split:
+             raise ValueError("This development probe accepts training cases only by default; "
+@@ -156,7 +155,7 @@ def main():
+         for offset in range(0, len(cases), args.batch_size):
+             for mode in args.modes:
+                 batch = cases[offset:offset + args.batch_size]
+-                codes = [canonical(row["target"]) if mode == "identity" else arrange_code(row["encoder"]["text"], args.code_layout)
++                codes = [canonical_json(row["target"]) if mode == "identity" else arrange_code(row["encoder"]["text"], args.code_layout)
+                          for row in batch]
+                 prompts = [tokenizer.apply_chat_template(decoder_messages(code), tokenize=True,
+                            add_generation_prompt=True, enable_thinking=False) for code in codes]
+@@ -206,7 +205,7 @@ def main():
+                     tokens = trim_generated(generated, eos_ids, args.max_new_tokens)
+                     text = tokenizer.decode(tokens, skip_special_tokens=True)
+                     finish = termination(tokens, eos_ids, args.max_new_tokens)
+-                    score = reconstruction_metrics(text, canonical(row["target"]))
++                    score = reconstruction_metrics(text, canonical_json(row["target"]))
+                     result = {"id": row["id"], "mode": mode, "generated": text, **score,
+                               "exact_complete": score["event_equal"] and finish["complete"],
+                               "generation": finish, "batch_seconds": elapsed,
+diff --git a/src/lod/training/learned_codec/diagnostics/engine_probe.py b/src/lod/training/learned_codec/diagnostics/engine_probe.py
+index ba1b5e6..2f29594 100644
+--- a/src/lod/training/learned_codec/diagnostics/engine_probe.py
++++ b/src/lod/training/learned_codec/diagnostics/engine_probe.py
+@@ -24,7 +24,7 @@ def main():
+     if args.engine == 'prepare':
+         from lod.training.learned_codec.objective import decoder_messages
+         from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-        from lod.training.pairs import canonical
++        from lod.training.evaluation import canonical_json
+ 
+         tokenizer = load_codec_tokenizer(MODEL, REVISION)
+         seed = tokenizer.encode('Reconstruct full assistant response including tool arguments. ', add_special_tokens=False)
+@@ -40,7 +40,7 @@ def main():
+             with gzip.open(args.manifest.parent / shard['path'], 'rt', encoding='utf-8') as stream:
+                 for line in stream:
+                     row = json.loads(line)
+-                    target = canonical(row['target'])
++                    target = canonical_json(row['target'])
+                     size = len(tokenizer.encode(target, add_special_tokens=False))
+                     if not 500 <= size <= 1500:
+                         continue
+diff --git a/src/lod/training/learned_codec/diagnostics/precision_probe.py b/src/lod/training/learned_codec/diagnostics/precision_probe.py
+index 6b2590c..7985522 100644
+--- a/src/lod/training/learned_codec/diagnostics/precision_probe.py
++++ b/src/lod/training/learned_codec/diagnostics/precision_probe.py
+@@ -5,10 +5,10 @@ import json
+ import time
+ from pathlib import Path
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.diagnostics.decode_probe import load_cases
+ from lod.training.learned_codec.objective import decoder_messages
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer, tokenizer_policy
+-from lod.training.pairs import canonical
+ from lod.training.progress import Progress
+ 
+ 
+@@ -67,7 +67,7 @@ def main():
+     try:
+         for row in cases:
+             for input_mode in ("identity", "compact"):
+-                code = canonical(row["target"]) if input_mode == "identity" else row["encoder"]["text"]
++                code = canonical_json(row["target"]) if input_mode == "identity" else row["encoder"]["text"]
+                 ids = tokenizer.apply_chat_template(decoder_messages(code), tokenize=True,
+                         add_generation_prompt=True, enable_thinking=False)
+                 inputs = torch.tensor([ids], device="cuda")
+diff --git a/src/lod/training/learned_codec/evaluation/audit_decode.py b/src/lod/training/learned_codec/evaluation/audit_decode.py
+index 2202671..7fcb578 100644
+--- a/src/lod/training/learned_codec/evaluation/audit_decode.py
++++ b/src/lod/training/learned_codec/evaluation/audit_decode.py
+@@ -4,9 +4,8 @@ import argparse
+ import json
+ from pathlib import Path
+ 
+-from lod.training.evaluation import reconstruction_metrics
++from lod.training.evaluation import canonical_json, reconstruction_metrics
+ from lod.training.learned_codec.diagnostics.decode_probe import load_cases
+-from lod.training.pairs import canonical
+ 
+ 
+ def changed_span(expected, actual):
+@@ -40,7 +39,7 @@ def audit(report, controls):
+         control = by_id[key[0]]
+         if report['split'] != control['split'] or report['split'] not in ('train', 'validation'):
+             raise ValueError('Report/target split mismatch or sealed final test')
+-        target, generated = canonical(control['target']), result['generated']
++        target, generated = canonical_json(control['target']), result['generated']
+         metrics = reconstruction_metrics(generated, target)
+         complete = result['generation']['complete'] is True
+         exact = metrics['event_equal'] and complete
+diff --git a/src/lod/training/learned_codec/evaluation/audit_replay.py b/src/lod/training/learned_codec/evaluation/audit_replay.py
+index 87eb866..9a30498 100644
+--- a/src/lod/training/learned_codec/evaluation/audit_replay.py
++++ b/src/lod/training/learned_codec/evaluation/audit_replay.py
+@@ -5,11 +5,11 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.objective import decoder_messages, encoder_messages
+ from lod.training.learned_codec.replay import load_replay
+ from lod.training.learned_codec.train import load_training_pairs
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer, tokenizer_policy
+-from lod.training.pairs import canonical
+ 
+ 
+ def main():
+@@ -28,7 +28,7 @@ def main():
+     common = tiktoken.get_encoding("o200k_base")
+     results = []
+     for row in rows:
+-        target, code = canonical(row["target"]), row["code"]
++        target, code = canonical_json(row["target"]), row["code"]
+         target_tokens = len(tokenizer.encode(target, add_special_tokens=False)) + 1
+         code_tokens = len(tokenizer.encode(code, add_special_tokens=False)) + 1
+         contexts = {}
+diff --git a/src/lod/training/learned_codec/evaluation/validation_run.py b/src/lod/training/learned_codec/evaluation/validation_run.py
+index 9e993e9..2b62dfe 100644
+--- a/src/lod/training/learned_codec/evaluation/validation_run.py
++++ b/src/lod/training/learned_codec/evaluation/validation_run.py
+@@ -8,10 +8,10 @@ import time
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.workflows.campaign import training_command
+ from lod.training.learned_codec.evaluation.compare_reports import compare_reports, markdown
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ 
+ 
+ def prepare_subset(manifest, output, tokenizer):
+@@ -20,10 +20,10 @@ def prepare_subset(manifest, output, tokenizer):
+     train = None
+     for row in load_expanded(manifest):
+         if row['split'] == 'train':
+-            if train is None and len(tokenizer.encode(canonical(row['target']))) < 18500:
++            if train is None and len(tokenizer.encode(canonical_json(row['target']))) < 18500:
+                 train = row
+             continue
+-        length = len(tokenizer.encode(canonical(row['target']), add_special_tokens=False)) + 1
++        length = len(tokenizer.encode(canonical_json(row['target']), add_special_tokens=False)) + 1
+         for bucket, (low, high, _) in zip(candidates, strata):
+             if low <= length <= high:
+                 bucket.append((row, length))
+diff --git a/src/lod/training/learned_codec/replay.py b/src/lod/training/learned_codec/replay.py
+index c524ec3..12ddf0e 100644
+--- a/src/lod/training/learned_codec/replay.py
++++ b/src/lod/training/learned_codec/replay.py
+@@ -4,9 +4,8 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
+-from lod.training.evaluation import reconstruction_metrics
++from lod.training.evaluation import canonical_json, reconstruction_metrics
+ from lod.training.learned_codec.payloads import payload_preservation
+-from lod.training.pairs import canonical
+ 
+ 
+ def encoder_evidence(encoded, decoded, path, dataset_sha256, row_id):
+@@ -56,7 +55,7 @@ def load_replay(rows, dataset_sha256, *, reports=(), verified_directories=()):
+     def add(row, code, proof, source):
+         if not isinstance(code, str) or not code.strip():
+             raise ValueError("Replay code must be nonempty text")
+-        target = canonical(row["target"])
++        target = canonical_json(row["target"])
+         if code_targets.setdefault(code, target) != target:
+             raise ValueError("Identical replay code maps to conflicting targets")
+         key = (row["id"], code)
+@@ -91,8 +90,8 @@ def load_replay(rows, dataset_sha256, *, reports=(), verified_directories=()):
+             raw = path.read_bytes()
+             item = json.loads(raw)
+             row = target_for(item)
+-            target = canonical(row["target"])
+-            if (item.get("split") != "train" or canonical(item.get("target")) != target
++            target = canonical_json(row["target"])
++            if (item.get("split") != "train" or canonical_json(item.get("target")) != target
+                     or item.get("target_sha256") != hashlib.sha256(target.encode()).hexdigest()):
+                 raise ValueError("Teacher proof target or split differs from validated training event")
+             encoded, decoded = item.get("encoder", {}), item.get("decoder", {})
+diff --git a/src/lod/training/learned_codec/runtime/preparation.py b/src/lod/training/learned_codec/runtime/preparation.py
+index 26bd40a..56ca631 100644
+--- a/src/lod/training/learned_codec/runtime/preparation.py
++++ b/src/lod/training/learned_codec/runtime/preparation.py
+@@ -3,10 +3,10 @@
+ import re
+ from dataclasses import dataclass
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.channel_protocol import build_label_table, replace_event_labels
+ from lod.training.learned_codec.record_store import DiskRecords
+ from lod.training.learned_codec.replay import load_replay
+-from lod.training.pairs import canonical
+ 
+ _REFERENCE = re.compile(r"@L[0-9]+;")
+ 
+@@ -86,7 +86,7 @@ def prepare_data(args, mode, tokenizer, report, log, load_pairs):
+         "accepted": 0, "excluded": 0, "accepted_target_tokens": 0}
+     counts = report["dataset_token_filter"]
+     for row in rows:
+-        target = canonical(row["target"])
++        target = canonical_json(row["target"])
+         record = prepare_record(row, target, tokenizer)
+         tokens = record["tokens"]
+         if args.min_target_tokens <= len(tokens) <= args.max_target_tokens:
+diff --git a/src/lod/training/learned_codec/runtime/reporting.py b/src/lod/training/learned_codec/runtime/reporting.py
+index b484a81..f9326d7 100644
+--- a/src/lod/training/learned_codec/runtime/reporting.py
++++ b/src/lod/training/learned_codec/runtime/reporting.py
+@@ -2,10 +2,10 @@
+ 
+ import hashlib
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.configuration import configuration_arguments
+ from lod.training.learned_codec.curriculum import training_duration_hours
+ from lod.training.learned_codec.objective import OBJECTIVE_VERSION
+-from lod.training.pairs import canonical
+ 
+ 
+ def build_initial_report(args, mode):
+@@ -107,4 +107,4 @@ def write_run_config(args):
+         "model": args.model,
+         "revision": args.revision,
+     }
+-    (args.output / "config.json").write_text(canonical(payload), encoding="utf-8")
++    (args.output / "config.json").write_text(canonical_json(payload), encoding="utf-8")
+diff --git a/src/lod/training/learned_codec/workflows/adaptive_campaign.py b/src/lod/training/learned_codec/workflows/adaptive_campaign.py
+index e4cf76c..16e47db 100644
+--- a/src/lod/training/learned_codec/workflows/adaptive_campaign.py
++++ b/src/lod/training/learned_codec/workflows/adaptive_campaign.py
+@@ -9,8 +9,8 @@ import sys
+ import time
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ from .workflow_benchmark import summarize
+ 
+ 
+@@ -30,7 +30,7 @@ def prepare_cohort(manifest, output, hf_base):
+     for row in load_expanded(manifest):
+         split=row['split']
+         if len(rows[split])>=needs[split]:continue
+-        tokens=len(tokenizer.encode(canonical(row['target']),add_special_tokens=False))
++        tokens=len(tokenizer.encode(canonical_json(row['target']),add_special_tokens=False))
+         if 128<=tokens<=512:rows[split].append(row)
+         if all(len(rows[k])==v for k,v in needs.items()):break
+     if any(len(rows[k])!=v for k,v in needs.items()):raise ValueError('Insufficient short full-event cohort')
+diff --git a/src/lod/training/learned_codec/workflows/batch_cohort.py b/src/lod/training/learned_codec/workflows/batch_cohort.py
+index 94e22b9..f18e4df 100644
+--- a/src/lod/training/learned_codec/workflows/batch_cohort.py
++++ b/src/lod/training/learned_codec/workflows/batch_cohort.py
+@@ -7,8 +7,8 @@ import shutil
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-from lod.training.pairs import canonical
+ 
+ 
+ def main():
+@@ -26,7 +26,7 @@ def main():
+     for row in load_expanded(args.manifest):
+         if row['split'] != 'train':
+             continue
+-        length = len(tokenizer.encode(canonical(row['target']), add_special_tokens=False)) + 1
++        length = len(tokenizer.encode(canonical_json(row['target']), add_special_tokens=False)) + 1
+         bucket = 0 if length <= 512 else 1 if length <= 2048 else 2 if length <= 8192 else None
+         if bucket is not None and len(buckets[bucket]) < args.per_stratum:
+             buckets[bucket].append(row)
+diff --git a/src/lod/training/learned_codec/workflows/workflow_benchmark.py b/src/lod/training/learned_codec/workflows/workflow_benchmark.py
+index e155ff3..b12e6c2 100644
+--- a/src/lod/training/learned_codec/workflows/workflow_benchmark.py
++++ b/src/lod/training/learned_codec/workflows/workflow_benchmark.py
+@@ -8,11 +8,11 @@ import time
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.loading import load_expanded
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.workflows.campaign import training_command
+ from lod.training.learned_codec.evaluation.compare_reports import compare_reports
+ from lod.training.learned_codec.tokenization import load_codec_tokenizer
+ from lod.training.learned_codec.evaluation.validation_run import prepare_subset
+-from lod.training.pairs import canonical
+ 
+ 
+ def summarize(path):
+@@ -43,7 +43,7 @@ def main():
+     for row in load_expanded(args.manifest):
+         if row['split'] != 'train':
+             continue
+-        n = len(tokenizer.encode(canonical(row['target']), add_special_tokens=False)) + 1
++        n = len(tokenizer.encode(canonical_json(row['target']), add_special_tokens=False)) + 1
+         bucket = 0 if n <= 512 else 1 if n <= 2048 else 2 if n <= 8192 else None
+         if bucket is not None and len(buckets[bucket]) < 4:
+             buckets[bucket].append(row)
+diff --git a/src/lod/training/pairs.py b/src/lod/training/pairs.py
+index 31c20bd..be48622 100644
+--- a/src/lod/training/pairs.py
++++ b/src/lod/training/pairs.py
+@@ -5,9 +5,7 @@ import json
+ import re
+ from pathlib import Path
+ 
+-
+-def canonical(value):
+-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
++from lod.training.evaluation import canonical_json
+ 
+ 
+ def load_pairs(path):
+@@ -83,7 +81,7 @@ def load_pairs(path):
+                     raise ValueError("Message content blocks required")
+             elif kind != "opaque" or "raw" not in item:
+                 raise ValueError("Unknown item must retain opaque raw payload")
+-        content = canonical(target)
++        content = canonical_json(target)
+         digest = hashlib.sha256(content.encode()).hexdigest()
+         if contents.setdefault(digest, split) != split:
+             raise ValueError("Identical assistant target leaks across splits")
+@@ -109,7 +107,7 @@ def tokenize_pair(tokenizer, row, max_tokens):
+         add_generation_prompt=True,
+         enable_thinking=False,
+     )
+-    text = canonical(row["target"])
++    text = canonical_json(row["target"])
+     target = tokenizer.encode(text, add_special_tokens=False) + [tokenizer.eos_token_id]
+     if len(prompt) + len(target) > max_tokens:
+         raise ValueError(
+diff --git a/src/lod/training/pilot.py b/src/lod/training/pilot.py
+index 93c2966..3d9c1ee 100644
+--- a/src/lod/training/pilot.py
++++ b/src/lod/training/pilot.py
+@@ -9,9 +9,9 @@ import random
+ import time
+ from pathlib import Path
+ 
+-from lod.training.evaluation import reconstruction_metrics, select_examples
++from lod.training.evaluation import canonical_json, reconstruction_metrics, select_examples
+ from lod.training.loss import response_loss
+-from lod.training.pairs import canonical, load_pairs, tokenize_pair
++from lod.training.pairs import load_pairs, tokenize_pair
+ from lod.training.progress import Progress
+ from lod.training.smoke import scaled_optimizer_step
+ 
+@@ -115,7 +115,7 @@ def run(args):
+         config["initial_adapter_sha256"] = saved["initial_adapter_sha256"]
+     if args.resume and saved != config:
+         raise ValueError("Resume dataset/model/training config or package versions changed")
+-    (args.output / "run-config.json").write_text(canonical(config), encoding="utf-8")
++    (args.output / "run-config.json").write_text(canonical_json(config), encoding="utf-8")
+     report = {
+         "status": "running",
+         "counts": counts,
+@@ -236,7 +236,7 @@ def run(args):
+                 },
+                 temporary / "state.pt",
+             )
+-            (temporary / "run-config.json").write_text(canonical(config), encoding="utf-8")
++            (temporary / "run-config.json").write_text(canonical_json(config), encoding="utf-8")
+             temporary.rename(final)
+             progress.emit("checkpoint_saved", step=step, path=str(final))
+ 
+diff --git a/src/lod/training/synthetic_tools/audit_tokens.py b/src/lod/training/synthetic_tools/audit_tokens.py
+index e34a5dc..e8fc6ca 100644
+--- a/src/lod/training/synthetic_tools/audit_tokens.py
++++ b/src/lod/training/synthetic_tools/audit_tokens.py
+@@ -7,7 +7,7 @@ from importlib.metadata import version
+ from pathlib import Path
+ from statistics import median
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools import load_dataset
+ 
+ 
+@@ -64,7 +64,7 @@ def main():
+     else:
+         rows = load_dataset(args.dataset)
+     for row in rows:
+-        text = canonical(row["target"])
++        text = canonical_json(row["target"])
+         split = row["split"]
+         lengths[split].append(count_tokens(text))
+         characters[split].append(len(text))
+diff --git a/src/lod/training/synthetic_tools/dataset.py b/src/lod/training/synthetic_tools/dataset.py
+index 7efc666..3a530e3 100644
+--- a/src/lod/training/synthetic_tools/dataset.py
++++ b/src/lod/training/synthetic_tools/dataset.py
+@@ -4,7 +4,7 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools.specs import validate_arguments
+ 
+ 
+@@ -88,7 +88,7 @@ def validate_rows(rows):
+                 raise ValueError("Unknown item")
+         if not calls:
+             raise ValueError("At least one complete tool call required")
+-        digest = hashlib.sha256(canonical(target).encode()).hexdigest()
++        digest = hashlib.sha256(canonical_json(target).encode()).hexdigest()
+         if digest in targets:
+             raise ValueError("Duplicate target")
+         targets.add(digest)
+diff --git a/src/lod/training/synthetic_tools/format_curriculum.py b/src/lod/training/synthetic_tools/format_curriculum.py
+index fb929da..a437326 100644
+--- a/src/lod/training/synthetic_tools/format_curriculum.py
++++ b/src/lod/training/synthetic_tools/format_curriculum.py
+@@ -8,7 +8,7 @@ import uuid
+ from collections import Counter
+ from pathlib import Path
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools.dataset import validate_rows
+ from lod.training.synthetic_tools.literal_curriculum import LITERAL_CASES
+ from lod.training.synthetic_tools.literal_curriculum import generate_rows as literal_rows
+@@ -68,7 +68,7 @@ def main():
+     args = parser.parse_args()
+     rows = generate_rows()
+     args.output.mkdir(parents=True, exist_ok=False)
+-    raw = "".join(canonical(row) + "\n" for row in rows).encode("utf-8")
++    raw = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+     (args.output / "dataset.jsonl").write_bytes(raw)
+     manifest = {
+         "version": VERSION,
+diff --git a/src/lod/training/synthetic_tools/generate.py b/src/lod/training/synthetic_tools/generate.py
+index d643562..5a2a7bb 100644
+--- a/src/lod/training/synthetic_tools/generate.py
++++ b/src/lod/training/synthetic_tools/generate.py
+@@ -7,7 +7,7 @@ import random
+ from collections import Counter
+ from pathlib import Path
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools.dataset import validate_rows
+ from lod.training.synthetic_tools.specs import tool_schemas
+ 
+@@ -124,7 +124,7 @@ def arguments(family, rng, seed):
+     result = builders[family]()
+     # Some arguments contain serialized JSON inside JSON, exercising two escaping layers.
+     if seed % 7 == 0:
+-        result["metadata_json"] = canonical(
++        result["metadata_json"] = canonical_json(
+             {"note": text, "active": flag, "count": number, "missing": None}
+         )
+     return result
+@@ -198,12 +198,12 @@ def main():
+     args = parser.parse_args()
+     rows = generate_rows(seed=args.seed)
+     args.output.mkdir(parents=True, exist_ok=True)
+-    raw = "".join(canonical(row) + "\n" for row in rows).encode("utf-8")
++    raw = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+     (args.output / "dataset.jsonl").write_bytes(raw)
+     (args.output / "tool-schemas.json").write_text(
+         json.dumps(tool_schemas(), indent=2) + "\n", encoding="utf-8"
+     )
+-    lengths = sorted(len(canonical(row["target"])) for row in rows)
++    lengths = sorted(len(canonical_json(row["target"])) for row in rows)
+     report = {
+         "version": VERSION,
+         "seed": args.seed,
+diff --git a/src/lod/training/synthetic_tools/literal_curriculum.py b/src/lod/training/synthetic_tools/literal_curriculum.py
+index 9f98136..2bc8ef9 100644
+--- a/src/lod/training/synthetic_tools/literal_curriculum.py
++++ b/src/lod/training/synthetic_tools/literal_curriculum.py
+@@ -9,7 +9,7 @@ import uuid
+ from collections import Counter
+ from pathlib import Path
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools.dataset import validate_rows
+ from lod.training.synthetic_tools.generate import LITERALS
+ from lod.training.synthetic_tools.generate import generate_rows as base_rows
+@@ -89,9 +89,9 @@ def main():
+     args = parser.parse_args()
+     rows = generate_rows()
+     args.output.mkdir(parents=True, exist_ok=False)
+-    raw = "".join(canonical(row) + "\n" for row in rows).encode()
++    raw = "".join(canonical_json(row) + "\n" for row in rows).encode()
+     (args.output / "dataset.jsonl").write_bytes(raw)
+-    lengths = sorted(len(canonical(r["target"])) for r in rows)
++    lengths = sorted(len(canonical_json(r["target"])) for r in rows)
+     manifest = {
+         "version": VERSION,
+         "seed": 20260910,
+diff --git a/tests/codec/test_audit_decode.py b/tests/codec/test_audit_decode.py
+index 0d2cda7..401dcf7 100644
+--- a/tests/codec/test_audit_decode.py
++++ b/tests/codec/test_audit_decode.py
+@@ -1,14 +1,14 @@
+ import unittest
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.evaluation.audit_decode import audit, changed_span
+-from lod.training.pairs import canonical
+ 
+ 
+ class DecodeAuditTests(unittest.TestCase):
+     def test_missing_tail_is_diagnosed_but_never_counts_as_success(self):
+         target = {'role': 'assistant', 'items': [
+             {'type': 'tool_call', 'name': 'write_file', 'arguments_raw': '{"id":"abc"}'}]}
+-        text = canonical(target)
++        text = canonical_json(target)
+         report = {'split': 'validation', 'cases': [
+             {'id': 'a', 'mode': 'compact', 'generated': text[:-3],
+              'generation': {'complete': True}}]}
+@@ -30,7 +30,7 @@ class DecodeAuditTests(unittest.TestCase):
+         target = {'role': 'assistant', 'items': [
+             {'type': 'tool_call', 'name': 'write_file', 'arguments_raw': '{"id":"abc"}'}]}
+         report = {'split': 'validation', 'cases': [
+-            {'id': 'a', 'mode': 'compact', 'generated': canonical(target).replace('abc', 'xyz'),
++            {'id': 'a', 'mode': 'compact', 'generated': canonical_json(target).replace('abc', 'xyz'),
+              'generation': {'complete': True}}]}
+         controls = [{'id': 'a', 'split': 'validation', 'target': target,
+                      'encoder': {'text': 'short code'}}]
+@@ -48,7 +48,7 @@ class DecodeAuditTests(unittest.TestCase):
+         with self.assertRaises(ValueError):
+             audit({'split': 'validation', 'cases': [row]}, [])
+         target = {'role': 'assistant', 'items': []}
+-        row['generated'] = canonical(target)
++        row['generated'] = canonical_json(target)
+         controls = [{'id': 'missing', 'split': 'validation', 'target': target,
+                      'encoder': {'text': '{}'}}]
+         with self.assertRaises(ValueError):
+@@ -58,12 +58,12 @@ class DecodeAuditTests(unittest.TestCase):
+         target = {'role': 'assistant', 'items': []}
+         controls = [{'id': 'a', 'split': 'validation', 'target': target,
+                      'encoder': {'text': 'empty'}}]
+-        row = {'id': 'a', 'mode': 'compact', 'generated': canonical(target),
++        row = {'id': 'a', 'mode': 'compact', 'generated': canonical_json(target),
+                'generation': {'complete': True}}
+         report = {'split': 'validation', 'cases': [row]}
+         result = audit(report, controls)['cases'][0]
+         self.assertTrue(result['exact_complete'])
+-        self.assertAlmostEqual(result['successful_code_ratio_chars'], 5 / len(canonical(target)))
++        self.assertAlmostEqual(result['successful_code_ratio_chars'], 5 / len(canonical_json(target)))
+         row['generation']['complete'] = False
+         self.assertIsNone(audit(report, controls)['cases'][0]['successful_code_ratio_chars'])
+ 
+diff --git a/tests/codec/test_codec_replay.py b/tests/codec/test_codec_replay.py
+index 87403a0..45cf91b 100644
+--- a/tests/codec/test_codec_replay.py
++++ b/tests/codec/test_codec_replay.py
+@@ -4,8 +4,8 @@ import tempfile
+ import unittest
+ from pathlib import Path
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.replay import load_replay
+-from lod.training.pairs import canonical
+ from lod.training.campaigns.recovery import _assert_config
+ 
+ 
+@@ -22,9 +22,9 @@ class ReplayTests(unittest.TestCase):
+ 
+     def teacher(self, **changes):
+         row = {"id": "train:0", "split": "train", "target": self.target,
+-               "target_sha256": hashlib.sha256(canonical(self.target).encode()).hexdigest(),
++               "target_sha256": hashlib.sha256(canonical_json(self.target).encode()).hexdigest(),
+                "encoder": {"status": "completed", "text": "invented compact text", "thread_id": "a"},
+-               "decoder": {"status": "completed", "text": canonical(self.target), "thread_id": "b"}}
++               "decoder": {"status": "completed", "text": canonical_json(self.target), "thread_id": "b"}}
+         row.update(changes)
+         (self.root / "case-000.json").write_text(json.dumps(row), encoding="utf-8")
+         return row
+@@ -67,9 +67,9 @@ class ReplayTests(unittest.TestCase):
+                     load_replay(self.rows, "dataset", verified_directories=[self.root])
+ 
+     def test_recomputes_exact_raw_arguments_and_requires_independent_completed_decode(self):
+-        for decoded, status, thread in ((canonical(self.target).replace('path\\\": \\\"a', 'path\\\":\\\"a'), "completed", "b"),
+-                                         (canonical(self.target), "failed", "b"),
+-                                         (canonical(self.target), "completed", "a")):
++        for decoded, status, thread in ((canonical_json(self.target).replace('path\\\": \\\"a', 'path\\\":\\\"a'), "completed", "b"),
++                                         (canonical_json(self.target), "failed", "b"),
++                                         (canonical_json(self.target), "completed", "a")):
+             self.teacher(decoder={"text": decoded, "status": status, "thread_id": thread})
+             with self.assertRaises(ValueError):
+                 load_replay(self.rows, "dataset", verified_directories=[self.root])
+@@ -77,9 +77,9 @@ class ReplayTests(unittest.TestCase):
+     def test_cached_codes_require_matching_dataset_train_ids_eos_and_recomputed_guard(self):
+         path = self.root / "report.json"
+         cached = {"dataset_sha256": "dataset", "decoder_sft_codes": [
+-            {"id": "train:0", "code": canonical(self.target), "encoder_generation": {"complete": True}},
++            {"id": "train:0", "code": canonical_json(self.target), "encoder_generation": {"complete": True}},
+             {"id": "train:0", "code": "lost data", "encoder_generation": {"complete": True}},
+-            {"id": "train:0", "code": canonical(self.target), "encoder_generation": {"complete": False}}]}
++            {"id": "train:0", "code": canonical_json(self.target), "encoder_generation": {"complete": False}}]}
+         path.write_text(json.dumps(cached), encoding="utf-8")
+         rows, stats = load_replay(self.rows, "dataset", reports=[path])
+         self.assertEqual(len(rows), 1)
+diff --git a/tests/codec/test_decode_probe.py b/tests/codec/test_decode_probe.py
+index 8e0af44..23d83fc 100644
+--- a/tests/codec/test_decode_probe.py
++++ b/tests/codec/test_decode_probe.py
+@@ -4,8 +4,8 @@ import tempfile
+ import unittest
+ from pathlib import Path
+ 
++from lod.training.evaluation import canonical_json
+ from lod.training.learned_codec.diagnostics.decode_probe import load_cases, resolve_precision
+-from lod.training.pairs import canonical
+ 
+ 
+ class DecodeProbeTests(unittest.TestCase):
+@@ -23,7 +23,7 @@ class DecodeProbeTests(unittest.TestCase):
+             target = {"tool_calls": []}
+             row = {"id": "heldout", "target": target, "split": "validation",
+                    "encoder": {"text": "empty tools"},
+-                   "target_sha256": hashlib.sha256(canonical(target).encode()).hexdigest()}
++                   "target_sha256": hashlib.sha256(canonical_json(target).encode()).hexdigest()}
+             path = root / "case-000.json"
+             path.write_text(json.dumps(row))
+             with self.assertRaises(ValueError):
+@@ -39,7 +39,7 @@ class DecodeProbeTests(unittest.TestCase):
+             root = Path(tmp)
+             row = {"id": "case", "target": {"a": 1}, "split": "train",
+                    "encoder": {"text": "a=1"},
+-                   "target_sha256": hashlib.sha256(canonical({"a": 1}).encode()).hexdigest()}
++                   "target_sha256": hashlib.sha256(canonical_json({"a": 1}).encode()).hexdigest()}
+             path = root / "case-000.json"
+             path.write_text(json.dumps(row))
+             self.assertEqual(load_cases(root)[0]["id"], "case")
+diff --git a/tests/codec/test_synthetic_tools.py b/tests/codec/test_synthetic_tools.py
+index 32f8d1c..d9de5c0 100644
+--- a/tests/codec/test_synthetic_tools.py
++++ b/tests/codec/test_synthetic_tools.py
+@@ -1,7 +1,7 @@
+ import copy
+ import unittest
+ 
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ from lod.training.synthetic_tools.dataset import strict_json, validate_rows
+ from lod.training.synthetic_tools.generate import generate_rows
+ 
+@@ -10,12 +10,12 @@ class SyntheticToolsTests(unittest.TestCase):
+     def test_complete_reproducible_disjoint_corpus(self):
+         rows = generate_rows()
+         self.assertEqual(len(rows), 5000)
+-        self.assertEqual(canonical(rows), canonical(generate_rows()))
++        self.assertEqual(canonical_json(rows), canonical_json(generate_rows()))
+         self.assertEqual(
+             [sum(r["split"] == s for r in rows) for s in ("train", "validation", "test")],
+             [4000, 500, 500],
+         )
+-        self.assertEqual(len({canonical(r["target"]) for r in rows}), 5000)
++        self.assertEqual(len({canonical_json(r["target"]) for r in rows}), 5000)
+         for row in rows:
+             for item in row["target"]["items"]:
+                 if item["type"] == "tool_call":
+diff --git a/tests/codec/test_training_evaluation.py b/tests/codec/test_training_evaluation.py
+index 84a2d7c..65256d9 100644
+--- a/tests/codec/test_training_evaluation.py
++++ b/tests/codec/test_training_evaluation.py
+@@ -1,7 +1,11 @@
+ import unittest
+ 
+-from lod.training.evaluation import reconstruction_metrics, select_examples, strict_json
+-from lod.training.pairs import canonical
++from lod.training.evaluation import (
++    canonical_json,
++    reconstruction_metrics,
++    select_examples,
++    strict_json,
++)
+ 
+ 
+ class EvaluationTests(unittest.TestCase):
+@@ -23,9 +27,9 @@ class EvaluationTests(unittest.TestCase):
+                 }
+             ],
+         }
+-        correct = canonical(target)
++        correct = canonical_json(target)
+         target["items"][0]["arguments_raw"] = '{"x":1}'
+-        result = reconstruction_metrics(canonical(target), correct)
++        result = reconstruction_metrics(canonical_json(target), correct)
+         self.assertTrue(result["valid_json"])
+         self.assertFalse(result["event_equal"])
+         self.assertFalse(result["tool_arguments_equal"])
+diff --git a/tests/datasets/test_curate_teacher_codes.py b/tests/datasets/test_curate_teacher_codes.py
+index 9817b5e..9506370 100644
+--- a/tests/datasets/test_curate_teacher_codes.py
++++ b/tests/datasets/test_curate_teacher_codes.py
+@@ -5,13 +5,13 @@ import tempfile
+ import unittest
+ 
+ from lod.datasets.curate_teacher_codes import select_proofs
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json
+ 
+ 
+ class TeacherCurationTests(unittest.TestCase):
+     def test_uses_independent_exact_retry_without_changing_bytes(self):
+         target = {"role": "assistant", "sequence": 1, "items": []}
+-        text = canonical(target)
++        text = canonical_json(target)
+         proof = {"id": "train:1", "split": "train", "target": target,
+                  "target_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                  "encoder": {"thread_id": "encoder", "status": "completed", "text": "code"},
+diff --git a/training/analysis/analyze_decode_failures.py b/training/analysis/analyze_decode_failures.py
+index 91ab22a..2281e75 100644
+--- a/training/analysis/analyze_decode_failures.py
++++ b/training/analysis/analyze_decode_failures.py
+@@ -7,8 +7,7 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
+-from lod.training.evaluation import first_difference, reconstruction_metrics, strict_json
+-from lod.training.pairs import canonical
++from lod.training.evaluation import canonical_json, first_difference, reconstruction_metrics, strict_json
+ 
+ 
+ def string_difference(expected, actual):
+@@ -30,11 +29,11 @@ def event_key(item):
+         return ('tool_call', str(item.get('call_id')))
+     if item.get('type') == 'opaque' and isinstance(item.get('raw'), dict) and 'id' in item['raw']:
+         return ('opaque', str(item['raw']['id']))
+-    return (str(item.get('type')), canonical(item))
++    return (str(item.get('type')), canonical_json(item))
+ 
+ 
+ def classify_case(row, target):
+-    target_text = canonical(target)
++    target_text = canonical_json(target)
+     generated = row.get('generated')
+     result = {'id': row['id'], 'mode': row.get('mode'), 'labels': [], 'tool_differences': [],
+               'alignment_note': 'Stable call/opaque IDs anchor alignment; unmatched replacements pair by position.'}
+@@ -72,8 +71,8 @@ def classify_case(row, target):
+     if first_difference({k: v for k, v in target.items() if k != 'items'},
+                         {k: v for k, v in actual.items() if k != 'items'}) is not None:
+         labels.append('envelope_metadata_changed')
+-    exact_expected = [canonical(item) for item in expected_items]
+-    exact_actual = [canonical(item) for item in actual_items]
++    exact_expected = [canonical_json(item) for item in expected_items]
++    exact_actual = [canonical_json(item) for item in actual_items]
+     reordered = Counter(exact_expected) == Counter(exact_actual) and exact_expected != exact_actual
+     if reordered:
+         labels.append('events_reordered')
+@@ -174,7 +173,7 @@ def main():
+         case = strict_json(path.read_text(encoding='utf-8'))
+         if case.get('split') not in ('train', 'validation') or case['id'] in references:
+             raise ValueError('Unique train/validation references required; final test remains sealed')
+-        if hashlib.sha256(canonical(case['target']).encode()).hexdigest() != case['target_sha256']:
++        if hashlib.sha256(canonical_json(case['target']).encode()).hexdigest() != case['target_sha256']:
+             raise ValueError('Reference target hash mismatch')
+         references[case['id']] = case['target']
+     if not references:
+diff --git a/training/colab/colab_decoder_thinking.py b/training/colab/colab_decoder_thinking.py
+index 7340d02..d32ad3b 100644
+--- a/training/colab/colab_decoder_thinking.py
++++ b/training/colab/colab_decoder_thinking.py
+@@ -32,7 +32,7 @@ def main():
+     from lod.training.learned_codec.batching import pad_prompts, trim_generated
+     from lod.training.learned_codec.generation import termination
+     from lod.training.learned_codec.objective import decoder_messages, reward
+-    from lod.training.pairs import canonical
++    from lod.training.evaluation import canonical_json
+ 
+     root = Path("/content/drive/MyDrive/LOD/training")
+     audit = root / "joint-audit-20260908T172621Z"
+@@ -41,7 +41,7 @@ def main():
+     dataset = Path("/content/lod-training-src/short-tools-v1/dataset.jsonl")
+     assert hashlib.sha256(dataset.read_bytes()).hexdigest() == previous["dataset_sha256"]
+     targets = {
+-        r["id"]: canonical(r["target"]) for r in map(json.loads, dataset.read_text().splitlines())
++        r["id"]: canonical_json(r["target"]) for r in map(json.loads, dataset.read_text().splitlines())
+     }
+     cases = previous["validation"][:32]
+     assert len(cases) == len({c["id"] for c in cases}) == 32
+diff --git a/training/experiments/batch-capacity/probe.py b/training/experiments/batch-capacity/probe.py
+index ce19586..87f3d6e 100644
+--- a/training/experiments/batch-capacity/probe.py
++++ b/training/experiments/batch-capacity/probe.py
+@@ -150,7 +150,7 @@ def main():
+         from lod.training.learned_codec.batch_loss import batch_response_loss
+         from lod.training.learned_codec.objective import encoder_messages, decoder_messages
+         from lod.training.learned_codec.tokenization import load_codec_tokenizer
+-        from lod.training.pairs import canonical
++        from lod.training.evaluation import canonical_json
+ 
+         if args.long_payload:
+             rows, selected, digest, report['proof_transport'] = long_payload_admission(args.source)
+@@ -170,7 +170,7 @@ def main():
+         terms = {'encoder': [], 'decoder': []}
+         for case in selected:
+             row = by_id[case['id']]
+-            target, code = canonical(row['target']), row['code']
++            target, code = canonical_json(row['target']), row['code']
+             for role, messages, response in [('encoder', encoder_messages(target), code),
+                                               ('decoder', decoder_messages(code), target)]:
+                 prompt = tokenizer.apply_chat_template(messages, tokenize=True,

@@ -1,0 +1,846 @@
+diff --git a/src/app/App.tsx b/src/app/App.tsx
+index 9320621..fbc29cb 100644
+--- a/src/app/App.tsx
++++ b/src/app/App.tsx
+@@ -32,7 +32,7 @@ import {
+   useSelectionAskAi,
+ } from "@/modules/ai";
+ import { AiComposerProvider } from "@/modules/ai/lib/composer";
+-import { native } from "@/modules/ai/lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { CommandPalette, createCommandItems } from "@/modules/command-palette";
+ import {
+   type EditorPaneHandle,
+@@ -956,7 +956,7 @@ export default function App() {
+       setLeafCwd(leafId, cwd);
+       if (cwd && !authorizedCwds.current.has(cwd)) {
+         authorizedCwds.current.add(cwd);
+-        native.workspaceAuthorize(cwd).catch(() => {
++        nativeBridge.workspaceAuthorize(cwd).catch(() => {
+           authorizedCwds.current.delete(cwd);
+         });
+       }
+diff --git a/src/app/components/useGitBranch.ts b/src/app/components/useGitBranch.ts
+index b1ed3a5..2db6c3d 100644
+--- a/src/app/components/useGitBranch.ts
++++ b/src/app/components/useGitBranch.ts
+@@ -1,4 +1,4 @@
+-import { native } from "@/modules/ai/lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { useEffect, useState } from "react";
+ 
+ // `nonce` forces a re-resolve (e.g. on command finish) so `git checkout` shows.
+@@ -12,7 +12,7 @@ export function useGitBranch(cwd: string | null, nonce = 0): string | null {
+       return;
+     }
+     let alive = true;
+-    native
++    nativeBridge
+       .gitResolveRepo(cwd)
+       .then((repo) => {
+         if (alive) setBranch(repo?.branch || null);
+diff --git a/src/app/hooks/useWorkspaceSwitcher.ts b/src/app/hooks/useWorkspaceSwitcher.ts
+index 43e39b2..9e859d3 100644
+--- a/src/app/hooks/useWorkspaceSwitcher.ts
++++ b/src/app/hooks/useWorkspaceSwitcher.ts
+@@ -1,6 +1,6 @@
+ import { type RefObject, useCallback, useEffect, useState } from "react";
+ import { homeDir } from "@tauri-apps/api/path";
+-import { native } from "@/modules/ai/lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import type { Tab } from "@/modules/tabs";
+ import {
+   getWslHome,
+@@ -45,7 +45,7 @@ export function useWorkspaceSwitcher({
+         const normalized = p.replace(/\\/g, "/");
+         setHome(normalized);
+         try {
+-          await native.workspaceAuthorize(normalized);
++          await nativeBridge.workspaceAuthorize(normalized);
+         } catch {
+           // Bootstrap already authorizes home from Rust; ignore.
+         }
+@@ -54,7 +54,7 @@ export function useWorkspaceSwitcher({
+   }, []);
+ 
+   useEffect(() => {
+-    native
++    nativeBridge
+       .workspaceCurrentDir()
+       .then(setLaunchCwd)
+       .catch(() => setLaunchCwd(null))
+@@ -65,7 +65,7 @@ export function useWorkspaceSwitcher({
+     setHome(nextHome);
+     setLaunchCwd(nextHome);
+     try {
+-      await native.workspaceAuthorize(nextHome);
++      await nativeBridge.workspaceAuthorize(nextHome);
+     } catch {
+       // Non-fatal — git panel will surface "not authorized" if needed.
+     }
+diff --git a/src/modules/ai/lib/native.ts b/src/lib/nativeBridge.ts
+similarity index 99%
+rename from src/modules/ai/lib/native.ts
+rename to src/lib/nativeBridge.ts
+index 507b795..0359b6b 100644
+--- a/src/modules/ai/lib/native.ts
++++ b/src/lib/nativeBridge.ts
+@@ -136,7 +136,7 @@ export type GitBranchListResult = {
+   branches: GitBranchEntry[];
+ };
+ 
+-export const native = {
++export const nativeBridge = {
+   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
+   workspaceAuthorize: (path: string) =>
+     invoke<string>("workspace_authorize", {
+diff --git a/src/modules/ai/components/AgentRunBridge.tsx b/src/modules/ai/components/AgentRunBridge.tsx
+index 6c075ea..2382135 100644
+--- a/src/modules/ai/components/AgentRunBridge.tsx
++++ b/src/modules/ai/components/AgentRunBridge.tsx
+@@ -1,7 +1,7 @@
+ import { useChat, type UIMessage } from "@ai-sdk/react";
+ import type { ToolUIPart, UIMessagePart } from "ai";
+ import { useEffect, useMemo, useRef } from "react";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { checkReadable } from "../lib/security";
+ import { resolvePath } from "../tools/tools";
+ import {
+@@ -357,7 +357,7 @@ async function readOriginal(
+   const safety = checkReadable(abs);
+   if (!safety.ok) return { content: "", isNewFile: false };
+   try {
+-    const r = await native.readFile(abs);
++    const r = await nativeBridge.readFile(abs);
+     if (r.kind === "text") return { content: r.content, isNewFile: false };
+     // Binary or oversized — we can't render the original sensibly. Show the
+     // proposed content as a "new" view; the user can still cancel.
+diff --git a/src/modules/ai/lib/security.ts b/src/modules/ai/lib/security.ts
+index 346e7aa..dabe725 100644
+--- a/src/modules/ai/lib/security.ts
++++ b/src/modules/ai/lib/security.ts
+@@ -23,7 +23,7 @@
+  *    case-variants (`/Users/me/.SSH/config` on macOS/Windows case-insensitive
+  *    filesystems) are caught.
+  *  - The caller is expected to additionally validate the *canonical* path
+- *    (post symlink resolution) via `native.canonicalize` + a second
++ *    (post symlink resolution) via `nativeBridge.canonicalize` + a second
+  *    `checkReadable` pass, since a symlink at an "innocent" path can point
+  *    into a protected directory.
+  */
+diff --git a/src/modules/ai/lib/transport.ts b/src/modules/ai/lib/transport.ts
+index 5df9064..e56c085 100644
+--- a/src/modules/ai/lib/transport.ts
++++ b/src/modules/ai/lib/transport.ts
+@@ -3,7 +3,7 @@ import type { CustomEndpoint } from "../config";
+ import { runAgentStream, type AgentUsageDelta } from "./agent";
+ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+ import { formatAiError } from "./errors";
+-import { native } from "./native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import type { ToolContext } from "../tools/tools";
+ 
+ const TERAX_MD_MAX_BYTES = 32 * 1024;
+@@ -16,7 +16,7 @@ async function readTeraxMd(workspaceRoot: string | null): Promise<string | null>
+   const cached = projectMemoryCache.get(workspaceRoot);
+   if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
+   try {
+-    const r = await native.readFile(path);
++    const r = await nativeBridge.readFile(path);
+     if (r.kind !== "text") {
+       projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
+       return null;
+diff --git a/src/modules/ai/store/planStore.ts b/src/modules/ai/store/planStore.ts
+index b77906c..feeb09a 100644
+--- a/src/modules/ai/store/planStore.ts
++++ b/src/modules/ai/store/planStore.ts
+@@ -1,5 +1,5 @@
+ import { create } from "zustand";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ 
+ export type QueuedEdit = {
+   id: string;
+@@ -51,9 +51,9 @@ export const usePlanStore = create<PlanState>((set, get) => ({
+     for (const q of items) {
+       try {
+         if (q.kind === "create_directory") {
+-          await native.createDir(q.path);
++          await nativeBridge.createDir(q.path);
+         } else {
+-          await native.writeFile(q.path, q.proposedContent);
++          await nativeBridge.writeFile(q.path, q.proposedContent);
+         }
+         results.push({ id: q.id, ok: true });
+       } catch (e) {
+diff --git a/src/modules/ai/tools/edit.test.ts b/src/modules/ai/tools/edit.test.ts
+index a84ef3e..587d47a 100644
+--- a/src/modules/ai/tools/edit.test.ts
++++ b/src/modules/ai/tools/edit.test.ts
+@@ -8,7 +8,7 @@ const nativeMock = vi.hoisted(() => ({
+   writeFile: vi.fn(async () => undefined),
+ }));
+ 
+-vi.mock("../lib/native", () => ({ native: nativeMock }));
++vi.mock("@/lib/nativeBridge", () => ({ nativeBridge: nativeMock }));
+ 
+ vi.mock("../lib/security", () => ({
+   checkWritableCanonical: vi.fn(async (path: string) => ({
+diff --git a/src/modules/ai/tools/edit.ts b/src/modules/ai/tools/edit.ts
+index d6893f6..41bf509 100644
+--- a/src/modules/ai/tools/edit.ts
++++ b/src/modules/ai/tools/edit.ts
+@@ -1,6 +1,6 @@
+ import { tool } from "ai";
+ import { z } from "zod";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { checkWritableCanonical } from "../lib/security";
+ import { newQueuedEditId, usePlanStore } from "../store/planStore";
+ import { resolvePath, type ToolContext } from "./context";
+@@ -21,7 +21,7 @@ async function applyEdits(
+   kind: "edit" | "multi_edit",
+   readCache: Map<string, { size: number; hash: number }>,
+ ): Promise<EditResult> {
+-  const r = await native.readFile(abs);
++  const r = await nativeBridge.readFile(abs);
+   if (r.kind === "binary")
+     return { error: "binary file refused", path: abs };
+   if (r.kind === "toolarge")
+@@ -104,7 +104,7 @@ async function applyEdits(
+   }
+ 
+   try {
+-    await native.writeFile(abs, content);
++    await nativeBridge.writeFile(abs, content);
+     readCache.set(abs, { size: content.length, hash: djb2(content) });
+     return {
+       ok: true,
+@@ -133,7 +133,7 @@ export function buildEditTools(ctx: ToolContext) {
+       needsApproval: true,
+       execute: async ({ path, old_string, new_string, replace_all }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
++        const safety = await checkWritableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+         if (!ctx.readCache.has(abs)) {
+@@ -170,7 +170,7 @@ export function buildEditTools(ctx: ToolContext) {
+       needsApproval: true,
+       execute: async ({ path, edits }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
++        const safety = await checkWritableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+         if (!ctx.readCache.has(abs)) {
+diff --git a/src/modules/ai/tools/fs.ts b/src/modules/ai/tools/fs.ts
+index 0cd07dd..b0b11d4 100644
+--- a/src/modules/ai/tools/fs.ts
++++ b/src/modules/ai/tools/fs.ts
+@@ -1,6 +1,6 @@
+ import { tool } from "ai";
+ import { z } from "zod";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import {
+   checkReadableCanonical,
+   checkWritableCanonical,
+@@ -42,11 +42,11 @@ export function buildFsTools(ctx: ToolContext) {
+       }),
+       execute: async ({ path, offset, limit }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
++        const safety = await checkReadableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+         try {
+-          const r = await native.readFile(abs);
++          const r = await nativeBridge.readFile(abs);
+           if (r.kind === "binary")
+             return { error: "binary file refused", path: abs, size: r.size };
+           if (r.kind === "toolarge")
+@@ -118,11 +118,11 @@ export function buildFsTools(ctx: ToolContext) {
+       }),
+       execute: async ({ path }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
++        const safety = await checkReadableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+         try {
+-          const entries = await native.readDir(abs);
++          const entries = await nativeBridge.readDir(abs);
+           return {
+             path: abs,
+             entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
+@@ -143,7 +143,7 @@ export function buildFsTools(ctx: ToolContext) {
+       needsApproval: true,
+       execute: async ({ path, content }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
++        const safety = await checkWritableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+ 
+@@ -151,7 +151,7 @@ export function buildFsTools(ctx: ToolContext) {
+           let original = "";
+           let isNewFile = false;
+           try {
+-            const r = await native.readFile(abs);
++            const r = await nativeBridge.readFile(abs);
+             if (r.kind === "text") original = r.content;
+           } catch {
+             isNewFile = true;
+@@ -172,7 +172,7 @@ export function buildFsTools(ctx: ToolContext) {
+         }
+ 
+         try {
+-          await native.writeFile(abs, content);
++          await nativeBridge.writeFile(abs, content);
+           ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+           return { path: abs, bytesWritten: content.length, ok: true };
+         } catch (e) {
+@@ -190,7 +190,7 @@ export function buildFsTools(ctx: ToolContext) {
+       needsApproval: true,
+       execute: async ({ path }) => {
+         const reqPath = resolvePath(path, ctx.getCwd());
+-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
++        const safety = await checkWritableCanonical(reqPath, nativeBridge.canonicalize);
+         if (!safety.ok) return { error: safety.reason, path: reqPath };
+         const abs = safety.canonical;
+         if (usePlanStore.getState().active) {
+@@ -206,7 +206,7 @@ export function buildFsTools(ctx: ToolContext) {
+           return { path: abs, queued_for_plan_review: true, ok: true };
+         }
+         try {
+-          await native.createDir(abs);
++          await nativeBridge.createDir(abs);
+           return { path: abs, ok: true };
+         } catch (e) {
+           return { error: String(e), path: abs };
+diff --git a/src/modules/ai/tools/search.test.ts b/src/modules/ai/tools/search.test.ts
+index 178fc1d..12803b8 100644
+--- a/src/modules/ai/tools/search.test.ts
++++ b/src/modules/ai/tools/search.test.ts
+@@ -8,8 +8,8 @@ const nativeMock = vi.hoisted(() => ({
+   grep: vi.fn(),
+ }));
+ 
+-vi.mock("../lib/native", () => ({
+-  native: nativeMock,
++vi.mock("@/lib/nativeBridge", () => ({
++  nativeBridge: nativeMock,
+ }));
+ 
+ import { buildSearchTools } from "./search";
+diff --git a/src/modules/ai/tools/search.ts b/src/modules/ai/tools/search.ts
+index c924b22..6dcfa78 100644
+--- a/src/modules/ai/tools/search.ts
++++ b/src/modules/ai/tools/search.ts
+@@ -1,6 +1,6 @@
+ import { tool } from "ai";
+ import { z } from "zod";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { checkReadable, checkReadableCanonical } from "../lib/security";
+ import { resolvePath, type ToolContext } from "./context";
+ 
+@@ -79,13 +79,13 @@ export function buildSearchTools(ctx: ToolContext) {
+         if (!r.ok) return { error: r.error };
+         const safety = await checkReadableCanonical(
+           r.path,
+-          native.canonicalize,
++          nativeBridge.canonicalize,
+         );
+         if (!safety.ok) return { error: safety.reason, root: r.path };
+         r.path = safety.canonical;
+         const cap = Math.min(max_results ?? 30, 500);
+         try {
+-          const res = await native.grep({
++          const res = await nativeBridge.grep({
+             pattern,
+             root: r.path,
+             glob,
+@@ -125,12 +125,12 @@ export function buildSearchTools(ctx: ToolContext) {
+         if (!r.ok) return { error: r.error };
+         const safety = await checkReadableCanonical(
+           r.path,
+-          native.canonicalize,
++          nativeBridge.canonicalize,
+         );
+         if (!safety.ok) return { error: safety.reason, root: r.path };
+         r.path = safety.canonical;
+         try {
+-          const res = await native.glob({
++          const res = await nativeBridge.glob({
+             pattern,
+             root: r.path,
+             maxResults: max_results,
+diff --git a/src/modules/ai/tools/shell.ts b/src/modules/ai/tools/shell.ts
+index 11ef2b6..f00d6da 100644
+--- a/src/modules/ai/tools/shell.ts
++++ b/src/modules/ai/tools/shell.ts
+@@ -1,6 +1,6 @@
+ import { tool } from "ai";
+ import { z } from "zod";
+-import { native } from "../lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { checkShellCommand } from "../lib/security";
+ import type { ToolContext } from "./context";
+ import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
+@@ -17,7 +17,7 @@ async function getSessionShell(
+ ): Promise<number> {
+   let p = sessionShells.get(sessionId);
+   if (!p) {
+-    p = native.shellSessionOpen(cwd);
++    p = nativeBridge.shellSessionOpen(cwd);
+     sessionShells.set(sessionId, p);
+   }
+   return p;
+@@ -45,7 +45,7 @@ export function buildShellTools(ctx: ToolContext) {
+         try {
+           const cwd = ctx.getCwd();
+           const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
+-          const r = await native.shellSessionRun(
++          const r = await nativeBridge.shellSessionRun(
+             shellId,
+             command,
+             cwd,
+@@ -79,7 +79,7 @@ export function buildShellTools(ctx: ToolContext) {
+         if (!safety.ok) return { error: safety.reason };
+         const effectiveCwd = cwd ?? ctx.getCwd();
+         try {
+-          const handle = await native.shellBgSpawn(command, effectiveCwd);
++          const handle = await nativeBridge.shellBgSpawn(command, effectiveCwd);
+           return { handle, command, cwd: effectiveCwd, ok: true };
+         } catch (e) {
+           return { error: String(e) };
+@@ -96,7 +96,7 @@ export function buildShellTools(ctx: ToolContext) {
+       }),
+       execute: async ({ handle, since_offset }) => {
+         try {
+-          const r = await native.shellBgLogs(handle, since_offset);
++          const r = await nativeBridge.shellBgLogs(handle, since_offset);
+           return r;
+         } catch (e) {
+           return { error: String(e) };
+@@ -110,7 +110,7 @@ export function buildShellTools(ctx: ToolContext) {
+       inputSchema: z.object({}),
+       execute: async () => {
+         try {
+-          const list = await native.shellBgList();
++          const list = await nativeBridge.shellBgList();
+           return { processes: list };
+         } catch (e) {
+           return { error: String(e) };
+@@ -124,7 +124,7 @@ export function buildShellTools(ctx: ToolContext) {
+       inputSchema: z.object({ handle: z.number().int() }),
+       execute: async ({ handle }) => {
+         try {
+-          await native.shellBgKill(handle);
++          await nativeBridge.shellBgKill(handle);
+           return { handle, ok: true };
+         } catch (e) {
+           return { error: String(e) };
+diff --git a/src/modules/editor/lib/diffCache.ts b/src/modules/editor/lib/diffCache.ts
+index 36a53fe..f289ccd 100644
+--- a/src/modules/editor/lib/diffCache.ts
++++ b/src/modules/editor/lib/diffCache.ts
+@@ -1,4 +1,4 @@
+-import { type GitDiffContentResult, native } from "@/modules/ai/lib/native";
++import { type GitDiffContentResult, nativeBridge } from "@/lib/nativeBridge";
+ import { currentWorkspaceScopeKey } from "@/modules/workspace";
+ 
+ const DIFF_CACHE_LIMIT = 6;
+@@ -62,7 +62,7 @@ export async function fetchWorkingDiff(
+   if (cached) return cached;
+   const pending = inflight.get(key);
+   if (pending) return pending;
+-  const p = native
++  const p = nativeBridge
+     .gitDiffContent(repoRoot, path, mode === "+", originalPath)
+     .then((res) => {
+       touch(key, res);
+@@ -86,7 +86,7 @@ export async function fetchCommitDiff(
+   if (cached) return cached;
+   const pending = inflight.get(key);
+   if (pending) return pending;
+-  const p = native
++  const p = nativeBridge
+     .gitCommitFileDiff(repoRoot, sha, path, originalPath)
+     .then((res) => {
+       touch(key, res);
+diff --git a/src/modules/explorer/FileExplorer.tsx b/src/modules/explorer/FileExplorer.tsx
+index b2f3325..f328780 100644
+--- a/src/modules/explorer/FileExplorer.tsx
++++ b/src/modules/explorer/FileExplorer.tsx
+@@ -43,7 +43,7 @@ import { useGitStatus } from "./lib/useGitStatus";
+ import type { GitStatusCode } from "./lib/gitStatusUtils";
+ import { useGlobalShortcuts } from "@/modules/shortcuts";
+ import { usePreferencesStore } from "@/modules/settings/preferences";
+-import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
++import type { GitStatusSnapshot } from "@/lib/nativeBridge";
+ import type { TerminalPathDropTarget } from "@/modules/terminal";
+ 
+ export type FileExplorerHandle = {
+diff --git a/src/modules/explorer/lib/gitStatusUtils.test.ts b/src/modules/explorer/lib/gitStatusUtils.test.ts
+index a60fdd1..4c33f98 100644
+--- a/src/modules/explorer/lib/gitStatusUtils.test.ts
++++ b/src/modules/explorer/lib/gitStatusUtils.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import type { GitChangedFile, GitStatusSnapshot } from "@/modules/ai/lib/native";
++import type { GitChangedFile, GitStatusSnapshot } from "@/lib/nativeBridge";
+ import {
+   buildGitStatusMap,
+   lookupGitStatus,
+diff --git a/src/modules/explorer/lib/gitStatusUtils.ts b/src/modules/explorer/lib/gitStatusUtils.ts
+index c0abe42..6db42d6 100644
+--- a/src/modules/explorer/lib/gitStatusUtils.ts
++++ b/src/modules/explorer/lib/gitStatusUtils.ts
+@@ -1,4 +1,4 @@
+-import type { GitChangedFile, GitStatusSnapshot } from "@/modules/ai/lib/native";
++import type { GitChangedFile, GitStatusSnapshot } from "@/lib/nativeBridge";
+ 
+ export type GitStatusCode = "M" | "A" | "D" | "U" | "R";
+ 
+diff --git a/src/modules/explorer/lib/useGitStatus.ts b/src/modules/explorer/lib/useGitStatus.ts
+index a42cfa1..9d6dd35 100644
+--- a/src/modules/explorer/lib/useGitStatus.ts
++++ b/src/modules/explorer/lib/useGitStatus.ts
+@@ -1,4 +1,4 @@
+-import { native, type GitStatusSnapshot } from "@/modules/ai/lib/native";
++import { nativeBridge, type GitStatusSnapshot } from "@/lib/nativeBridge";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import {
+   bubbleUpDirectoryStatuses,
+@@ -27,7 +27,7 @@ export function useGitStatus(
+       return;
+     }
+     const req = ++reqRef.current;
+-    void native
++    void nativeBridge
+       .canonicalize(workspaceRoot)
+       .then((c) => {
+         if (req === reqRef.current) setCanonicalRoot(c);
+diff --git a/src/modules/git-history/GitHistoryPane.tsx b/src/modules/git-history/GitHistoryPane.tsx
+index 1e6975a..c3a901c 100644
+--- a/src/modules/git-history/GitHistoryPane.tsx
++++ b/src/modules/git-history/GitHistoryPane.tsx
+@@ -8,10 +8,10 @@ import { Spinner } from "@/components/ui/spinner";
+ import { TooltipProvider } from "@/components/ui/tooltip";
+ import { cn } from "@/lib/utils";
+ import {
+-  native,
++  nativeBridge,
+   type GitCommitFileChange,
+   type GitLogEntry,
+-} from "@/modules/ai/lib/native";
++} from "@/lib/nativeBridge";
+ import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+ import {
+   Copy01Icon,
+@@ -320,7 +320,7 @@ export function GitHistoryPane({
+     setError(null);
+     setEndReached(false);
+     try {
+-      const entries = await native.gitLog(repoRoot, { limit: PAGE_SIZE });
++      const entries = await nativeBridge.gitLog(repoRoot, { limit: PAGE_SIZE });
+       if (requestId !== requestIdRef.current) return;
+       setCommits(entries);
+       setLoadStatus("idle");
+@@ -340,7 +340,7 @@ export function GitHistoryPane({
+     inflightMoreRef.current = true;
+     setLoadStatus("more");
+     try {
+-      const entries = await native.gitLog(repoRoot, {
++      const entries = await nativeBridge.gitLog(repoRoot, {
+         limit: PAGE_SIZE,
+         beforeSha: last.sha,
+       });
+@@ -371,7 +371,7 @@ export function GitHistoryPane({
+ 
+   useEffect(() => {
+     let cancelled = false;
+-    native
++    nativeBridge
+       .gitRemoteUrl(repoRoot)
+       .then((url) => {
+         if (cancelled) return;
+@@ -432,7 +432,7 @@ export function GitHistoryPane({
+       cache.set(sha, { state: "loading" });
+       bumpFiles();
+       try {
+-        const files = await native.gitCommitFiles(repoRoot, sha);
++        const files = await nativeBridge.gitCommitFiles(repoRoot, sha);
+         cache.set(sha, { state: "loaded", files });
+         while (cache.size > FILES_CACHE_LIMIT) {
+           const oldest = cache.keys().next().value;
+diff --git a/src/modules/git-history/lib/graph.test.ts b/src/modules/git-history/lib/graph.test.ts
+index 4f5b145..9b45b7a 100644
+--- a/src/modules/git-history/lib/graph.test.ts
++++ b/src/modules/git-history/lib/graph.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import type { GitLogEntry } from "@/modules/ai/lib/native";
++import type { GitLogEntry } from "@/lib/nativeBridge";
+ import { LANE_COLORS, laneColor, layoutGraph } from "./graph";
+ 
+ function commit(sha: string, parents: string[]): GitLogEntry {
+diff --git a/src/modules/git-history/lib/graph.ts b/src/modules/git-history/lib/graph.ts
+index 594b94a..d3947a6 100644
+--- a/src/modules/git-history/lib/graph.ts
++++ b/src/modules/git-history/lib/graph.ts
+@@ -15,7 +15,7 @@
+ // Lane colors are stable per slot index. This keeps the rail readable when
+ // you load more pages, since lane indices don't shift retroactively.
+ 
+-import type { GitLogEntry } from "@/modules/ai/lib/native";
++import type { GitLogEntry } from "@/lib/nativeBridge";
+ 
+ export type LaneColor = string;
+ 
+diff --git a/src/modules/source-control/SourceControlPanel.tsx b/src/modules/source-control/SourceControlPanel.tsx
+index 4fe9740..17250b8 100644
+--- a/src/modules/source-control/SourceControlPanel.tsx
++++ b/src/modules/source-control/SourceControlPanel.tsx
+@@ -37,7 +37,7 @@ import {
+ } from "@/components/ui/tooltip";
+ import { IS_MAC } from "@/lib/platform";
+ import { cn } from "@/lib/utils";
+-import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
++import { type GitBranchEntry, nativeBridge } from "@/lib/nativeBridge";
+ import {
+   copyToClipboard,
+   revealInFinder,
+@@ -187,7 +187,7 @@ function BranchDropdown({
+     setLoading(true);
+     setError(null);
+     try {
+-      const result = await native.gitListBranches(repoRoot);
++      const result = await nativeBridge.gitListBranches(repoRoot);
+       if (id !== requestRef.current) return;
+       setBranches(result.branches);
+     } catch (e) {
+@@ -213,7 +213,7 @@ function BranchDropdown({
+       checkoutInFlight.current = true;
+       setCheckingOut(true);
+       try {
+-        await native.gitCheckoutBranch(repoRoot, branch);
++        await nativeBridge.gitCheckoutBranch(repoRoot, branch);
+         setBranches([]);
+         setOpen(false);
+         onRefresh();
+diff --git a/src/modules/source-control/useSourceControl.ts b/src/modules/source-control/useSourceControl.ts
+index e0115f6..f84a8b8 100644
+--- a/src/modules/source-control/useSourceControl.ts
++++ b/src/modules/source-control/useSourceControl.ts
+@@ -1,8 +1,8 @@
+ import {
+-  native,
++  nativeBridge,
+   type GitRepoInfo,
+   type GitStatusSnapshot,
+-} from "@/modules/ai/lib/native";
++} from "@/lib/nativeBridge";
+ import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ 
+@@ -239,7 +239,7 @@ export function useSourceControl(
+         if (reusableRoot) {
+           try {
+             repo = stateRef.current.repo ?? null;
+-            status = await native.gitStatus(reusableRoot);
++            status = await nativeBridge.gitStatus(reusableRoot);
+             if (requestId !== requestIdRef.current) return;
+             if (!repo || repo.repoRoot !== reusableRoot) {
+               repo = {
+@@ -250,7 +250,7 @@ export function useSourceControl(
+               };
+             }
+           } catch {
+-            const snapshot = await native.gitPanelSnapshot(contextPath);
++            const snapshot = await nativeBridge.gitPanelSnapshot(contextPath);
+             if (requestId !== requestIdRef.current) return;
+             if (!snapshot.repo) {
+               setState((current) => ({
+@@ -267,7 +267,7 @@ export function useSourceControl(
+             status = snapshot.status ?? null;
+           }
+         } else {
+-          const snapshot = await native.gitPanelSnapshot(contextPath);
++          const snapshot = await nativeBridge.gitPanelSnapshot(contextPath);
+           if (requestId !== requestIdRef.current) return;
+           if (!snapshot.repo) {
+             setState((current) => ({
+@@ -307,11 +307,11 @@ export function useSourceControl(
+ 
+         if (shouldAutoFetch) {
+           try {
+-            await native.gitFetch(repo.repoRoot);
++            await nativeBridge.gitFetch(repo.repoRoot);
+             touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
+             nextRemoteError = null;
+             if (requestId !== requestIdRef.current) return;
+-            status = await native.gitStatus(repo.repoRoot);
++            status = await nativeBridge.gitStatus(repo.repoRoot);
+             if (requestId !== requestIdRef.current) return;
+           } catch (error) {
+             nextRemoteError = normalizeError(error);
+@@ -389,14 +389,14 @@ export function useSourceControl(
+ 
+       try {
+         if (action === "fetch") {
+-          await native.gitFetch(repo.repoRoot);
++          await nativeBridge.gitFetch(repo.repoRoot);
+           touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
+         } else if (action === "pull") {
+-          await native.gitFetch(repo.repoRoot);
++          await nativeBridge.gitFetch(repo.repoRoot);
+           touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
+-          await native.gitPullFfOnly(repo.repoRoot);
++          await nativeBridge.gitPullFfOnly(repo.repoRoot);
+         } else {
+-          await native.gitPush(repo.repoRoot);
++          await nativeBridge.gitPush(repo.repoRoot);
+         }
+         setState((current) => ({ ...current, lastRemoteError: null }));
+         await refresh({ remote: "never" });
+diff --git a/src/modules/source-control/useSourceControlContext.ts b/src/modules/source-control/useSourceControlContext.ts
+index 940b22d..d7be634 100644
+--- a/src/modules/source-control/useSourceControlContext.ts
++++ b/src/modules/source-control/useSourceControlContext.ts
+@@ -1,5 +1,5 @@
+ import { useCallback, useMemo } from "react";
+-import { native } from "@/modules/ai/lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import type { SidebarViewId } from "@/modules/sidebar";
+ import type { Tab } from "@/modules/tabs";
+ import { useSourceControl } from "./useSourceControl";
+@@ -93,7 +93,7 @@ export function useSourceControlContext({
+     }
+     if (!sourceControlContextPath) return;
+     try {
+-      const repo = await native.gitResolveRepo(sourceControlContextPath);
++      const repo = await nativeBridge.gitResolveRepo(sourceControlContextPath);
+       if (!repo) return;
+       openCommitHistoryTab({ repoRoot: repo.repoRoot, branch: repo.branch });
+     } catch {
+diff --git a/src/modules/source-control/useSourceControlPanel.ts b/src/modules/source-control/useSourceControlPanel.ts
+index 74a3776..f869fbd 100644
+--- a/src/modules/source-control/useSourceControlPanel.ts
++++ b/src/modules/source-control/useSourceControlPanel.ts
+@@ -1,10 +1,10 @@
+ import {
+-  native,
++  nativeBridge,
+   type GitChangedFile,
+   type GitDiscardEntry,
+   type GitRepoInfo,
+   type GitStatusSnapshot,
+-} from "@/modules/ai/lib/native";
++} from "@/lib/nativeBridge";
+ import { useChatStore } from "@/modules/ai/store/chatStore";
+ import {
+   modelSupportsTemperature,
+@@ -703,7 +703,7 @@ export function useSourceControlPanel(
+       await runMutation(
+         `stage:${entry.path}`,
+         (s) => optimisticStage(s, paths),
+-        () => native.gitStage(repo.repoRoot, [entry.path]),
++        () => nativeBridge.gitStage(repo.repoRoot, [entry.path]),
+         [entry.path],
+       );
+     },
+@@ -717,7 +717,7 @@ export function useSourceControlPanel(
+       await runMutation(
+         `unstage:${entry.path}`,
+         (s) => optimisticUnstage(s, paths),
+-        () => native.gitUnstage(repo.repoRoot, [entry.path]),
++        () => nativeBridge.gitUnstage(repo.repoRoot, [entry.path]),
+         [entry.path],
+       );
+     },
+@@ -758,7 +758,7 @@ export function useSourceControlPanel(
+         ? `discard:${list[0].path}`
+         : "discard:all",
+       (s) => optimisticDiscard(s, paths),
+-      () => native.gitDiscard(repo.repoRoot, entries),
++      () => nativeBridge.gitDiscard(repo.repoRoot, entries),
+       [...paths],
+     );
+   }, [pendingDiscard, repo, runMutation]);
+@@ -769,7 +769,7 @@ export function useSourceControlPanel(
+     await runMutation(
+       "stage:all",
+       (s) => optimisticStage(s, paths),
+-      () => native.gitStage(repo.repoRoot, [...paths]),
++      () => nativeBridge.gitStage(repo.repoRoot, [...paths]),
+       [...paths],
+     );
+   }, [repo, runMutation, unstagedEntries]);
+@@ -780,7 +780,7 @@ export function useSourceControlPanel(
+     await runMutation(
+       "unstage:all",
+       (s) => optimisticUnstage(s, paths),
+-      () => native.gitUnstage(repo.repoRoot, [...paths]),
++      () => nativeBridge.gitUnstage(repo.repoRoot, [...paths]),
+       [...paths],
+     );
+   }, [repo, runMutation, stagedEntries]);
+@@ -814,14 +814,14 @@ export function useSourceControlPanel(
+         await runMutation(
+           `unstage:${entry.path}`,
+           (s) => optimisticUnstage(s, paths),
+-          () => native.gitUnstage(repo.repoRoot, [entry.path]),
++          () => nativeBridge.gitUnstage(repo.repoRoot, [entry.path]),
+           [entry.path],
+         );
+       } else {
+         await runMutation(
+           `stage:${entry.path}`,
+           (s) => optimisticStage(s, paths),
+-          () => native.gitStage(repo.repoRoot, [entry.path]),
++          () => nativeBridge.gitStage(repo.repoRoot, [entry.path]),
+           [entry.path],
+         );
+       }
+@@ -873,7 +873,7 @@ export function useSourceControlPanel(
+         await Promise.all([
+           import("@/modules/ai/lib/agent"),
+           import("ai"),
+-          native.gitDiff(repo.repoRoot, null, true),
++          nativeBridge.gitDiff(repo.repoRoot, null, true),
+         ]);
+       const { text: diffText, truncated } = truncateDiff(diff.diffText);
+       const chatState = useChatStore.getState();
+@@ -944,7 +944,7 @@ export function useSourceControlPanel(
+     setActionMessage(null);
+     setActionError(null);
+     try {
+-      const result = await native.gitCommit(repo.repoRoot, commitMessage);
++      const result = await nativeBridge.gitCommit(repo.repoRoot, commitMessage);
+       setCommitMessage("");
+       setActionMessage(
+         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
+diff --git a/src/modules/spaces/lib/useSpacesBoot.ts b/src/modules/spaces/lib/useSpacesBoot.ts
+index 81e6e62..c750a59 100644
+--- a/src/modules/spaces/lib/useSpacesBoot.ts
++++ b/src/modules/spaces/lib/useSpacesBoot.ts
+@@ -1,4 +1,4 @@
+-import { native } from "@/modules/ai/lib/native";
++import { nativeBridge } from "@/lib/nativeBridge";
+ import { usePreferencesStore } from "@/modules/settings/preferences";
+ import type { Tab } from "@/modules/tabs";
+ import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
+@@ -114,7 +114,7 @@ export function useSpacesBoot({
+         }
+ 
+         await Promise.allSettled(
+-          uniqueCwds(bootTabs).map((cwd) => native.workspaceAuthorize(cwd)),
++          uniqueCwds(bootTabs).map((cwd) => nativeBridge.workspaceAuthorize(cwd)),
+         );
+ 
+         const initialActiveIndex: Record<string, number> = {};

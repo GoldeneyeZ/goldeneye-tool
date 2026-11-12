@@ -1,0 +1,76 @@
+{
+  "name": "goldeneye-rename-refactor-dirty",
+  "output": "../../../target/agent-bench/goldeneye-rename-refactor-dirty/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\.gab-src\\goldeneye-tool",
+  "base_ref": "630c53133ccade8963ae0b551db86180b7b2c78b",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/goldeneye-rename-refactor-dirty",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\ger-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\ger-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "goldeneye-rename-refactor-dirty",
+      "prompt_file": "../tasks/goldeneye-rename-refactor-dirty.md",
+      "source_language": "Rust",
+      "source_extensions": [
+        ".rs"
+      ],
+      "overlay": {
+        "patch_file": "../overlays/goldeneye-rename-refactor-dirty.patch"
+      },
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/goldeneye-rename-refactor-dirty.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "crates/",
+      "docs/"
+    ],
+    "min_paths": 1,
+    "max_paths": 12
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full",
+        "GOLDENEYE_INCLUDE_PATHS": "crates;xtask"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

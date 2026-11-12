@@ -1,0 +1,74 @@
+{
+  "name": "agentsview-sync-flow-qa-dirty",
+  "output": "../../../target/agent-bench/agentsview-sync-flow-qa-dirty/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\agentsview",
+  "base_ref": "2e403591553b58abd09e13ce65fbdeab42f31715",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/agentsview-sync-flow-qa-dirty",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\agv-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\agv-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "agentsview-sync-flow-qa-dirty",
+      "prompt_file": "../tasks/agentsview-sync-flow-qa-dirty.md",
+      "source_language": "Go",
+      "source_extensions": [
+        ".go"
+      ],
+      "overlay": {
+        "patch_file": "../overlays/agentsview-sync-flow-qa-dirty.patch"
+      },
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/fact-checklist.mjs",
+          "--checklist",
+          "../graders/fixtures/agentsview-sync-flow-qa-dirty.checklist.json",
+          "--run-dir",
+          "{runDir}",
+          "--worktree",
+          "{worktree}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "max_paths": 0
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "name": "spring-event-listener-flow-qa",
+  "output": "../../../target/agent-bench/spring-event-listener-flow-qa/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\spring-framework",
+  "base_ref": "daf955157871e4ac6f192e06b71d6cc595eb979b",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/spring-event-listener-flow-qa",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\sev-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\sev-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "spring-event-listener-flow-qa",
+      "prompt_file": "../tasks/spring-event-listener-flow-qa.md",
+      "source_language": "Java",
+      "source_extensions": [
+        ".java"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/fact-checklist.mjs",
+          "--checklist",
+          "../graders/fixtures/spring-event-listener-flow-qa.checklist.json",
+          "--run-dir",
+          "{runDir}",
+          "--worktree",
+          "{worktree}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "max_paths": 0
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full",
+        "GOLDENEYE_INCLUDE_PATHS": "spring-core/src/main/java;spring-core/src/test/java;spring-beans/src/main/java;spring-beans/src/test/java;spring-context/src/main/java;spring-context/src/test/java"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "source": "final-message",
+  "min_facts": 11,
+  "facts": [
+    {
+      "id": "discovery-processor-callback",
+      "all": ["EventListenerMethodProcessor", "afterSingletonsInstantiated"]
+    },
+    {
+      "id": "callback-triggered-by-preinstantiate-singletons",
+      "all": ["preInstantiateSingletons"]
+    },
+    {
+      "id": "factory-creates-method-adapter-and-registers-it",
+      "all": ["DefaultEventListenerFactory", "ApplicationListenerMethodAdapter", "addApplicationListener"]
+    },
+    {
+      "id": "infrastructure-beans-from-annotation-config-utils",
+      "all": ["AnnotationConfigUtils"]
+    },
+    {
+      "id": "non-application-event-wrapped-as-payload-event",
+      "all": ["PayloadApplicationEvent"]
+    },
+    {
+      "id": "early-events-held-and-replayed",
+      "all": ["earlyApplicationEvents", "registerListeners"]
+    },
+    {
+      "id": "context-delegates-to-simple-multicaster",
+      "all": ["AbstractApplicationContext", "SimpleApplicationEventMulticaster", "multicastEvent"]
+    },
+    {
+      "id": "ordered-chain-multicast-to-reflective-invoke",
+      "all": ["multicastEvent.*?invokeListener.*?onApplicationEvent.*?processEvent.*?doInvoke(?!Listener)"]
+    },
+    {
+      "id": "selection-methods",
+      "all": ["retrieveApplicationListeners|getApplicationListeners", "supportsEvent"]
+    },
+    {
+      "id": "cache-and-key",
+      "all": [
+        "retrieverCache|ListenerCacheKey|CachedListenerRetriever",
+        "source\\W{0,3}(type|class)|sourceType|(type|class) of (the |its |the event'?s? )?source"
+      ]
+    },
+    {
+      "id": "async-condition",
+      "all": ["supportsAsyncExecution", "task\\W{0,2}executor"]
+    },
+    {
+      "id": "rejected-execution-falls-back-to-caller",
+      "all": ["RejectedExecutionException"],
+      "any": [
+        "call(ing|er'?s?) thread",
+        "publish(ing|er'?s?) thread",
+        "(current|same|local) thread",
+        "locally",
+        "synchronous",
+        "inline",
+        "directly"
+      ]
+    },
+    {
+      "id": "error-handler-or-propagation",
+      "all": ["ErrorHandler"],
+      "any": [
+        "propagat",
+        "re-?throw",
+        "thrown (back )?(to|into|in|on|up)",
+        "bubbl",
+        "escap",
+        "back to the (caller|publisher)",
+        "reach(es)? the (caller|publisher)",
+        "(caller|publisher) (of publishEvent )?(sees|gets|receives)"
+      ]
+    },
+    {
+      "id": "return-value-handling",
+      "all": ["handleResult", "CompletionStage|CompletableFuture", "array|collection"]
+    }
+  ],
+  "forbidden": [
+    {
+      "id": "claims-async-dispatch-by-default",
+      "any": [
+        "(listeners?|events?|invocations?|dispatch(ing)?|multicast(ing|er)?|delivery|execution)\\s+(is|are|happens|runs?|run)\\s+(always\\s+)?((invoked|dispatched|executed|run|delivered|called)\\s+)?asynchronous(ly)?\\s+by\\s+default",
+        "by\\s+default,?\\s+(the\\s+)?(listeners?|events?)\\s+(is|are)\\s+(invoked|dispatched|executed|run|delivered)\\s+asynchronously"
+      ]
+    },
+    {
+      "id": "claims-return-value-is-ignored",
+      "any": [
+        "(?<!\\b(null|void|nothing|no|empty)\\b[^.\\n]{0,40})return(ed)?\\s+values?\\s+(is|are)\\s+(simply\\s+|silently\\s+|always\\s+|just\\s+)?(ignored|discarded)",
+        "non-?(void|null)\\s+(return(ed)?\\s+values?|results?)\\s+(is|are)\\s+(simply\\s+|silently\\s+|always\\s+|just\\s+)?(ignored|discarded|dropped)"
+      ]
+    },
+    {
+      "id": "claims-result-published-only-if-application-event",
+      "any": [
+        "only\\s+(if|when)\\s+(it|the\\s+(result|return(ed)?\\s+value))\\s+is\\s+an?\\s+[`*]*ApplicationEvent"
+      ]
+    },
+    {
+      "id": "claims-processor-is-bean-post-processor",
+      "any": [
+        "EventListenerMethodProcessor[`*\\s]*(,\\s*|\\(\\s*|:\\s*|is\\s+|as\\s+|implements\\s+)(an?\\s+|the\\s+)?[`*]*(Smart\\w*)?BeanPostProcessor"
+      ]
+    },
+    {
+      "id": "claims-exceptions-swallowed-by-default",
+      "any": [
+        "by\\s+default[^.\\n]{0,80}(exceptions?|errors?)[^.\\n]{0,40}(?<!not\\s|never\\s|n't\\s)(swallowed|logged\\s+and\\s+(ignored|suppressed|swallowed))",
+        "(without|with\\s+no|in\\s+the\\s+absence\\s+of)\\s+(an?\\s+)?[`*]*error\\s?handler[`*]*[^.\\n]{0,80}(?<!not\\s|never\\s|n't\\s)(swallowed|logged\\s+and\\s+(ignored|suppressed|swallowed))"
+      ]
+    }
+  ]
+}

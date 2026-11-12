@@ -1,0 +1,33 @@
+Live-update path of `agentsview serve`.
+
+1. Call chain
+
+a. internal/sync/watcher.go - Watcher.loop reads fsnotify events and calls Watcher.handleEvent. handleEvent returns immediately unless event.Op has one of Write, Create, Remove or Rename set (checked inline); for a Create it calls watchIfDir so new directories get watched; then it records pending[event.Name] = now.
+b. internal/sync/watcher.go - on every debounce tick Watcher.flush collects the paths that have been pending for at least the debounce period (watcherDebounce = 500ms, set in cmd/agentsview/main.go), logs "watcher: N file(s) changed, triggering sync" and calls w.onChange(ready).
+c. cmd/agentsview/main.go - onChange is the closure runServe passes to startFileWatcher (which builds the watcher with sync.NewWatcher(watcherDebounce, onChange, cfg.WatchExcludePatterns)). The closure runs idleTracker.Do(func() { engine.SyncPathsContext(ctx, paths) }).
+d. internal/sync/engine.go - Engine.SyncPathsContext is the engine entry point (SyncPaths is the context-less wrapper). Before anything is parsed it applies, in order:
+   - refuseWriteInForceParse("SyncPaths");
+   - captureSQLiteContainerStates();
+   - e.classifyPaths(paths) (engine.go), which for each path calls classifyCodexIndexPath and classifyProviderChangedPath (the latter asks every provider-authoritative provider's SourcesForChangedPath, e.g. internal/parser/claude_provider.go), merges duplicates per agent+path, then runs expandClaudeDuplicateCandidates, dedupeDiscoveredFiles and dedupeClaudeDiscoveredFiles. An empty result makes SyncPathsContext return.
+e. internal/sync/engine.go - under syncMu: startWorkers(ctx, files) fans the files out to a worker pool (min(max(NumCPU,2), maxWorkers=8)); each worker calls processFile, which delegates to processProviderFile (provider lookup, provider.Fingerprint, the skip checks, tryProviderIncrementalAppend -> tryIncrementalJSONL -> provider.ParseIncremental, otherwise a full provider.Parse).
+f. internal/sync/engine.go - collectAndBatch drains the results. An incremental result goes to writeIncremental, which calls db.WriteSessionIncremental (internal/db/messages.go) - that is the database call that stores an append. Full parses become pendingWrite entries flushed by writeBatch: db.UpsertSession (internal/db/sessions.go), then writeMessages -> db.InsertMessages, or db.ReplaceSessionContent when messages must be replaced.
+g. internal/sync/engine.go - back in SyncPathsContext: persistSkipCache, lastSync/lastSyncStats are recorded, and a deferred closure that runs after syncMu.Unlock calls e.emit("sessions") only if stats.Synced > 0. emit forwards to the configured Emitter.
+h. internal/server/broadcaster.go - the Emitter is the server.Broadcaster created in runServe (passed as EngineConfig.Emitter, optionally wrapped in teeEmitter). Broadcaster.Emit rate-limits (leading edge immediately, later emits inside cfg.EventsCoalesceInterval coalesced into one trailing broadcast via flushTrailing) and broadcastLocked sends the Event to every subscriber channel.
+i. internal/server/huma_routes_sessions.go - Server.humaEvents (GET /api/v1/events) calls s.broadcaster.Subscribe() and writes each event as the SSE event "data_changed" with payload {"scope": "sessions"} (plus periodic "heartbeat" events). The frontend listens for data_changed and refetches.
+
+2. What is dropped early
+
+- Watcher: handleEvent ignores every fsnotify event that is not a Write, Create, Remove or Rename, i.e. Chmod-only events. Directories matching the watch exclude patterns are never watched, and repeated events for one path collapse into a single pending entry until the debounce elapses.
+- Before classification: nothing. Every debounced path is handed unfiltered to classifyPaths; there is no separate filtering function, the only filter is classification itself.
+- No agent claims the path: classifyPaths returns no files and SyncPathsContext returns silently before taking syncMu - no parse, no database write, no emit.
+
+3. Unchanged, appended or rewritten
+
+- Unchanged: processProviderFile returns processResult{skip: true} when the source matches what is already stored. For Claude that is providerSingleSessionFresh -> shouldSkipFile (shouldSkipFileWithPrefix): the stored file_size and file_mtime of the session equal the current os.Stat size and mtime and the stored data version is current (with extra inode/device and content-hash guards). There is also the in-memory skip cache (skipCache: cache key -> mtime, persisted by persistSkipCache), shouldSkipProviderSource, and the generic DB check providerSourceUnchangedInDB (GetFileInfoByPath size + mtime equal the fingerprint and data_version is current).
+- Appended: tryProviderIncrementalAppend (provider must declare IncrementalAppend) drives tryIncrementalJSONL, which loads the stored row with db.GetSessionForIncremental and parses only the bytes after the stored file size.
+- It falls back to a full re-parse when, among others: there is no stored session or its stored size is 0; the stored data version is older than db.CurrentDataVersion(); the stored message count is 0; the file's inode/device identity changed (file was replaced); the file was truncated (current size smaller than stored); the size is unchanged although the file changed; the incremental parser reports a DAG/fork or another error; or the first appended Claude assistant chunk shares its message.id with the stored tail. The identity, truncation, same-size and message.id cases set forceReplace so the write path replaces the stored messages instead of appending.
+
+4. Failures
+
+- A parse failure is returned as processResult{err: ...}. collectAndBatch calls stats.RecordFailed(), logs it with log.Printf("sync error: %v", r.err) and continues with the next result, so the rest of the pass continues (only context cancellation aborts it). Nothing is returned to the watcher - SyncPathsContext has no return value - so the error ends up in the server log and in the failed count of the SyncStats kept as lastSyncStats. Parse errors are not skip-cached (noCacheSkip), so the file is tried again on its next sync. No event is emitted unless at least one session was synced.
+- Slow browser: every subscriber has a buffered channel of broadcasterBufferCap = 8 events. broadcastLocked uses a non-blocking send, so when that buffer is full the event is dropped for that subscriber only; the engine and the other clients are never blocked.

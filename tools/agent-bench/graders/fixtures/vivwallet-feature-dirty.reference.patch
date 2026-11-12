@@ -1,0 +1,171 @@
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
+index 56f200c..6764fae 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
+@@ -4,6 +4,7 @@ import com.invivoo.vivwallet.api.domain.action.ActionRepository;
+ import com.invivoo.vivwallet.api.domain.user.User;
+ import com.invivoo.vivwallet.api.domain.user.UserRepository;
+ import com.invivoo.vivwallet.api.interfaces.payments.PaymentDto;
++import com.invivoo.vivwallet.api.interfaces.payments.PaymentsSummaryDto;
+ import lombok.AllArgsConstructor;
+ import org.springframework.stereotype.Service;
+ 
+@@ -47,6 +48,21 @@ public class PaymentService {
+                              .orElse(List.of());
+     }
+ 
++    public PaymentsSummaryDto summarize(LocalDate from, LocalDate to) {
++        List<Payment> payments = getAll().stream()
++                                         .filter(payment -> from == null || !payment.getDate().isBefore(from))
++                                         .filter(payment -> to == null || !payment.getDate().isAfter(to))
++                                         .collect(Collectors.toList());
++        int totalViv = payments.stream()
++                               .mapToInt(Payment::getViv)
++                               .sum();
++        return PaymentsSummaryDto.builder()
++                                 .count(payments.size())
++                                 .totalViv(totalViv)
++                                 .totalAmount(VivAmounts.toEuros(totalViv))
++                                 .build();
++    }
++
+     public Optional<Payment> findByDateAndReceiver(LocalDate paymentDate, User user) {
+         return paymentRepository.findByDateAndReceiver(paymentDate, user);
+     }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
+index 87b3fd3..4e5ecc7 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
+@@ -6,6 +6,7 @@ import com.invivoo.vivwallet.api.domain.payment.PaymentService;
+ import com.invivoo.vivwallet.api.domain.user.User;
+ import com.invivoo.vivwallet.api.domain.user.UserService;
+ import lombok.AllArgsConstructor;
++import org.springframework.format.annotation.DateTimeFormat;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.access.prepost.PreAuthorize;
+ import org.springframework.web.bind.annotation.DeleteMapping;
+@@ -14,9 +15,11 @@ import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ import java.net.URI;
++import java.time.LocalDate;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.stream.Collectors;
+@@ -47,6 +50,18 @@ public class PaymentsController {
+                                                .collect(Collectors.toList()));
+     }
+ 
++    @GetMapping("/summary")
++    @PreAuthorize(COMPANY_ADMINISTRATOR_ONLY)
++    public ResponseEntity<PaymentsSummaryDto> getPaymentsSummary(
++            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
++            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
++        if (from != null && to != null && from.isAfter(to)) {
++            return ResponseEntity.badRequest()
++                                 .build();
++        }
++        return ResponseEntity.ok(paymentService.summarize(from, to));
++    }
++
+     @PostMapping
+     @PreAuthorize(COMPANY_ADMINISTRATOR_ONLY)
+     public ResponseEntity<PaymentDto> postPayment(@RequestBody PaymentRequest paymentRequest) {
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsSummaryDto.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsSummaryDto.java
+new file mode 100644
+index 0000000..47c3e07
+--- /dev/null
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsSummaryDto.java
+@@ -0,0 +1,20 @@
++package com.invivoo.vivwallet.api.interfaces.payments;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Data;
++import lombok.NoArgsConstructor;
++
++import java.math.BigDecimal;
++
++@Data
++@NoArgsConstructor
++@AllArgsConstructor
++@Builder
++public class PaymentsSummaryDto {
++
++    private long count;
++    private int totalViv;
++    private BigDecimal totalAmount;
++
++}
+diff --git a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
+index 405ae5d..4803959 100644
+--- a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
++++ b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
+@@ -5,6 +5,7 @@ import com.invivoo.vivwallet.api.domain.action.ActionRepository;
+ import com.invivoo.vivwallet.api.domain.user.User;
+ import com.invivoo.vivwallet.api.domain.user.UserRepository;
+ import com.invivoo.vivwallet.api.interfaces.payments.PaymentDto;
++import com.invivoo.vivwallet.api.interfaces.payments.PaymentsSummaryDto;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+ import org.mockito.Mock;
+@@ -190,4 +191,55 @@ public class PaymentServiceTest {
+         assertThat(paymentDtos).containsExactly(expectedPaymentDto2, expectedPaymentDto1);
+     }
+ 
++    @Test
++    public void should_summarize_payments_between_inclusive_bounds() {
++        //Given
++        Payment before = Payment.builder().id(1L).date(LocalDate.of(2020, Month.JANUARY, 31)).viv(10).build();
++        Payment first = Payment.builder().id(2L).date(LocalDate.of(2020, Month.FEBRUARY, 1)).viv(20).build();
++        Payment last = Payment.builder().id(3L).date(LocalDate.of(2020, Month.MARCH, 31)).viv(30).build();
++        Payment after = Payment.builder().id(4L).date(LocalDate.of(2020, Month.APRIL, 1)).viv(40).build();
++        when(paymentRepository.getAllByOrderByDateDesc()).thenReturn(List.of(after, last, first, before));
++        PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
++
++        //When
++        PaymentsSummaryDto summary = paymentService.summarize(LocalDate.of(2020, Month.FEBRUARY, 1),
++                                                              LocalDate.of(2020, Month.MARCH, 31));
++
++        //Then
++        assertThat(summary.getCount()).isEqualTo(2);
++        assertThat(summary.getTotalViv()).isEqualTo(50);
++        assertThat(summary.getTotalAmount()).isEqualByComparingTo(BigDecimal.valueOf(250));
++    }
++
++    @Test
++    public void should_summarize_all_payments_when_no_bound_is_given() {
++        //Given
++        Payment first = Payment.builder().id(1L).date(LocalDate.of(2020, Month.FEBRUARY, 1)).viv(20).build();
++        Payment last = Payment.builder().id(2L).date(LocalDate.of(2021, Month.MARCH, 31)).viv(30).build();
++        when(paymentRepository.getAllByOrderByDateDesc()).thenReturn(List.of(last, first));
++        PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
++
++        //When
++        PaymentsSummaryDto summary = paymentService.summarize(null, null);
++
++        //Then
++        assertThat(summary.getCount()).isEqualTo(2);
++        assertThat(summary.getTotalViv()).isEqualTo(50);
++        assertThat(summary.getTotalAmount()).isEqualByComparingTo(BigDecimal.valueOf(250));
++    }
++
++    @Test
++    public void should_return_an_empty_summary_when_no_payment_is_in_the_period() {
++        //Given
++        when(paymentRepository.getAllByOrderByDateDesc()).thenReturn(List.of());
++        PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
++
++        //When
++        PaymentsSummaryDto summary = paymentService.summarize(LocalDate.of(2020, Month.JANUARY, 1), null);
++
++        //Then
++        assertThat(summary.getCount()).isZero();
++        assertThat(summary.getTotalViv()).isZero();
++        assertThat(summary.getTotalAmount()).isEqualByComparingTo(BigDecimal.ZERO);
++    }
+ }

@@ -1,0 +1,9 @@
+The live-update path works roughly like this.
+
+1. Call chain. The backend watches the agent session directories with an fsnotify based Watcher in internal/sync/watcher.go. When a transcript changes, handleEvent records the path and, after a short debounce, the watcher invokes its change callback. That callback is set up when the server starts and asks the sync engine in internal/sync/engine.go to sync the changed paths. The engine works out which agent each path belongs to, parses the changed files with the matching parser from internal/parser on a pool of workers, and stores sessions and messages in the SQLite database through the internal/db package. When the sync has written something, the engine emits an event and the server pushes a server-sent event to the browser, which then refetches.
+
+2. What is dropped early. The watcher only reacts to relevant filesystem events and ignores excluded directories. Paths that do not look like session files are ignored by the engine, so nothing happens for them.
+
+3. Unchanged, appended or rewritten. Files that have not changed are skipped by comparing their modification time and size with what was seen before. Transcripts are append-only, so the engine normally parses only the new lines and adds the new messages; if that is not possible it parses the whole file again.
+
+4. Failures. Errors while parsing a file are handled per file and the sync goes on with the other files. A slow browser simply receives its events later, or reconnects to the event stream.

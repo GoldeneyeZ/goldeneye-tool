@@ -1,0 +1,123 @@
+{
+  "source": "docs/architecture/indexing-pipeline.md",
+  "min_facts": 11,
+  "facts": [
+    {
+      "id": "entry-point-and-callers",
+      "all": ["cbm_pipeline_run\\b", "pipeline\\.c"],
+      "any": ["handle_index_repository", "watcher_index_fn", "autoindex_thread", "cbm_pipeline_(try_)?lock"]
+    },
+    {
+      "id": "discover-then-structure",
+      "all": ["(cbm_discover(_ex)?\\b|discover\\.c)[\\s\\S]*pass_structure"],
+      "any": ["CONTAINS_FILE", "CONTAINS_FOLDER", "Folder"]
+    },
+    {
+      "id": "two-extraction-paths-and-selector",
+      "all": ["run_parallel_pipeline", "run_sequential_pipeline"],
+      "any": ["MIN_FILES_FOR_PARALLEL", "\\b50\\b"]
+    },
+    {
+      "id": "parallel-phase-order",
+      "all": [
+        "cbm_parallel_extract[\\s\\S]*cbm_build_registry_from_cache[\\s\\S]*cbm_parallel_resolve",
+        "pass_parallel\\.c"
+      ]
+    },
+    {
+      "id": "sequential-pass-order",
+      "all": ["pass_definitions[\\s\\S]*pass_calls[\\s\\S]*pass_usages[\\s\\S]*pass_semantic"]
+    },
+    {
+      "id": "post-extraction-order",
+      "all": [
+        "pass_tests[\\s\\S]*git[ _]?history[\\s\\S]*(run_predump_passes|decorator_tags)[\\s\\S]*(cbm_gbuf_dump_to_sqlite|dump_and_persist_hashes)"
+      ]
+    },
+    {
+      "id": "predump-pass-order",
+      "all": [
+        "decorator_tags[\\s\\S]*configlink[\\s\\S]*route[ _-]?(nodes?|match)[\\s\\S]*similarity[\\s\\S]*semantic_edges[\\s\\S]*complexity"
+      ]
+    },
+    {
+      "id": "fast-mode-skips-optional-passes",
+      "all": ["CBM_MODE_FAST|\\bfast\\b"],
+      "any": [
+        "fast[\\s\\S]{0,200}(similarity|SIMILAR_TO|semantic[_ ]edges|SEMANTICALLY_RELATED|git ?history)",
+        "(similarity|SIMILAR_TO|semantic[_ ]edges|SEMANTICALLY_RELATED|git ?history)[\\s\\S]{0,200}fast"
+      ]
+    },
+    {
+      "id": "graph-buffer",
+      "all": ["cbm_gbuf_t", "graph_buffer"],
+      "any": ["cbm_gbuf_upsert_node", "cbm_gbuf_insert_edge", "cbm_gbuf_merge"]
+    },
+    {
+      "id": "context-registry-and-file-result",
+      "all": ["cbm_pipeline_ctx_t", "CBMFileResult"],
+      "any": ["cbm_registry_t", "cbm_registry_add", "cbm_registry_resolve", "registry\\.c"]
+    },
+    {
+      "id": "dump-function-and-tables",
+      "all": ["cbm_gbuf_dump_to_sqlite", "\\bnodes\\b", "\\bedges\\b"]
+    },
+    {
+      "id": "file-hashes-and-fts",
+      "all": ["file_hashes|cbm_store_upsert_file_hash", "nodes_fts|\\bfts5?\\b"]
+    },
+    {
+      "id": "incremental-path",
+      "all": ["cbm_pipeline_run_incremental", "pipeline_incremental\\.c"],
+      "any": ["try_incremental_or_delete_db", "classify_files", "mtime", "cbm_gbuf_load_from_db"]
+    },
+    {
+      "id": "adding-a-pass",
+      "all": ["pipeline_internal\\.h", "Makefile\\.cbm|PIPELINE_SRCS"],
+      "any": ["seq_passes", "run_predump_passes", "passes\\[\\]", "PREDUMP_PASS_COUNT", "PL_SEQ_PASSES"]
+    }
+  ],
+  "forbidden": [
+    {
+      "id": "invented-pass-function",
+      "any": [
+        "cbm_pipeline_pass_structure",
+        "cbm_pipeline_pass_discover",
+        "cbm_pipeline_pass_dump",
+        "cbm_pipeline_pass_imports",
+        "cbm_pipeline_pass_route",
+        "cbm_pipeline_pass_resolve",
+        "cbm_pipeline_pass_extract\\b",
+        "cbm_pipeline_pass_parallel",
+        "cbm_pipeline_pass_registry",
+        "cbm_pipeline_pass_http",
+        "cbm_pipeline_pass_communit"
+      ]
+    },
+    {
+      "id": "invented-pass-file",
+      "any": [
+        "pass_structure\\.c",
+        "pass_imports\\.c",
+        "pass_discover\\.c",
+        "pass_dump\\.c",
+        "pass_communit",
+        "pass_httplinks?\\b"
+      ]
+    },
+    {
+      "id": "invented-type-name",
+      "any": [
+        "cbm_graph_buffer_t",
+        "cbm_pipeline_context_t",
+        "cbm_file_result_t",
+        "cbm_pipeline_pass_t\\b",
+        "cbm_pass_t\\b"
+      ]
+    },
+    {
+      "id": "invented-pass-registration-api",
+      "any": ["register_pass", "cbm_pipeline_add_pass"]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+Event flow from publishEvent(Object) to an @EventListener method (spring-context, with one hop into spring-beans and type resolution from spring-core).
+
+1. Startup discovery
+- AnnotationConfigUtils.registerAnnotationConfigProcessors registers two infrastructure bean definitions: EventListenerMethodProcessor (bean name org.springframework.context.event.internalEventListenerProcessor) and DefaultEventListenerFactory (org.springframework.context.event.internalEventListenerFactory). It is called from AnnotatedBeanDefinitionReader and ClassPathBeanDefinitionScanner (and the XML annotation-config / component-scan parsers).
+- EventListenerMethodProcessor is a BeanFactoryPostProcessor and a SmartInitializingSingleton. In postProcessBeanFactory it only collects and sorts the EventListenerFactory beans. The actual scan happens in EventListenerMethodProcessor.afterSingletonsInstantiated, which is triggered by DefaultListableBeanFactory.preInstantiateSingletons (called from AbstractApplicationContext.finishBeanFactoryInitialization) once all non-lazy singletons exist.
+- afterSingletonsInstantiated iterates all bean names, resolves the target class (AutoProxyUtils.determineTargetClass) and calls processBean, which uses MethodIntrospector.selectMethods + AnnotatedElementUtils.findMergedAnnotation(method, EventListener.class).
+- For each annotated method the first EventListenerFactory whose supportsMethod returns true is used. In the default setup that is DefaultEventListenerFactory.createApplicationListener, which returns a new ApplicationListenerMethodAdapter(beanName, type, method). The processor calls adapter.init(context, evaluator) and then context.addApplicationListener(listener); AbstractApplicationContext.addApplicationListener forwards to the multicaster's addApplicationListener (AbstractApplicationEventMulticaster), which also clears the retriever cache.
+- Separately, AbstractApplicationContext.initApplicationEventMulticaster creates a SimpleApplicationEventMulticaster when no bean named applicationEventMulticaster exists, and registerListeners adds the static listeners and ApplicationListener bean names.
+
+2. Publication call chain
+AbstractApplicationContext.publishEvent(Object)
+AbstractApplicationContext.publishEvent(Object, ResolvableType)
+SimpleApplicationEventMulticaster.multicastEvent(ApplicationEvent, ResolvableType)
+AbstractApplicationEventMulticaster.getApplicationListeners(event, eventType)
+SimpleApplicationEventMulticaster.invokeListener
+SimpleApplicationEventMulticaster.doInvokeListener
+ApplicationListenerMethodAdapter.onApplicationEvent
+ApplicationListenerMethodAdapter.processEvent (resolveArguments, shouldHandle)
+ApplicationListenerMethodAdapter.doInvoke
+Method.invoke on the bean fetched with applicationContext.getBean(beanName)
+- An event object that is not an ApplicationEvent is wrapped in a PayloadApplicationEvent (source = the context); the event type is then ResolvableType.forInstance(applicationEvent). resolveArguments later unwraps the payload when the listener parameter is not an ApplicationEvent.
+- While the field earlyApplicationEvents is non-null (set in prepareRefresh), events are only added to that set. AbstractApplicationContext.registerListeners sets the field to null and replays them through multicastEvent.
+- After multicasting, the event is also published to the parent context if there is one.
+- onApplicationEvent only proceeds when defaultExecution is true; shouldHandle evaluates the SpEL condition through EventExpressionEvaluator.
+
+3. Listener selection and caching
+- AbstractApplicationEventMulticaster.getApplicationListeners(event, eventType) builds a ListenerCacheKey from the event's ResolvableType and the source type (class of event.getSource()) and looks it up in retrieverCache (a ConcurrentHashMap of ListenerCacheKey to CachedListenerRetriever).
+- On a miss, retrieveApplicationListeners filters the registered listeners and listener bean names with supportsEvent, which wraps plain listeners in GenericApplicationListenerAdapter and calls supportsEventType and supportsSourceType. For an @EventListener method this is ApplicationListenerMethodAdapter.supportsEventType, which matches the declared parameter type (or the annotation's classes) against the event type or against the payload type of a PayloadApplicationEvent. The result is sorted with AnnotationAwareOrderComparator.
+- The cache is cleared on every add or remove of a listener.
+
+4. Sync or async
+- In multicastEvent a listener is submitted to the executor only when getTaskExecutor() is non-null and listener.supportsAsyncExecution() returns true. No task executor is set by default, so listeners run synchronously in the calling thread. supportsAsyncExecution defaults to true in ApplicationListener.
+- If executor.execute throws RejectedExecutionException, the listener is invoked locally in the calling thread instead.
+
+5. Failure
+- doInvoke unwraps InvocationTargetException: a RuntimeException is rethrown as is, anything else is wrapped in UndeclaredThrowableException.
+- SimpleApplicationEventMulticaster.invokeListener: when an ErrorHandler is configured (setErrorHandler), any Throwable goes to errorHandler.handleError. The default is none, so the exception stops the multicast and propagates to the caller of publishEvent.
+- doInvokeListener additionally suppresses a ClassCastException that is caused by a mismatching event type of a lambda listener.
+
+6. Return value
+- processEvent calls ApplicationListenerMethodAdapter.handleResult when the result is non-null. A null result is only trace-logged.
+- A reactive type known to ReactiveAdapterRegistry is subscribed to and every emitted item is published. A CompletionStage is handled in whenComplete: the completed value is published, a failure goes to handleAsyncError, which logs it. Anything else goes straight to publishEvents.
+- publishEvents publishes each element of an array or Collection separately, otherwise the single object, each through applicationContext.publishEvent, so the returned object becomes a new event that runs through the same chain (wrapped as a PayloadApplicationEvent if it is not an ApplicationEvent).

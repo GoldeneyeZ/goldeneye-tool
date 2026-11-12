@@ -1,0 +1,113 @@
+diff --git a/crates/application/goldeneye-edit/src/durable/commit.rs b/crates/application/goldeneye-edit/src/durable/commit.rs
+index 4470013..17f7fac 100644
+--- a/crates/application/goldeneye-edit/src/durable/commit.rs
++++ b/crates/application/goldeneye-edit/src/durable/commit.rs
+@@ -39,7 +39,7 @@ impl DurableEditService {
+         let expected_old = required_hash(record.original_hash, operation_id, "original")?;
+         let expected_new = required_hash(record.new_hash, operation_id, "new")?;
+         let revalidated = authorized.revalidate()?;
+-        ensure_file_hash(revalidated.as_path(), expected_old)?;
++        ensure_file_hash(revalidated.checked_destination(), expected_old)?;
+         ensure_file_hash(&artifacts.temp_absolute, expected_new)?;
+         Ok(record)
+     }
+diff --git a/crates/application/goldeneye-edit/src/durable/mutation.rs b/crates/application/goldeneye-edit/src/durable/mutation.rs
+index 49daa44..018cd76 100644
+--- a/crates/application/goldeneye-edit/src/durable/mutation.rs
++++ b/crates/application/goldeneye-edit/src/durable/mutation.rs
+@@ -69,7 +69,7 @@ impl DurableEditService {
+             PathIntent::Update,
+         )?;
+         let lease = TargetLease::acquire(authorized.destination())?;
+-        let source = Arc::<[u8]>::from(read_file(authorized.revalidate()?.as_path())?);
++        let source = Arc::<[u8]>::from(read_file(authorized.revalidate()?.checked_destination())?);
+         let actual_hash = ensure_request_hash(&request, &source)?;
+         self.ensure_indexed_hash(&project_id, &relative_path, actual_hash)?;
+         let plan = self.plan_update(
+diff --git a/crates/application/goldeneye-edit/src/path_auth.rs b/crates/application/goldeneye-edit/src/path_auth.rs
+index 1139ba0..bce8ae3 100644
+--- a/crates/application/goldeneye-edit/src/path_auth.rs
++++ b/crates/application/goldeneye-edit/src/path_auth.rs
+@@ -128,7 +128,7 @@ impl AuthorizedPath {
+ ///
+ /// The value is a point-in-time result: it only says the destination was
+ /// confined to its project when [`AuthorizedPath::revalidate`] returned. Read
+-/// it through [`RevalidatedPath::as_path`] right before the filesystem call
++/// it through [`RevalidatedPath::checked_destination`] right before the filesystem call
+ /// and do not keep it across operations.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct RevalidatedPath {
+@@ -143,14 +143,14 @@ impl RevalidatedPath {
+     }
+ 
+     #[must_use]
+-    pub fn as_path(&self) -> &Path {
++    pub fn checked_destination(&self) -> &Path {
+         &self.destination
+     }
+ }
+ 
+ impl AsRef<Path> for RevalidatedPath {
+     fn as_ref(&self) -> &Path {
+-        self.as_path()
++        self.checked_destination()
+     }
+ }
+ 
+diff --git a/crates/application/goldeneye-edit/tests/path_auth.rs b/crates/application/goldeneye-edit/tests/path_auth.rs
+index ea83fb7..fb66dda 100644
+--- a/crates/application/goldeneye-edit/tests/path_auth.rs
++++ b/crates/application/goldeneye-edit/tests/path_auth.rs
+@@ -134,7 +134,7 @@ fn accepts_normalized_unicode_paths() {
+     let revalidated = authorized.revalidate().expect("revalidate Unicode path");
+ 
+     assert_eq!(
+-        revalidated.as_path(),
++        revalidated.checked_destination(),
+         canonical_project.join("src/naïve_变量.rs")
+     );
+ }
+diff --git a/crates/application/goldeneye-edit/tests/revalidated_path.rs b/crates/application/goldeneye-edit/tests/revalidated_path.rs
+index 6d2be8a..a3e5e15 100644
+--- a/crates/application/goldeneye-edit/tests/revalidated_path.rs
++++ b/crates/application/goldeneye-edit/tests/revalidated_path.rs
+@@ -21,7 +21,7 @@ fn revalidated_update_destination_is_the_canonical_file() {
+         .expect("authorize existing file");
+     let revalidated = authorized.revalidate().expect("revalidate existing file");
+ 
+-    assert_eq!(revalidated.as_path(), expected.as_path());
+-    assert_eq!(revalidated.as_path(), authorized.destination());
++    assert_eq!(revalidated.checked_destination(), expected.as_path());
++    assert_eq!(revalidated.checked_destination(), authorized.destination());
+     assert_eq!(revalidated.into_path_buf(), expected);
+ }
+diff --git a/crates/application/goldeneye-services/src/edit/inspection.rs b/crates/application/goldeneye-services/src/edit/inspection.rs
+index 43c6ba0..3201ddd 100644
+--- a/crates/application/goldeneye-services/src/edit/inspection.rs
++++ b/crates/application/goldeneye-services/src/edit/inspection.rs
+@@ -84,10 +84,10 @@ fn read_authorized_source(
+     let destination = authorized_path
+         .revalidate()
+         .map_err(DurableEditError::from)?;
+-    fs::read(destination.as_path())
++    fs::read(destination.checked_destination())
+         .map_err(|source| DurableEditError::Io {
+             operation: "reading syntax source",
+-            path: destination.as_path().to_path_buf(),
++            path: destination.checked_destination().to_path_buf(),
+             source,
+         })
+         .map_err(ServiceError::from)
+diff --git a/docs/ack-feature-handoff.md b/docs/ack-feature-handoff.md
+index 4c3bd95..313d2b2 100644
+--- a/docs/ack-feature-handoff.md
++++ b/docs/ack-feature-handoff.md
+@@ -95,7 +95,7 @@ Goldeneye now supports durable, syntax-aware file creation and node mutation:
+   refresh. Startup reconciles incomplete journal entries before serving work.
+ - Every mutation re-checks its destination right before touching the
+   filesystem: `AuthorizedPath::revalidate` returns a `RevalidatedPath`, and
+-  callers read the confined destination through `RevalidatedPath::as_path`
++  callers read the confined destination through `RevalidatedPath::checked_destination`
+   instead of reusing a path computed earlier.
+ - Results include old/new hashes, a compact diff, syntax and graph changes,
+   generation, diagnostics, and approximate context size.

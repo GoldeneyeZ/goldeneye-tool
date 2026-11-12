@@ -1,0 +1,7 @@
+When you call publishEvent, the application context hands the event to its ApplicationEventMulticaster, which looks up all listeners interested in the event type and calls them one after another. Objects that are not ApplicationEvents get wrapped in a PayloadApplicationEvent first.
+
+@EventListener methods are found at startup by the EventListenerMethodProcessor, which wraps every annotated method in an ApplicationListenerMethodAdapter and registers it with the context. Events published too early are queued and delivered once the context is ready.
+
+Matching listeners are cached per event type so the lookup is fast. Listeners are called synchronously unless a task executor is configured on the multicaster, in which case they run on another thread.
+
+Exceptions thrown by a listener propagate to the publisher unless an ErrorHandler has been set. If the listener method returns a value, it is published as a new event; collections are published element by element, and futures are published when they complete.

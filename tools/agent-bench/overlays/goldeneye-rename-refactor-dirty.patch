@@ -1,0 +1,114 @@
+diff --git a/crates/application/goldeneye-edit/src/durable/commit.rs b/crates/application/goldeneye-edit/src/durable/commit.rs
+index d0bac0b..4470013 100644
+--- a/crates/application/goldeneye-edit/src/durable/commit.rs
++++ b/crates/application/goldeneye-edit/src/durable/commit.rs
+@@ -38,8 +38,8 @@ impl DurableEditService {
+         let record = self.operation(operation_id)?;
+         let expected_old = required_hash(record.original_hash, operation_id, "original")?;
+         let expected_new = required_hash(record.new_hash, operation_id, "new")?;
+-        authorized.revalidate()?;
+-        ensure_file_hash(authorized.destination(), expected_old)?;
++        let revalidated = authorized.revalidate()?;
++        ensure_file_hash(revalidated.as_path(), expected_old)?;
+         ensure_file_hash(&artifacts.temp_absolute, expected_new)?;
+         Ok(record)
+     }
+diff --git a/crates/application/goldeneye-edit/src/durable/mutation.rs b/crates/application/goldeneye-edit/src/durable/mutation.rs
+index f5a496f..49daa44 100644
+--- a/crates/application/goldeneye-edit/src/durable/mutation.rs
++++ b/crates/application/goldeneye-edit/src/durable/mutation.rs
+@@ -16,6 +16,9 @@ use crate::{
+     EditPlan, EditPlanRequest, SourceDiff, ValidatedCreate, plan_edit, validate_create_content,
+ };
+ 
++/// State carried from validation to commit for one node edit: the authorized
++/// destination, the computed plan, and the lease that keeps other writers away
++/// until the journal entry is finished.
+ struct PreparedEdit {
+     operation_id: String,
+     project_id: ProjectId,
+@@ -25,6 +28,8 @@ struct PreparedEdit {
+     _lease: TargetLease,
+ }
+ 
++/// Create-side counterpart of [`PreparedEdit`]. `create_parents` records whether
++/// missing parent directories may be created on behalf of the caller.
+ struct PreparedCreate {
+     operation_id: String,
+     project_id: ProjectId,
+diff --git a/crates/application/goldeneye-edit/src/path_auth.rs b/crates/application/goldeneye-edit/src/path_auth.rs
+index 1eb09df..1139ba0 100644
+--- a/crates/application/goldeneye-edit/src/path_auth.rs
++++ b/crates/application/goldeneye-edit/src/path_auth.rs
+@@ -125,12 +125,23 @@ impl AuthorizedPath {
+ }
+ 
+ /// A destination produced by the latest containment and intent check.
++///
++/// The value is a point-in-time result: it only says the destination was
++/// confined to its project when [`AuthorizedPath::revalidate`] returned. Read
++/// it through [`RevalidatedPath::as_path`] right before the filesystem call
++/// and do not keep it across operations.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct RevalidatedPath {
+     destination: PathBuf,
+ }
+ 
+ impl RevalidatedPath {
++    /// Consumes the check result and returns the owned destination.
++    #[must_use]
++    pub fn into_path_buf(self) -> PathBuf {
++        self.destination
++    }
++
+     #[must_use]
+     pub fn as_path(&self) -> &Path {
+         &self.destination
+diff --git a/crates/application/goldeneye-edit/tests/revalidated_path.rs b/crates/application/goldeneye-edit/tests/revalidated_path.rs
+new file mode 100644
+index 0000000..6d2be8a
+--- /dev/null
++++ b/crates/application/goldeneye-edit/tests/revalidated_path.rs
+@@ -0,0 +1,27 @@
++use std::fs;
++use std::path::PathBuf;
++
++use goldeneye_edit::path_auth::{PathAuthorizer, PathIntent};
++
++#[test]
++fn revalidated_update_destination_is_the_canonical_file() {
++    let temporary = tempfile::tempdir().expect("create fixture root");
++    let project = temporary.path().join("project");
++    fs::create_dir_all(project.join("src")).expect("create project fixture");
++    fs::write(project.join("src").join("lib.rs"), "fn existing() {}\n")
++        .expect("write source fixture");
++    let expected: PathBuf = fs::canonicalize(&project)
++        .expect("canonicalize project fixture")
++        .join("src")
++        .join("lib.rs");
++
++    let authorized = PathAuthorizer::new([temporary.path()])
++        .expect("configure allowed root")
++        .authorize(&project, "src/lib.rs", PathIntent::Update)
++        .expect("authorize existing file");
++    let revalidated = authorized.revalidate().expect("revalidate existing file");
++
++    assert_eq!(revalidated.as_path(), expected.as_path());
++    assert_eq!(revalidated.as_path(), authorized.destination());
++    assert_eq!(revalidated.into_path_buf(), expected);
++}
+diff --git a/docs/ack-feature-handoff.md b/docs/ack-feature-handoff.md
+index e5a8e14..4c3bd95 100644
+--- a/docs/ack-feature-handoff.md
++++ b/docs/ack-feature-handoff.md
+@@ -93,6 +93,10 @@ Goldeneye now supports durable, syntax-aware file creation and node mutation:
+   hash. A stale locator never writes.
+ - Writes are journaled, atomic, parse-policy checked, and followed by graph
+   refresh. Startup reconciles incomplete journal entries before serving work.
++- Every mutation re-checks its destination right before touching the
++  filesystem: `AuthorizedPath::revalidate` returns a `RevalidatedPath`, and
++  callers read the confined destination through `RevalidatedPath::as_path`
++  instead of reusing a path computed earlier.
+ - Results include old/new hashes, a compact diff, syntax and graph changes,
+   generation, diagnostics, and approximate context size.
+ 

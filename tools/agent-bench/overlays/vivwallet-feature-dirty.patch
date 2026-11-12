@@ -1,0 +1,279 @@
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/provider/payments/PaymentsProviderService.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/provider/payments/PaymentsProviderService.java
+index e131a41..9bad56d 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/provider/payments/PaymentsProviderService.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/provider/payments/PaymentsProviderService.java
+@@ -68,7 +68,7 @@ public class PaymentsProviderService {
+                                             .creator(companyAdministrator)
+                                             .date(paymentDate)
+                                             .receiver(user)
+-                                            .vivAmount(vivAmount)
++                                            .viv(vivAmount)
+                                             .build();
+             payments.add(payment);
+         }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/Payment.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/Payment.java
+index 67875a5..1b54cfd 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/Payment.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/Payment.java
+@@ -8,6 +8,7 @@ import lombok.Data;
+ import lombok.NoArgsConstructor;
+ import lombok.ToString;
+ 
++import javax.persistence.Column;
+ import javax.persistence.Entity;
+ import javax.persistence.GeneratedValue;
+ import javax.persistence.GenerationType;
+@@ -34,6 +35,7 @@ public class Payment {
+     private User receiver;
+     @ManyToOne
+     private User creator;
+-    private int vivAmount;
++    @Column(name = "viv_amount")
++    private int viv;
+ 
+ }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
+index 1868fda..56f200c 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/PaymentService.java
+@@ -13,6 +13,10 @@ import java.util.List;
+ import java.util.Optional;
+ import java.util.stream.Collectors;
+ 
++/**
++ * Reads and writes {@link Payment}s. Amounts are stored in vivs, see
++ * {@link Payment#getViv()}; euros are only computed for display.
++ */
+ @Service
+ @AllArgsConstructor
+ public class PaymentService {
+@@ -21,6 +25,10 @@ public class PaymentService {
+     private final PaymentRepository paymentRepository;
+     private final ActionRepository actionRepository;
+ 
++    public boolean existsById(Long paymentId) {
++        return paymentId != null && paymentRepository.existsById(paymentId);
++    }
++
+     public Optional<Payment> findById(Long paymentId) {
+         return paymentRepository.findById(paymentId);
+     }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/VivAmounts.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/VivAmounts.java
+new file mode 100644
+index 0000000..0726c8a
+--- /dev/null
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/payment/VivAmounts.java
+@@ -0,0 +1,20 @@
++package com.invivoo.vivwallet.api.domain.payment;
++
++import java.math.BigDecimal;
++
++/**
++ * Conversions between vivs and euros. Keep the rate here: nothing else should
++ * multiply by it directly.
++ */
++public final class VivAmounts {
++
++    public static final int EUROS_PER_VIV = 5;
++
++    private VivAmounts() {
++    }
++
++    public static BigDecimal toEuros(int viv) {
++        return BigDecimal.valueOf((long) viv * EUROS_PER_VIV);
++    }
++
++}
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/user/UserService.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/user/UserService.java
+index 92a610f..beeea0a 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/user/UserService.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/domain/user/UserService.java
+@@ -93,7 +93,7 @@ public class UserService {
+                                                                                  .sum();
+         int userPaymentsAmountInViv = paymentRepository.findAllByReceiverOrderByDateDesc(user)
+                                                        .stream()
+-                                                       .mapToInt(Payment::getVivAmount)
++                                                       .mapToInt(Payment::getViv)
+                                                        .sum();
+         return user.getVivInitialBalance() + userBalanceFromActionsInVivAfterInitialBalanceDate - userPaymentsAmountInViv;
+     }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentDto.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentDto.java
+index f9b1aa0..0ef22ba 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentDto.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentDto.java
+@@ -1,6 +1,7 @@
+ package com.invivoo.vivwallet.api.interfaces.payments;
+ 
+ import com.invivoo.vivwallet.api.domain.payment.Payment;
++import com.invivoo.vivwallet.api.domain.payment.VivAmounts;
+ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Data;
+@@ -15,8 +16,6 @@ import java.time.LocalDate;
+ @Builder
+ public class PaymentDto {
+ 
+-    public static final int FACTOR_VIV_TO_AMOUNT = 5;
+-
+     private Long id;
+     private Long userId;
+     private LocalDate date;
+@@ -28,8 +27,9 @@ public class PaymentDto {
+                          .id(payment.getId())
+                          .userId(payment.getReceiver().getId())
+                          .date(payment.getDate())
+-                         .viv(payment.getVivAmount())
+-                         .amount(BigDecimal.valueOf(payment.getVivAmount() * FACTOR_VIV_TO_AMOUNT)).build();
++                         .viv(payment.getViv())
++                         .amount(VivAmounts.toEuros(payment.getViv()))
++                         .build();
+     }
+ 
+ }
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
+index d6f17f4..87b3fd3 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsController.java
+@@ -21,12 +21,19 @@ import java.util.List;
+ import java.util.Optional;
+ import java.util.stream.Collectors;
+ 
++/**
++ * Payments made to consultants in exchange for their vivs.
++ * <p>
++ * Reading payments is open to every authenticated user; every other
++ * operation is restricted with {@link #COMPANY_ADMINISTRATOR_ONLY}.
++ */
+ @RestController
+ @RequestMapping(PaymentsController.API_V_1_PAYMENTS)
+ @AllArgsConstructor
+ public class PaymentsController {
+ 
+     public static final String API_V_1_PAYMENTS = "/api/v1/payments";
++    public static final String COMPANY_ADMINISTRATOR_ONLY = "hasAnyAuthority('COMPANY_ADMINISTRATOR')";
+ 
+     private final PaymentService paymentService;
+     private final SecurityService securityService;
+@@ -41,7 +48,7 @@ public class PaymentsController {
+     }
+ 
+     @PostMapping
+-    @PreAuthorize("hasAnyAuthority('COMPANY_ADMINISTRATOR')")
++    @PreAuthorize(COMPANY_ADMINISTRATOR_ONLY)
+     public ResponseEntity<PaymentDto> postPayment(@RequestBody PaymentRequest paymentRequest) {
+         Optional<User> receiverOpt = userService.findById(paymentRequest.getReceiverId());
+         Optional<User> connectedUser = securityService.getConnectedUser();
+@@ -54,7 +61,7 @@ public class PaymentsController {
+                                  .date(paymentRequest.getDate())
+                                  .receiver(receiver)
+                                  .creator(connectedUser.get())
+-                                 .vivAmount(paymentRequest.getVivAmount())
++                                 .viv(paymentRequest.getVivAmount())
+                                  .build();
+         Payment savedPayment = paymentService.save(payment);
+         return ResponseEntity.created(getLocation(savedPayment))
+@@ -62,7 +69,7 @@ public class PaymentsController {
+     }
+ 
+     @DeleteMapping("/{id}")
+-    @PreAuthorize("hasAnyAuthority('COMPANY_ADMINISTRATOR')")
++    @PreAuthorize(COMPANY_ADMINISTRATOR_ONLY)
+     public ResponseEntity<PaymentDto> deletePayment(@PathVariable("id") Long paymentId) {
+         return paymentService.findById(paymentId)
+                              .map(paymentService::delete)
+diff --git a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
+index 22eaf94..405ae5d 100644
+--- a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
++++ b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/PaymentServiceTest.java
+@@ -100,7 +100,7 @@ public class PaymentServiceTest {
+                                  .id(1L)
+                                  .date(LocalDate.of(2020, Month.JULY, 1))
+                                  .receiver(testUser)
+-                                 .vivAmount(actionVivAmount)
++                                 .viv(actionVivAmount)
+                                  .build();
+         when(paymentRepository.findAllByReceiverOrderByDateDesc(testUser)).thenReturn(List.of(payment));
+         PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
+@@ -129,7 +129,7 @@ public class PaymentServiceTest {
+                                  .id(1L)
+                                  .date(LocalDate.of(2020, Month.JULY, 1))
+                                  .receiver(testUser)
+-                                 .vivAmount(100)
++                                 .viv(100)
+                                  .build();
+         when(paymentRepository.findAllByReceiverOrderByDateDesc(testUser)).thenReturn(List.of(payment));
+         PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
+@@ -158,13 +158,13 @@ public class PaymentServiceTest {
+                                   .id(1L)
+                                   .date(LocalDate.of(2020, Month.JANUARY, 1))
+                                   .receiver(testUser)
+-                                  .vivAmount(50)
++                                  .viv(50)
+                                   .build();
+         Payment payment2 = Payment.builder()
+                                   .id(1L)
+                                   .date(LocalDate.of(2020, Month.JULY, 1))
+                                   .receiver(testUser)
+-                                  .vivAmount(50)
++                                  .viv(50)
+                                   .build();
+         when(paymentRepository.findAllByReceiverOrderByDateDesc(testUser)).thenReturn(List.of(payment2, payment1));
+         PaymentService paymentService = new PaymentService(userRepository, paymentRepository, actionRepository);
+diff --git a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/VivAmountsTest.java b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/VivAmountsTest.java
+new file mode 100644
+index 0000000..4ba5104
+--- /dev/null
++++ b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/domain/payment/VivAmountsTest.java
+@@ -0,0 +1,22 @@
++package com.invivoo.vivwallet.api.domain.payment;
++
++import org.junit.Test;
++
++import java.math.BigDecimal;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++public class VivAmountsTest {
++
++    @Test
++    public void should_convert_vivs_to_euros() {
++        assertThat(VivAmounts.toEuros(50)).isEqualByComparingTo(BigDecimal.valueOf(250));
++    }
++
++    @Test
++    public void should_convert_zero_and_negative_vivs() {
++        assertThat(VivAmounts.toEuros(0)).isEqualByComparingTo(BigDecimal.ZERO);
++        assertThat(VivAmounts.toEuros(-20)).isEqualByComparingTo(BigDecimal.valueOf(-100));
++    }
++
++}
+diff --git a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsControllerTest.java b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsControllerTest.java
+index b096131..52e3a88 100644
+--- a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsControllerTest.java
++++ b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/interfaces/payments/PaymentsControllerTest.java
+@@ -54,14 +54,14 @@ public class PaymentsControllerTest {
+                                                     .creator(THEOPHILE_MONTGOMERY)
+                                                     .receiver(RECEIVER)
+                                                     .date(PAYMENT_DATE)
+-                                                    .vivAmount(20)
++                                                    .viv(20)
+                                                     .build();
+     private static final Payment PAYMENT_2 = Payment.builder()
+                                                     .id(2L)
+                                                     .creator(THEOPHILE_MONTGOMERY)
+                                                     .receiver(RECEIVER)
+                                                     .date(PAYMENT_DATE)
+-                                                    .vivAmount(20)
++                                                    .viv(20)
+                                                     .build();
+     private static final List<Payment> PAYMENTS = Arrays.asList(PAYMENT_1, PAYMENT_2);
+     private static final PaymentRequest PAYMENT_REQUEST = PaymentRequest.builder()
+@@ -111,7 +111,7 @@ public class PaymentsControllerTest {
+         // given
+         when(userService.findById(PAYMENT_REQUEST.getReceiverId())).thenReturn(Optional.of(RECEIVER));
+         when(securityService.getConnectedUser()).thenReturn(Optional.of(THEOPHILE_MONTGOMERY));
+-        when(userService.computeBalance(RECEIVER)).thenReturn(PAYMENT_1.getVivAmount());
++        when(userService.computeBalance(RECEIVER)).thenReturn(PAYMENT_1.getViv());
+         when(paymentService.save(any(Payment.class))).thenReturn(PAYMENT_1);
+ 
+         // when

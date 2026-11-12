@@ -1,0 +1,203 @@
+diff --git a/docs/architecture/indexing-pipeline.md b/docs/architecture/indexing-pipeline.md
+new file mode 100644
+index 0000000..2f8bd2e
+--- /dev/null
++++ b/docs/architecture/indexing-pipeline.md
+@@ -0,0 +1,197 @@
++# Indexing pipeline
++
++This document describes the indexing pipeline as implemented in `src/pipeline/`.
++It follows the code, not the header comments (the step lists at the top of
++`pipeline.h` and `pipeline.c` mention steps that are no longer separate passes).
++
++## 1. Purpose
++
++The pipeline turns a repository checkout into a code graph (nodes such as
++`File`, `Function`, `Class`, `Route`; edges such as `CALLS`, `IMPORTS`,
++`DEFINES`) and writes it to one SQLite file per project.
++
++The public API is in `src/pipeline/pipeline.h`: `cbm_pipeline_new()`,
++`cbm_pipeline_run()`, `cbm_pipeline_cancel()`, `cbm_pipeline_free()`.
++`cbm_pipeline_run()` (in `src/pipeline/pipeline.c`) is the single entry point.
++In the production sources it is called from three places:
++
++| Caller | File | Lock used |
++| --- | --- | --- |
++| `handle_index_repository()` (MCP tool `index_repository`) | `src/mcp/mcp.c` | `cbm_pipeline_lock()` (blocking) |
++| `autoindex_thread()` (background index of the session root) | `src/mcp/mcp.c` | `cbm_pipeline_lock()` (blocking) |
++| `watcher_index_fn()` (file watcher callback) | `src/main.c` | `cbm_pipeline_try_lock()` (skips when busy) |
++
++Concurrent runs are prevented by a process-wide atomic flag (`g_pipeline_busy`
++in `pipeline.c`) behind `cbm_pipeline_lock()` / `cbm_pipeline_try_lock()` /
++`cbm_pipeline_unlock()`. The callers take the lock; `cbm_pipeline_run()` does not.
++
++## 2. Stages of a full index
++
++`cbm_pipeline_run()` executes the following, in this order. The cancellation
++flag is polled between stages (`check_cancel()`).
++
++1. **User config** - `cbm_userconfig_load()` (`src/discover/userconfig.c`) loads
++   extension overrides. Macro extraction is enabled only for `CBM_MODE_FULL`.
++2. **Discover** - `cbm_discover_ex()` (`src/discover/discover.c`) walks the
++   repository and returns an array of `cbm_file_info_t` (absolute path, relative
++   path, language) plus the list of excluded directories.
++3. **Full or incremental** - `try_incremental_or_delete_db()` (see section 5).
++   If it does not take the incremental route, the old database is deleted and
++   the run continues with a new `cbm_gbuf_t`, a new `cbm_registry_t` and the
++   path aliases from `cbm_load_path_aliases()` (`path_alias.c`), bundled into a
++   `cbm_pipeline_ctx_t`.
++4. **Structure** - `pass_structure()` (static, `pipeline.c`) creates the
++   `Project` node, an optional `Branch` node (`HAS_BRANCH`), one `File` node per
++   discovered file, `Folder` nodes via `create_folder_chain()`, and the
++   `CONTAINS_FOLDER` / `CONTAINS_FILE` edges.
++5. **Extraction and resolution** - `run_extraction_phase()` picks one of two
++   paths: `run_parallel_pipeline()` when `cbm_default_worker_count()` is greater
++   than 1 **and** more than `MIN_FILES_FOR_PARALLEL` (50) files were discovered,
++   otherwise `run_sequential_pipeline()`.
++6. **Tests** - `cbm_pipeline_pass_tests()` (`pass_tests.c`) derives `TESTS` and
++   `TESTS_FILE` edges from the `CALLS` edges.
++7. **Git history** - `run_githistory()` runs `cbm_pipeline_githistory_compute()`
++   (on a helper thread when more than one worker is available) and then
++   `cbm_pipeline_githistory_apply()`, both in `pass_githistory.c`, producing
++   `FILE_CHANGES_WITH` edges. Skipped in `CBM_MODE_FAST`.
++8. **Pre-dump passes** - `run_predump_passes()` runs a fixed table, in order:
++
++   | # | Log name | Function | File | Mode |
++   | --- | --- | --- | --- | --- |
++   | 1 | `decorator_tags` | `cbm_pipeline_pass_decorator_tags()` | `pass_enrichment.c` | all |
++   | 2 | `configlink` | `cbm_pipeline_pass_configlink()` | `pass_configlink.c` | all |
++   | 3 | `route_match` | `cbm_pipeline_create_route_nodes()` | `pass_route_nodes.c` | all |
++   | 4 | `similarity` | `cbm_pipeline_pass_similarity()` | `pass_similarity.c` | skipped in `CBM_MODE_FAST` |
++   | 5 | `semantic_edges` | `cbm_pipeline_pass_semantic_edges()` | `pass_semantic_edges.c` | skipped in `CBM_MODE_FAST` |
++   | 6 | `complexity` | `cbm_pipeline_pass_complexity()` | `pass_complexity.c` | all |
++
++9. **Dump and persist** - `dump_and_persist_hashes()` (see section 4).
++
++Steps 6 to 9 are grouped in `run_post_extraction()`.
++
++### 2.1 Parallel path (`run_parallel_pipeline()`)
++
++All three phases are implemented in `src/pipeline/pass_parallel.c` and use
++`cbm_parallel_for()` from `worker_pool.c`.
++
++1. `cbm_parallel_extract()` - each worker (`extract_worker()`) reads and parses
++   its files once with `cbm_extract_file()`, writes definition nodes into a
++   worker-local graph buffer created with `cbm_gbuf_new_shared_ids()`, and
++   stores the `CBMFileResult` in a cache array indexed by file position. The
++   local buffers are merged into the main one with `cbm_gbuf_merge()`.
++2. `cbm_build_registry_from_cache()` - serial. Registers functions, methods,
++   type-like definitions, variables and fields with `cbm_registry_add()` and creates `DEFINES`, `DEFINES_METHOD`, `IMPORTS` and
++   channel (`EMITS` / `LISTENS_ON`) edges from the cached results.
++3. Cross-file LSP preparation - `cbm_pxc_collect_all_defs()`,
++   `cbm_pxc_build_module_def_index()` and the per-language
++   `cbm_*_build_cross_registry()` functions. Skipped when the environment
++   variable `CBM_DISABLE_LSP_CROSS` is set.
++4. `cbm_parallel_resolve()` - each worker (`resolve_worker()`) resolves calls,
++   usages, throws, reads/writes, inheritance, decorators and implementations of
++   the cached results into a worker-local edge buffer (`CALLS`, `HTTP_CALLS`,
++   `ASYNC_CALLS`, `USAGE`, `THROWS`, `RAISES`, `READS`, `WRITES`, `INHERITS`,
++   `DECORATES`, `IMPLEMENTS`), merged again with `cbm_gbuf_merge()`.
++5. `cbm_pipeline_extract_infra_routes()` and
++   `cbm_pipeline_process_infra_bindings()` (static, `pipeline.c`) add infra
++   `Route` nodes and `INFRA_MAPS` edges; the cache is then freed.
++6. `cbm_pipeline_pass_k8s()` (`pass_k8s.c`).
++
++### 2.2 Sequential path (`run_sequential_pipeline()`)
++
++Builds the package map with `cbm_pkgmap_build_from_repo()` (`pass_pkgmap.c`),
++allocates `ctx->result_cache`, then runs the `seq_passes[]` table in order:
++
++| # | Function | File | Errors |
++| --- | --- | --- | --- |
++| 1 | `cbm_pipeline_pass_definitions()` | `pass_definitions.c` | fatal |
++| 2 | `cbm_pipeline_pass_k8s()` | `pass_k8s.c` | ignored |
++| 3 | `seq_pass_lsp_cross_dispatch()` -> `cbm_pipeline_pass_lsp_cross()` | `pass_lsp_cross.c` | ignored |
++| 4 | `cbm_pipeline_pass_calls()` | `pass_calls.c` | fatal |
++| 5 | `cbm_pipeline_pass_usages()` | `pass_usages.c` | fatal |
++| 6 | `cbm_pipeline_pass_semantic()` | `pass_semantic.c` | fatal |
++
++`cbm_pipeline_pass_definitions()` extracts each file, creates the definition
++nodes, registers them in the registry and keeps the `CBMFileResult` in
++`ctx->result_cache` so the later passes do not re-parse. After the table, the
++same two infra functions as in the parallel path run, and the cache is freed.
++
++## 3. Key data structures
++
++| Type | Defined in | Role |
++| --- | --- | --- |
++| `cbm_pipeline_t` (`struct cbm_pipeline`) | `pipeline.c` (opaque in `pipeline.h`) | One run: repo path, db path, project name, `cbm_index_mode_t` mode, cancel flag, owning pointers to the graph buffer and registry. |
++| `cbm_pipeline_ctx_t` | `pipeline_internal.h` | Context handed to every pass: `project_name`, `repo_path`, `gbuf`, `registry`, `cancelled`, `mode`, `result_cache`, `path_aliases`. |
++| `cbm_file_info_t` | `src/discover/discover.h` | One discovered file. |
++| `cbm_gbuf_t`, `cbm_gbuf_node_t`, `cbm_gbuf_edge_t` | `src/graph_buffer/graph_buffer.h` | In-memory graph. Nodes are upserted by qualified name with `cbm_gbuf_upsert_node()`; edges are deduplicated by (source, target, type) in `cbm_gbuf_insert_edge()`. IDs are temporary until the dump. |
++| `cbm_registry_t` | `pipeline.h`, implemented in `registry.c` | Symbol registry used for call/usage resolution (`cbm_registry_add()`, `cbm_registry_resolve()`). |
++| `CBMFileResult` | `internal/cbm/cbm.h` | Output of `cbm_extract_file()` for one file (definitions, calls, imports, ...); cached between extraction and resolution. |
++
++Qualified names are computed by `cbm_pipeline_fqn_compute()` and friends in `fqn.c`.
++
++## 4. Persistence
++
++Nothing is written to disk before `dump_and_persist_hashes()` (`pipeline.c`):
++
++1. The target is the `db_path` given to `cbm_pipeline_new()`, or
++   `<cache dir>/<project>.db` (`cbm_resolve_cache_dir()`).
++2. `cbm_gbuf_dump_to_sqlite()` (`src/graph_buffer/graph_buffer.c`) remaps the
++   temporary IDs and writes the database file directly through the writer in
++   `internal/cbm/sqlite_writer.c` (`cbm_writer_open()`,
++   `cbm_writer_append_nodes()`, `cbm_writer_finalize()`). The graph lands in the
++   `nodes` and `edges` tables, the project row in `projects`, and the vectors
++   stored by the semantic-edges pass in `node_vectors` / `token_vectors`.
++3. The file is reopened with `cbm_store_open_path()` (`src/store/store.c`):
++   `cbm_store_delete_file_hashes()` then `cbm_store_upsert_file_hash()` record
++   mtime and size of every discovered file in `file_hashes`; a saved ADR is
++   restored into `project_summaries` with `cbm_store_adr_store()`.
++4. The FTS5 table `nodes_fts` is rebuilt from `nodes` with `cbm_store_exec()`.
++5. If `cbm_pipeline_set_persistence()` was enabled, `cbm_artifact_export()`
++   (`artifact.c`) writes the compressed artifact; a failure fails the run.
++
++## 5. Incremental re-index
++
++`try_incremental_or_delete_db()` (`pipeline.c`) opens an existing database. If
++it passes `cbm_store_check_integrity()`, has stored rows in `file_hashes`, and
++the discovered file count is at most 1.5 times the stored count, it calls
++`cbm_pipeline_run_incremental()` (`src/pipeline/pipeline_incremental.c`).
++Otherwise the database (and its `-wal` / `-shm` files) is deleted after saving
++the ADR, and the full path above runs.
++
++`cbm_pipeline_run_incremental()`:
++
++1. `cbm_store_get_file_hashes()`, then `classify_files()` compares mtime and
++   size; `find_deleted_files()` finds removed files. No change means return.
++2. `cbm_gbuf_load_from_db()` loads the whole stored graph into a graph buffer.
++3. Inbound edges from unchanged files are snapshotted
++   (`incr_capture_inbound_edge()`), then `cbm_gbuf_delete_by_file()` purges the
++   nodes of changed and deleted files.
++4. A registry is seeded from the remaining nodes (`registry_visitor()`).
++5. `run_extract_resolve()` re-indexes only the changed files (the three
++   `pass_parallel.c` phases when more than 50 files changed and more than one
++   worker is available, otherwise definitions, calls, usages, semantic), then `cbm_pipeline_pass_k8s()` and `run_postpasses()` (tests,
++   decorator tags, configlink, and similarity + semantic edges unless fast).
++   Git history, route matching and complexity do not run here.
++6. `incr_restore_inbound_edges()`, then `dump_and_persist()` deletes the file
++   and rewrites it with `cbm_gbuf_dump_to_sqlite()`, `persist_hashes()` and the
++   same `nodes_fts` rebuild.
++
++## 6. Adding a new pass
++
++1. Create `src/pipeline/pass_<name>.c`. A graph-wide pass takes
++   `cbm_pipeline_ctx_t *`; a per-file pass also takes
++   `const cbm_file_info_t *files, int file_count`. Read and write the graph only
++   through the `cbm_gbuf_*` functions.
++2. Declare it in `src/pipeline/pipeline_internal.h` next to the other
++   `cbm_pipeline_pass_*` prototypes.
++3. Register it in `src/pipeline/pipeline.c`:
++   - graph-wide: add a `predump_<name>()` wrapper and a row to `passes[]` in
++     `run_predump_passes()`, and increase `PREDUMP_PASS_COUNT`;
++   - per-file: add a row to `seq_passes[]` in `run_sequential_pipeline()` and
++     increase `PL_SEQ_PASSES`, **and** add the equivalent work to the parallel
++     path in `pass_parallel.c`, otherwise repositories with more than 50 files
++     never run it.
++4. If it must also run on incremental re-indexes, call it from
++   `run_postpasses()` or `run_extract_resolve()` in `pipeline_incremental.c`.
++5. Add the file to `PIPELINE_SRCS` in `Makefile.cbm`.
++6. Add tests to `tests/test_pipeline.c` (`TEST(...)` plus `RUN_TEST(...)` in
++   `SUITE(pipeline)`).

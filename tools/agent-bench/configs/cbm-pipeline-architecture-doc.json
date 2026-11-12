@@ -1,0 +1,76 @@
+{
+  "name": "cbm-pipeline-architecture-doc",
+  "output": "../../../target/agent-bench/cbm-pipeline-architecture-doc/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\codebase-memory-mcp",
+  "base_ref": "01c5921952da58221fd012d40d94ad6a17dae9d0",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/cbm-pipeline-architecture-doc",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\cbm-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\cbm-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "cbm-pipeline-architecture-doc",
+      "prompt_file": "../tasks/cbm-pipeline-architecture-doc.md",
+      "source_language": "C",
+      "source_extensions": [
+        ".c",
+        ".h"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/fact-checklist.mjs",
+          "--checklist",
+          "../graders/fixtures/cbm-pipeline-architecture-doc.checklist.json",
+          "--run-dir",
+          "{runDir}",
+          "--worktree",
+          "{worktree}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "exact": [
+      "docs/architecture/indexing-pipeline.md"
+    ],
+    "min_paths": 1,
+    "max_paths": 1
+  },
+  "engines": [
+    {
+      "id": "goldeneye-ack",
+      "kind": "ack",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Zacha\\IdeaProjects\\agent-context-kernel\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "source": "final-message",
+  "min_facts": 11,
+  "facts": [
+    {
+      "id": "watcher-handle-event-and-flush",
+      "all": ["watcher\\.go", "\\bhandleEvent\\b", "\\bflush\\b"]
+    },
+    {
+      "id": "watcher-ignores-non-content-events",
+      "any": [
+        "chmod",
+        "\\bwatchedEventOps\\b",
+        "(?=.*\\bwrite\\b)(?=.*\\bcreate\\b)(?=.*\\bremove\\b)(?=.*\\brename\\b)"
+      ]
+    },
+    {
+      "id": "engine-entry-wired-from-main",
+      "all": ["\\bSyncPathsContext\\b", "main\\.go"]
+    },
+    {
+      "id": "classification-function-current-name",
+      "all": ["\\bclassifyChangedPaths\\b"]
+    },
+    {
+      "id": "transient-path-helper",
+      "all": ["\\bdropTransientPaths\\b"]
+    },
+    {
+      "id": "transient-path-helper-file",
+      "all": ["transient_paths\\.go"]
+    },
+    {
+      "id": "transient-path-rule",
+      "any": [
+        "\\.tmp\\b",
+        "\\.swp\\b",
+        "\\.swx\\b",
+        "DS_Store",
+        "swap[- ]files?",
+        "temp(?:orary)?[- ]files?",
+        "suffix"
+      ]
+    },
+    {
+      "id": "workers-and-per-file-processing",
+      "all": ["\\bstartWorkers\\b"],
+      "any": ["\\bprocessFile\\b", "\\bprocessProviderFile\\b"]
+    },
+    {
+      "id": "incremental-append-decision-and-fallback",
+      "all": [
+        "\\btryProviderIncrementalAppend\\b|\\btryIncrementalJSONL\\b",
+        "truncat|shr[iu]nk|smaller|inode|file identity|identity chang|device|data[ _-]?version|same size|size (?:is )?unchanged|unchanged size|did not grow|\\bDAG\\b|message\\.?id|forceReplace|MsgCount|no (?:stored )?messages"
+      ]
+    },
+    {
+      "id": "collect-write-and-db-call",
+      "all": [
+        "\\bcollectAndBatch\\b",
+        "\\bwriteIncremental\\b|\\bwriteBatch\\b",
+        "\\bWriteSessionIncremental\\b|\\bUpsertSession\\b|\\bInsertMessages\\b"
+      ]
+    },
+    {
+      "id": "broadcaster-emit-data-changed",
+      "all": ["broadcaster", "\\bEmit\\b", "data_changed"]
+    },
+    {
+      "id": "unchanged-skip-by-size-and-mtime",
+      "all": ["mtime|modification time|mod ?time", "\\bsize\\b"],
+      "any": [
+        "skip[ _-]?cache",
+        "\\bproviderSingleSessionFresh\\b",
+        "\\bshouldSkipFile",
+        "\\bproviderSourceUnchangedInDB\\b",
+        "\\bshouldSkipProviderSource",
+        "file_size",
+        "file_mtime",
+        "\\bGetSessionFileInfo\\b",
+        "\\bGetFileInfoByPath\\b"
+      ]
+    },
+    {
+      "id": "parse-error-logged-and-counted",
+      "all": ["\\blog"],
+      "any": ["\\bRecordFailed\\b", "sync error", "\\bfailed\\b", "\\bSyncStats\\b"]
+    },
+    {
+      "id": "slow-subscriber-events-dropped",
+      "all": ["drop|discard|\\blost\\b|\\blose"],
+      "any": ["buffer", "non-?blocking", "\\bbroadcasterBufferCap\\b"]
+    }
+  ],
+  "forbidden": [
+    {
+      "id": "old-classify-name-presented-as-current",
+      "any": ["^(?!.*\\bclassifyChangedPaths\\b).*\\bclassifyPaths\\b"]
+    },
+    {
+      "id": "claims-websocket-transport",
+      "any": [
+        "(?<!not |than |instead of |n't )(?:over|via|through|using) (?:a |the )?web ?sockets?"
+      ]
+    }
+  ]
+}
