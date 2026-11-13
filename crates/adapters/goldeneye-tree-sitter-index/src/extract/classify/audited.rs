@@ -260,11 +260,23 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
     {
         return None;
     }
-    if is_javascript_family(language)
-        && is_javascript_function_value(node)
-        && node.child_by_field_name("name").is_none()
-    {
-        return javascript_assigned_name_node(node);
+    if is_anonymous_function(kind) && node.child_by_field_name("name").is_none() {
+        // A lambda or a closure has no name of its own. Taking the first
+        // identifier inside it made a symbol called after a parameter or after
+        // whatever its body mentions first, often a type: 10% of the callables
+        // of a Spring index and a third of those of a Rust index were such.
+        if is_javascript_family(language) && is_javascript_function_value(node) {
+            return javascript_assigned_name_node(node);
+        }
+        // In Nix every function is written in place and named by its binding.
+        if language == "nix" {
+            return node
+                .parent()
+                .filter(|holder| holder.kind() == "binding")
+                .and_then(|holder| holder.child_by_field_name("attrpath"))
+                .and_then(|path| first_name_like(path).or(Some(path)));
+        }
+        return None;
     }
     if matches!(language, "cpp" | "cuda") && matches!(label, "Function" | "Method") {
         return cpp_callable_name_node(node);
@@ -412,6 +424,23 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
 
 pub(super) fn is_javascript_family(language: &str) -> bool {
     matches!(language, "javascript" | "typescript" | "tsx")
+}
+
+/// Syntax kinds of functions written in place, as the grammars name them.
+fn is_anonymous_function(kind: &str) -> bool {
+    matches!(
+        kind,
+        "arrow_function"
+            | "function_expression"
+            | "generator_function"
+            | "lambda_expression"
+            | "lambda_literal"
+            | "lambda"
+            | "closure_expression"
+            | "func_literal"
+            | "anonymous_function"
+            | "anonymous_function_creation_expression"
+    )
 }
 
 pub(super) fn is_javascript_function_value(node: Node<'_>) -> bool {

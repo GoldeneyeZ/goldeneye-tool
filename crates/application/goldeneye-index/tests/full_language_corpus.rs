@@ -430,6 +430,66 @@ fn javascript_function_values_take_the_name_they_are_assigned_to() {
 }
 
 #[test]
+fn lambdas_and_closures_are_not_symbols_and_their_calls_belong_to_the_function_around_them() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("Config.java"),
+        concat!(
+            "class Config {\n",
+            "  Chain chain(Http http) {\n",
+            "    return http.csrf(csrf -> csrf.disable()).authorize(() -> new Policy()).build();\n",
+            "  }\n",
+            "}\n",
+            "class Policy {}\n",
+        ),
+    )
+    .expect("write Java source");
+    fs::write(
+        temp.path().join("lib.rs"),
+        concat!(
+            "pub struct ApiError;\n",
+            "pub fn convert(input: Option<u8>) -> Result<u8, ApiError> {\n",
+            "    input.map(|value| value + 1).ok_or_else(|| ApiError)\n",
+            "}\n",
+        ),
+    )
+    .expect("write Rust source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index lambdas and closures");
+
+    let labels = |name: &str| -> Vec<String> {
+        let mut found: Vec<String> = service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name)
+            .map(|hit| hit.node.label.as_str().to_owned())
+            .collect();
+        found.sort();
+        found
+    };
+
+    // Nothing is named after a lambda's parameter or after what its body mentions.
+    assert_eq!(labels("csrf"), Vec::<String>::new());
+    assert_eq!(labels("value"), Vec::<String>::new());
+    // A type that a lambda instantiates is that type and nothing else.
+    assert_eq!(labels("Policy"), vec!["Class".to_owned()]);
+    assert_eq!(labels("ApiError"), vec!["Struct".to_owned()]);
+    // The functions around them are still there.
+    assert_eq!(labels("chain"), vec!["Method".to_owned()]);
+    assert_eq!(labels("convert"), vec!["Function".to_owned()]);
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
