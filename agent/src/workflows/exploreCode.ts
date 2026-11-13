@@ -757,10 +757,12 @@ export async function testsUsing(
     for (const match of uses) perFile.set(match.filePath, [...(perFile.get(match.filePath) ?? []), ...match.lines]);
     const shown = [...perFile].slice(0, TESTS_FILES_LISTED);
     const more = perFile.size > shown.length ? `, +${perFile.size - shown.length} more files` : "";
-    return [
+    const listed = [
       `# tests using ${name}: ${uses.length} in ${files.size} file${files.size === 1 ? "" : "s"}`,
       ...shown.map(([filePath, lines]) => `  ${filePath}:${lineList([...new Set(lines)].sort((left, right) => left - right))}`),
     ].join("\n") + more;
+    const example = await oneTestExample(context, uses);
+    return example === undefined ? listed : `${listed}\n\n${example}`;
   }
   // Every test of the symbol is in one small file: a new or changed test is
   // written from that file as a whole.
@@ -802,6 +804,31 @@ export async function testsUsing(
 }
 
 const TESTS_FILES_LISTED = 5;
+const EXAMPLE_CANDIDATES = 12;
+/** Contexts whose answer already carries a whole test. */
+const exampleShown = new WeakSet<CodeContext>();
+
+/**
+ * Locations say where the tests are, not how this project writes one: which
+ * constructors, builders and assertions it uses. A test written without having
+ * seen one calls things that do not exist. So the first name of an answer that
+ * has a short test gets that test whole, with the head of its file; once.
+ */
+async function oneTestExample(context: CodeContext, uses: TextMatch[]): Promise<string | undefined> {
+  if (exampleShown.has(context)) return undefined;
+  const size = (match: TextMatch) => (match.enclosing?.endLine ?? 0) - (match.enclosing?.startLine ?? 0) + 1;
+  // Of the first short ones the longest: a three-line helper shows little.
+  const short = uses
+    .filter((match) => match.enclosing !== undefined && !isTypeNode(match.enclosing) && size(match) <= TESTS_SOURCE_MAX_LINES)
+    .slice(0, EXAMPLE_CANDIDATES)
+    .reduce<TextMatch | undefined>((best, match) => (best === undefined || size(match) > size(best) ? match : best), undefined);
+  if (short?.enclosing === undefined) return undefined;
+  exampleShown.add(context);
+  const sections = [`# one of them, as an example of how they are written:`, await renderSymbol(context, short.enclosing)];
+  const head = await testFileHead(context, short.filePath);
+  if (head !== undefined) sections.push(head);
+  return sections.join("\n\n");
+}
 // A test file is read whole to add a test to it; up to this size that costs
 // less than the call that would read it.
 const TEST_FILE_WHOLE_MAX_LINES = 300;
@@ -881,9 +908,12 @@ async function testFileHead(context: CodeContext, filePath: string): Promise<str
   const callables = symbols.filter((node) => !isTypeNode(node) && !VALUE_LABELS.has(node.label));
   if (callables.length === 0) return undefined;
   const first = Math.min(...callables.map((node) => leadingDocStart(lines, node.startLine)));
-  const end = Math.min(first - 1, TEST_HEAD_MAX_LINES);
-  if (end < 3) return undefined;
-  return [`# head of ${filePath}:1-${end}`, ...lines.slice(0, end)].join("\n");
+  // A licence header says nothing about how a test is written.
+  let start = 0;
+  while (start < first - 1 && /^\s*(\/\*|\*|\/\/|#(?!!)|$)/.test(lines[start])) start += 1;
+  const end = Math.min(first - 1, start + TEST_HEAD_MAX_LINES);
+  if (end - start < 3) return undefined;
+  return [`# head of ${filePath}:${start + 1}-${end}`, ...lines.slice(start, end)].join("\n");
 }
 
 /** `get <file> --tests`: the test files that import the file, or the tests of the type it declares. */

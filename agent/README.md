@@ -183,7 +183,9 @@ Behaviors worth knowing:
   tests are in one test file of at most 300 lines that file is printed whole.
 - `get --tests` for a method keeps to the test files that name its type; for
   a type, or for a batch of more than three names, it lists where the tests
-  are (file and lines) instead of printing them.
+  are (file and lines) instead of printing them, and prints one short test
+  whole with the head of its file, once per answer, as an example of how the
+  project writes its tests.
 - `search` also lists the files whose name holds a search word.
 - `get <file> --tests` lists the test files that import the file with the
   lines that use what they import, and prints the test file whole when it is

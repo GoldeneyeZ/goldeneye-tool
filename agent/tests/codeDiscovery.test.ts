@@ -1189,15 +1189,43 @@ describe("exploring code", () => {
     expect(method!.split("\n")[0]).toBe(`# tests using Billing.refund: 1 in ${BILLING_TEST}, printed whole (lines 6)`);
     expect(method).not.toContain("WalletTests");
 
-    // One name of a large batch: where its tests are, not their source.
-    expect(await testsUsing(await prepare(), "Billing.refund", { brief: true })).toBe(
+    // One name of a large batch: where its tests are, and one of them whole as
+    // an example of how this project writes a test.
+    const batch = await prepare();
+    expect(await testsUsing(batch, "Billing.refund", { brief: true })).toBe(
+      [
+        `# tests using Billing.refund: 1 in 1 file`,
+        `  ${BILLING_TEST}:6`,
+        "",
+        "# one of them, as an example of how they are written:",
+        "",
+        // The fixture's index gives the method one line more than it has.
+        `# BillingTests.refund Method ${BILLING_TEST}:4-8`,
+        "  @Test",
+        "  void refund() {",
+        "    new Billing().refund(5);",
+        "  }",
+        "}",
+        "",
+        `# head of ${BILLING_TEST}:1-3`,
+        "package com.shop;",
+        "",
+        "class BillingTests {",
+      ].join("\n"),
+    );
+    // The example comes once per answer: the next name gets locations only.
+    expect(await testsUsing(batch, "Billing.refund", { brief: true })).toBe(
       [`# tests using Billing.refund: 1 in 1 file`, `  ${BILLING_TEST}:6`].join("\n"),
     );
 
     // The tests of a type are its test files.
-    expect(await testsUsing(await prepare(), "Billing")).toBe(
-      [`# tests using Billing: 2 in 2 files`, `  ${BILLING_TEST}:6`, `  ${OTHER}:3`].join("\n"),
-    );
+    const ofType = await testsUsing(await prepare(), "Billing");
+    expect(ofType!.split("\n").slice(0, 3)).toEqual([
+      `# tests using Billing: 2 in 2 files`,
+      `  ${BILLING_TEST}:6`,
+      `  ${OTHER}:3`,
+    ]);
+    expect(ofType).toContain("# one of them, as an example of how they are written:");
   });
 
   it("answers --tests on a file with the test files that import it", async () => {
