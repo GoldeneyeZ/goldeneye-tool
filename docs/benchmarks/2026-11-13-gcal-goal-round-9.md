@@ -89,6 +89,54 @@ All runs of this goal: 56 of 61 (plain shell: 42 of 43). The seven runs made
 after the last fixes for the failures all passed. The clause "same or better
 pass rate" is not met by measurement and cannot be with the budget left.
 
+## The harness's slow daemon pre-warm, explained
+
+Unexplained in the summary until now: before the prompt the harness runs `gcal status` through
+the daemon and records the time. Per task, in the runs of this goal:
+
+| Task | Pre-warm, seconds |
+|---|---|
+| StringUtils (Spring) | 8.7 to 11.8 |
+| Spring redaction | 8.3 to 9.8 |
+| LOD | 8.2 to 11.5 (once 2.4) |
+| cbm | 7.9 to 9.3 |
+| Spring flow question | 3.3 to 7.3 |
+| agentsview | 4.2 to 4.5 |
+| the six small repositories | 0.9 to 4.4, mostly 1.4 |
+
+The same command took 1.0 s outside the harness on the same index. The cause
+is the disk the benchmark works on, not GCAL. The harness's worktrees and live
+caches are on `D:`, a SATA hard disk (TOSHIBA DT01ACA300); `git worktree add`
+writes 10,986 files of Spring there in 45 to 57 s, and the pre-warm is the
+first thing to write to that disk afterwards (the snapshot copy, then SQLite's
+`-wal` and `-shm` files when the index is opened).
+
+Measured by replaying the harness's own sequence for the StringUtils task
+without a model (worktree at the harness's path, snapshot restored, `gcal
+status` with the lane's environment), the worktree removed afterwards as the
+harness does:
+
+| Index and GCAL state restored to | Snapshot copy (129 MB) | `gcal status`, cold daemon | Second `gcal status` |
+|---|---|---|---|
+| `C:` (NVMe) | 0.08 s | 1.2 s | 2.3 s |
+| `D:` (the hard disk), right after `worktree add` | 32 s | 29 s | 36 s |
+| `D:`, once the disk had settled (direct backend) | | 0.85 s | |
+
+The second call waits behind the daemon's graph warm-up, which reads the
+index. Ruled out on the way, by measurement: changed modification times of
+the worktree (no effect), the harness's environment variables (no effect), a
+freshly copied index on a quiet disk (1.1 s). By reading the code: the
+daemon's start lock (a wait there ends in a fallback after 2 s, not in a slow
+answer) and the backend's file watcher (GCAL disables it).
+
+Does the same contention slow the plain-shell lane, which has no pre-warm and
+starts its agent sooner? Reads of the new worktree are served from memory:
+8 s after `worktree add`, `rg` over the three Spring modules took 380 ms and
+`git status` 102 ms; 30 s later 314 ms and 86 ms. So the contention is on new
+writes, the pre-warm takes it, and the pre-warm is not part of the wall time
+compared between the lanes (`wall_ms` is the agent's time only). What was not
+measured is the end of a run, where both lanes write (patches) on that disk.
+
 ## Limits
 
 - The callable counts are totals; no list of the removed symbols was reviewed

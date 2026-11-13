@@ -65,7 +65,10 @@ shell.
   - Slow first daemon start: the 65 s and 116 s were the benchmark running
     during a full build. `gcal status` through a cold daemon takes 1.0 s on a
     192 MB index. The daemon also loads the graph right after its first
-    answer.
+    answer. The 7 to 12 s the harness records for its pre-warm on large
+    repositories are the benchmark's hard disk, busy after `git worktree
+    add`: 1.2 s with the index restored to the NVMe disk, 29 s when the same
+    sequence is replayed on the hard disk (round 9).
 
 ### What did not improve
 
@@ -105,7 +108,7 @@ shell.
 
 ## What was changed
 
-33 commits on `master`, `ce7d73a` to the last one.
+34 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -151,8 +154,10 @@ shell.
   corpus; the importers lookup for anything but TypeScript on terax and the
   unit tests for Python.
 - The `gcal`-only lane (no shell discovery) was not run in this goal.
-- Why the harness's pre-prompt `gcal status` takes 7 to 10 s on large indexes
-  when the same command takes 1.0 s outside it.
+- Whether the hard disk the benchmark works on shifts the comparison of wall
+  times. Reads of a fresh worktree are not slowed (round 9) and the pre-warm
+  that takes the contention is outside the compared time; the writes at the
+  end of a run were not timed.
 - Fairness note that applies to every number above: the GCAL lane may run
   `gcal check` after editing; plain shell has no equivalent under the one-shot
   rule. Until round 8 it was a parse check of changed files; since then it
@@ -186,5 +191,8 @@ shell.
    small API mistakes with nothing compiled before grading. A third and fourth
    repetition per lane with the build allowed would say whether that rate
    differs between the lanes at all.
-6. **The harness's 7 to 10 s daemon start**: time each step of its preparation
-   once; it costs nothing in tokens.
+6. **Move the benchmark's worktrees and caches to the NVMe disk**, for both
+   lanes on the same day. Preparation of a Spring run is 45 to 57 s of
+   `git worktree add` on a hard disk, and the GCAL pre-warm after it 8 to 12 s.
+   For GCAL itself: open the index without creating `-wal` and `-shm` files
+   when the process only reads.
