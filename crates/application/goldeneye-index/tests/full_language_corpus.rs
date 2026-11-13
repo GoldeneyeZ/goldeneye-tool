@@ -672,6 +672,66 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
 }
 
 #[test]
+fn a_go_method_belongs_to_the_type_of_its_receiver() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("providers.go"),
+        concat!(
+            "package parser\n",
+            "\n",
+            "type claudeProvider struct{}\n",
+            "\n",
+            "type codexProvider struct{}\n",
+            "\n",
+            "func (p *claudeProvider) Parse(path string) error { return nil }\n",
+            "\n",
+            "func (p codexProvider) Parse(path string) error { return nil }\n",
+            "\n",
+            "func (*codexProvider) Close() error { return nil }\n",
+        ),
+    )
+    .expect("write Go source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index Go methods");
+
+    let owners = |name: &str| -> Vec<String> {
+        let mut found: Vec<String> = service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name && hit.node.label.as_str() == "Method")
+            .map(|hit| {
+                let qualified = hit.node.qualified_name.as_str().to_owned();
+                let mut segments: Vec<&str> = qualified.rsplit('.').take(2).collect();
+                segments.reverse();
+                segments.join(".")
+            })
+            .collect();
+        found.sort();
+        found
+    };
+
+    // Two methods of one name in one package are two symbols, each under its type.
+    assert_eq!(
+        owners("Parse"),
+        vec![
+            "claudeProvider.Parse".to_owned(),
+            "codexProvider.Parse".to_owned()
+        ]
+    );
+    assert_eq!(owners("Close"), vec!["codexProvider.Close".to_owned()]);
+}
+
+#[test]
 fn a_makefile_rule_is_one_function_named_by_its_target() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(

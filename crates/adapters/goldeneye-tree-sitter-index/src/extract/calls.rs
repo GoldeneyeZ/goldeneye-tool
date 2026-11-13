@@ -88,7 +88,11 @@ pub(super) fn generic_call_target(node: Node<'_>) -> Option<Node<'_>> {
 
 pub(super) fn receiver_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     let receiver = node.child_by_field_name("receiver")?;
-    let type_node = find_descendant_kind(receiver, &["type_identifier", "identifier"])?;
+    // `(p *Provider)`: the type, not the name the receiver is given. Taking
+    // whichever identifier came first took `p`, and no Go method with a named
+    // receiver was placed under its type.
+    let type_node = find_descendant_kind(receiver, &["type_identifier"])
+        .or_else(|| find_descendant_kind(receiver, &["identifier"]))?;
     Some(node_text(type_node, source))
 }
 
