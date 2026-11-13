@@ -66,6 +66,15 @@ fn declares_nothing_of_its_own(language: &str, node: Node<'_>) -> bool {
     if language == "powershell" && kind == "variable" {
         return true;
     }
+    // C family: `struct stat st;` uses a type and `struct node;` announces
+    // one. Each was a class; the definition is where the body is.
+    if matches!(
+        kind,
+        "struct_specifier" | "union_specifier" | "class_specifier" | "enum_specifier"
+    ) && node.child_by_field_name("body").is_none()
+    {
+        return true;
+    }
     let unnamed = node.child_by_field_name("name").is_none();
     // C family: a struct or union without a tag was named after its first
     // field, or after that field's type. `typedef struct { .. } name_t;` is

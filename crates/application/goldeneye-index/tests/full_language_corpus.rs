@@ -598,6 +598,9 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
             "    int used;\n",
             "} PageBuilder;\n",
             "\n",
+            "struct Tagged;\n",
+            "typedef struct Tagged tagged_t;\n",
+            "\n",
             "struct Tagged {\n",
             "    int value;\n",
             "};\n",
@@ -605,6 +608,7 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
             "typedef enum { RISK_LOW, RISK_HIGH } risk_level_t;\n",
             "\n",
             "int page_used(PageBuilder *page) { return page->used; }\n",
+            "int tagged_value(void) { struct Tagged local = {0}; return local.value; }\n",
         ),
     )
     .expect("write C source");
@@ -659,7 +663,9 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
     assert_eq!(labels("RISK_LOW"), vec!["Enum".to_owned()]);
     assert_eq!(labels("PageBuilder"), vec!["Type".to_owned()]);
     assert_eq!(labels("risk_level_t"), vec!["Type".to_owned()]);
+    // C: the struct is where its body is; announcing or using it declares nothing.
     assert_eq!(labels("Tagged"), vec!["Class".to_owned()]);
+    assert_eq!(labels("tagged_t"), vec!["Type".to_owned()]);
     // TypeScript: a class expression without a name is not called after its first method.
     assert_eq!(labels("observe"), vec!["Method".to_owned()]);
     assert_eq!(labels("Named"), vec!["Class".to_owned()]);
