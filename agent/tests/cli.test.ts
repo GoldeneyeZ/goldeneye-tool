@@ -265,6 +265,28 @@ describe("GCAL CLI", () => {
     expect(exitCode).toBe(0);
   });
 
+  it("reads search --tests as get --tests instead of refusing the option", async () => {
+    const tool = vi.fn(async (name: string) => (name === "index_status" ? { root_path: tmpdir() } : {}));
+    const writes: string[] = [];
+    const errors: string[] = [];
+
+    const exitCode = await runCli({
+      argv: ["node", "gcal", "search", "Missing.member", "--tests"],
+      env: {},
+      currentDirectory: "C:\\code\\example\\src",
+      homeDir: "C:\\Users\\example",
+      resolveProject: async () => "registered-project",
+      createClient: () => fakeClient({ tool }),
+      writeOut: (text) => writes.push(text),
+      writeErr: (text) => errors.push(text),
+    });
+
+    // The answer of `get`: the name is looked up as a symbol, not rejected with the help text.
+    expect(errors.join("")).not.toContain("unknown option");
+    expect(writes.join("")).toContain("# not found: Missing.member");
+    expect(exitCode).toBe(0);
+  });
+
   it("suggests init when the current directory is not registered", async () => {
     const errors: string[] = [];
     const createClient = vi.fn(() => fakeClient());

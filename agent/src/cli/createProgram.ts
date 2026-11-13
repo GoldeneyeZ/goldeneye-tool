@@ -86,6 +86,7 @@ interface SearchCommandOptions {
   query: string[];
   snippets?: number | true;
   context?: number;
+  tests?: boolean;
 }
 
 interface TraceCommandOptions {
@@ -210,6 +211,30 @@ const GRAPH_TRACE_ROWS = 60;
 const TESTS_FULL_MAX_NAMES = 3;
 const RAW_TRACE_ROWS = 20;
 
+/** `get <names> [--tests]`: the sources, then the tests that use each name. */
+async function readWithTests(
+  context: CodeContext,
+  names: string[],
+  full: boolean,
+  withTests: boolean,
+): Promise<ReadResult> {
+  const read = await readLocators(context, names, { detail: full ? "full" : "auto", forEdit: withTests });
+  if (!withTests) return read;
+  const sections = [read.text];
+  for (const name of names) {
+    try {
+      // Tests of many names at once: a few rows each, not their sources.
+      const tests = await testsUsing(context, name, { brief: names.length > TESTS_FULL_MAX_NAMES });
+      if (tests !== undefined) sections.push(tests);
+    } catch (error) {
+      // The source above is already read; a failed test lookup must not discard it.
+      const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
+      sections.push(`# tests using ${name}: lookup failed (${reason}); try: gcal callers ${name}`);
+    }
+  }
+  return { ...read, text: sections.join("\n\n") };
+}
+
 function emit(deps: ProgramDeps, result: ReadResult): void {
   if (result.text.length > 0) writeLine(deps.writeOut, result.text);
   if (!result.ok) throw new CommandFailedError();
@@ -257,8 +282,15 @@ export function createProgram(deps: ProgramDeps): Command {
     .option("--query <query>", "additional query", collectOption, [])
     .option("--snippets [n]", "append source of the top results", positiveNumberOption)
     .addOption(grepContextAlias())
+    .addOption(new Option("--tests", "as gcal get <names> --tests").hideHelp())
     .action(async (queries: string[], options: SearchCommandOptions) => {
       const filePattern = normalizeFilePattern(options.file ?? options.path);
+      // `search <names> --tests` means the symbols and their tests: what `get` prints.
+      if (options.tests === true) {
+        const context = await requireContext(deps, "search --tests");
+        answer(deps, await readWithTests(context, [...queries, ...options.query], false, true));
+        return;
+      }
       // `search <pattern> [paths...] -C n` is a grep in every way but its name.
       if (options.context !== undefined) {
         const context = await requireContext(deps, "search -C");
@@ -526,26 +558,7 @@ export function createProgram(deps: ProgramDeps): Command {
 
       const context = await codeContext(deps);
       if (context !== undefined) {
-        const read = await readLocators(context, qualifiedNames, {
-          detail: options.full ? "full" : "auto",
-          forEdit: options.tests === true,
-        });
-        if (options.tests) {
-          const sections = [read.text];
-          for (const name of qualifiedNames) {
-            try {
-              // Tests of many names at once: a few rows each, not their sources.
-              const tests = await testsUsing(context, name, { brief: qualifiedNames.length > TESTS_FULL_MAX_NAMES });
-              if (tests !== undefined) sections.push(tests);
-            } catch (error) {
-              // The source above is already read; a failed test lookup must not discard it.
-              const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
-              sections.push(`# tests using ${name}: lookup failed (${reason}); try: gcal callers ${name}`);
-            }
-          }
-          read.text = sections.join("\n\n");
-        }
-        answer(deps, read);
+        answer(deps, await readWithTests(context, qualifiedNames, options.full === true, options.tests === true));
         return;
       }
 
