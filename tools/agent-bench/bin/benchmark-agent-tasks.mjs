@@ -953,6 +953,9 @@ async function resolveOneShotPreparation({ baseCommit, config, engine, repoName 
   const artifacts = resolvePreparationArtifacts(config);
   try {
     const preparation = readPreparation(artifacts.preparation);
+    // A preparation that failed left no usable snapshot: an older one may still
+    // be on disk, built by another candidate. Prepare again.
+    if (preparation.error || !preparation.provenance) throw new Error("previous preparation failed");
     const verification = await verifyPreparedSnapshot({
       baseCommit,
       config,
@@ -1248,7 +1251,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
   const sourceLanguage = task.source_language ?? "TypeScript, TSX, or Rust";
   const sourceExtensions = (task.source_extensions ?? [".ts", ".tsx", ".rs"]).join(", ");
   const gcalEditCommands =
-    " gcal get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows) and the imports and fixtures at the top of their file; given a file, it lists the test files that import it. gcal check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status. gcal callers <path/File.ext> lists every file that imports that file, each way its path is written, and the lines that use what is imported; run it before moving or renaming a module. When gcal get is given a symbol together with a type or file too long to print whole, it also prints the members of that type that call the symbol. In PowerShell write regex patterns in single quotes, and a quote character inside a pattern as \\x22 (double) or \\x27 (single).";
+    " gcal get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows) and the imports and fixtures at the top of their file; given a file, it lists the test files that import it. With --tests a symbol in a small file comes with the whole file and a small test file is printed whole, so the edit can be written from that one answer. gcal check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status. gcal callers <path/File.ext> lists every file that imports that file, each way its path is written, and the lines that use what is imported; run it before moving or renaming a module. When gcal get is given a symbol together with a type or file too long to print whole, it also prints the members of that type that call the symbol. In PowerShell write regex patterns in single quotes, and a quote character inside a pattern as \\x22 (double) or \\x27 (single).";
   const gcalSyntax =
     "gcal takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). gcal get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). gcal grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. gcal search falls back to text when no symbol matches. gcal callers adds text references to call-graph edges; gcal callees and gcal impls follow the graph the other way. gcal replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express; add -g '*.ext' to leave data files and documents under the same directories unchanged." +
     gcalEditCommands;
