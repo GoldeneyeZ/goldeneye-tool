@@ -81,6 +81,11 @@ export interface ReadOptions {
    * full: whole source whatever the size; outline: always an outline.
    */
   detail?: "auto" | "full" | "outline";
+  /**
+   * The symbols are read to be changed (`--tests`): one that sits in a small
+   * file comes with the whole file.
+   */
+  forEdit?: boolean;
 }
 
 export async function readLocators(
@@ -102,6 +107,8 @@ export async function readLocators(
       });
     }
   }
+
+  await wholeSmallFiles(context, results, options);
 
   // `get Billing.charge BillingTests`: the second item is too large to print
   // and comes back as an outline. What is wanted from it is the part that
@@ -133,11 +140,46 @@ export async function readLocators(
 
   const budgets = fairBudgets(texts.map(byteLength), READ_MAX_OUTPUT_BYTES);
   return {
-    text: texts.map((text, index) => truncateBytes(text, budgets[index])).join("\n\n"),
+    text: texts
+      .map((text, index) => truncateBytes(text, budgets[index]))
+      .filter((text) => text.length > 0)
+      .join("\n\n"),
     // One miss in a batch is reported in the text; failing the command for it
     // would also cancel whatever the caller chained after it with `&&`.
     ok: results.some((result) => result.ok),
   };
+}
+
+export const SMALL_FILE_MAX_LINES = 150;
+
+/**
+ * A function read together with its tests is about to be edited, and in a small
+ * file the edit is written from the whole file: its imports, its neighbours.
+ * Printing the file costs a few lines more than the function and saves the
+ * call that would read it.
+ */
+async function wholeSmallFiles(context: CodeContext, results: ReadResult[], options: ReadOptions): Promise<void> {
+  if (options.forEdit !== true || (options.detail ?? "auto") !== "auto") return;
+  const byFile = new Map<string, ReadResult[]>();
+  for (const result of results) {
+    const files = new Set((result.callables ?? []).map((node) => node.filePath));
+    if (files.size !== 1 || result.outlined !== undefined) continue;
+    const [filePath] = files;
+    byFile.set(filePath, [...(byFile.get(filePath) ?? []), result]);
+  }
+  for (const [filePath, sameFile] of byFile) {
+    const lines = await context.reader.lines(filePath);
+    if (lines === undefined || lines.length > SMALL_FILE_MAX_LINES) continue;
+    const names = sameFile.flatMap((result) => (result.callables ?? []).map((node) => `${node.name} ${node.startLine}`));
+    const [first, ...rest] = sameFile;
+    first.text = [`# ${filePath}:1-${lines.length} whole (small file); ${[...new Set(names)].join(", ")}`, ...lines].join("\n");
+    first.compact = undefined;
+    // The other names of the same file are in what was just printed.
+    for (const result of rest) {
+      result.text = "";
+      result.compact = undefined;
+    }
+  }
 }
 
 const RELATED_MEMBERS_SHOWN = 4;

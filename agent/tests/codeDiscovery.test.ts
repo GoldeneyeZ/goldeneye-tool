@@ -315,6 +315,21 @@ describe("reading code", () => {
     );
   });
 
+  it("prints a small file whole when its symbols are read to be changed", async () => {
+    const context = await createContext();
+    const source = BILLING_SOURCE.replace(/\n$/, "").split("\n");
+
+    const forEdit = await readLocators(context, ["Billing.refund", "Billing.charge"], { forEdit: true });
+    const [header, ...body] = forEdit.text.split("\n");
+    expect(header).toMatch(new RegExp(`^# ${BILLING}:1-${source.length} whole \\(small file\\); refund \\d+, charge \\d+`));
+    // Once, however many of its symbols were named.
+    expect(body).toEqual(source);
+
+    // Without the intent to edit, a symbol is its own lines.
+    const plain = await readLocators(context, ["Billing.refund"]);
+    expect(plain.text.startsWith("# Billing.refund Method")).toBe(true);
+  });
+
   it("prints overloads with their location and exact working-tree lines", async () => {
     const context = await createContext();
     const result = await readLocators(context, ["com.shop.Billing.charge"]);
@@ -642,6 +657,31 @@ describe("exploring code", () => {
     expect(result.text).toContain('# no symbol named "-cents"; text matches:');
     // The line keeps its indentation: an edit is written from this text.
     expect(result.text).toContain(`${BILLING}\n  15\tBilling.refund\t    record(-cents);`);
+
+    // A large --limit stays within the page size the backend accepts.
+    const asked: number[] = [];
+    await searchCode(
+      context,
+      backend({
+        search: async (_query: string, options: { limit: number }) => {
+          asked.push(options.limit);
+          return [];
+        },
+      }),
+      { queries: ["charge"], limit: 80 },
+    );
+    expect(asked).toEqual([200]);
+
+    // A search word is often where something lives: files named like it are listed.
+    context.newFiles = {
+      list: async () => [],
+      all: async () => [BILLING, BILLING_TEST, "docs/billing-guide.md", "assets/billing.png", LEDGER],
+    } as unknown as CodeContext["newFiles"];
+    const named = await searchCode(context, backend({ search }), { queries: ["billing", "a|b"], limit: 5 });
+    expect(named.text).toContain(
+      `# files named like "billing": docs/billing-guide.md, ${BILLING}, ${BILLING_TEST}`,
+    );
+    expect(named.text).not.toContain('files named like "a|b"');
   });
 
   it("adds text references the call graph missed and skips declarations", async () => {
@@ -1023,22 +1063,21 @@ describe("exploring code", () => {
 
     const tests = await testsUsing(context, "Billing.refund");
 
+    // The only test file that uses it is small: it is printed whole.
     expect(tests).toBe(
       [
-        "# tests using Billing.refund: 1 in 1 file",
+        `# tests using Billing.refund: 1 in ${BILLING_TEST}, printed whole (lines 6)`,
         "",
-        `# BillingTests.refund Method ${BILLING_TEST}:4-8`,
+        `# ${BILLING_TEST}:1-9`,
+        "package com.shop;",
+        "",
+        "class BillingTests {",
         "  @Test",
         "  void refund() {",
         "    new Billing().refund(5);",
         "    assertEquals(-5, total());",
         "  }",
-        "",
-        // What a new test is written from: the lines above the first test.
-        `# head of ${BILLING_TEST}:1-3`,
-        "package com.shop;",
-        "",
-        "class BillingTests {",
+        "}",
       ].join("\n"),
     );
 
@@ -1053,8 +1092,10 @@ describe("exploring code", () => {
         return lookup(name, args);
       },
     };
-    // The head of a test file is printed once per answer.
-    expect(await testsUsing(context, "Billing.refund")).toBe(tests!.split("\n\n# head of")[0]);
+    // A test file is printed once per answer.
+    expect(await testsUsing(context, "Billing.refund")).toBe(
+      `# tests using Billing.refund: 1 in ${BILLING_TEST}, printed above (lines 6)`,
+    );
 
     const unused = await createContext({ textResults: [textHit(NODES[3], [7])] });
     expect(await testsUsing(unused, "Billing.refund")).toBe("# tests using Billing.refund: none found");
@@ -1130,6 +1171,8 @@ describe("exploring code", () => {
     );
     // A test file has no tests of its own.
     expect(await testsUsing(context, "tests/test_pairs.py")).toBeUndefined();
+    // The bare file name is enough.
+    expect(await testsUsing(context, "pairs.py")).toContain("# tests importing shop/pairs.py: 1 files");
   });
 
   it("prints matching lines with context, merging overlapping windows", async () => {

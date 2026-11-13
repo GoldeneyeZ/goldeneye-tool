@@ -522,6 +522,7 @@ export function createProgram(deps: ProgramDeps): Command {
       if (context !== undefined) {
         const read = await readLocators(context, qualifiedNames, {
           detail: options.full ? "full" : "auto",
+          forEdit: options.tests === true,
         });
         if (options.tests) {
           const sections = [read.text];

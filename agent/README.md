@@ -178,6 +178,10 @@ Behaviors worth knowing:
 - `get --tests` also prints the head of the first test file it shows (imports
   and fixtures above the first test, up to 40 lines): what a new test there is
   written from.
+- `get --tests` is read as the intent to change the symbols: one that sits in
+  a file of at most 150 lines comes with the whole file, and when all its
+  tests are in one test file of at most 150 lines that file is printed whole.
+- `search` also lists the files whose name holds a search word.
 - `get <file> --tests` lists the test files that import the file with the
   lines that use what they import; for a language that imports by name, the
   tests of the type the file declares.

@@ -21,6 +21,7 @@ import { couldBeFileName, normalizePath, parseLocator, parseSymbolLocator } from
 import { importers } from "./importers.js";
 import {
   declarationLine,
+  SMALL_FILE_MAX_LINES,
   declarationLineNumber,
   leadingDocStart,
   renderSymbol,
@@ -37,6 +38,7 @@ const TEXT_REFERENCE_LIMIT = 80;
 const ARCH_MAX_ROWS = 40;
 const MAX_SEARCH_ROWS = 40;
 const SEARCH_OVERFETCH_FACTOR = 3;
+const SEARCH_BACKEND_MAX = 200;
 const TEXT_LINES_SHOWN = 5;
 // The backend ranks before it truncates; over-fetch so definitions and
 // production code can be ordered first locally.
@@ -94,7 +96,8 @@ export async function searchCode(
   // The limit applies to each query, so a later query is never starved.
   for (const query of request.queries) {
     const candidates = await backend.search(query, {
-      limit: request.limit * SEARCH_OVERFETCH_FACTOR + 6,
+      // The backend refuses a page above 200 rows.
+      limit: Math.min(SEARCH_BACKEND_MAX, request.limit * SEARCH_OVERFETCH_FACTOR + 6),
       label: request.label,
       filePattern: request.filePattern,
       qualifiedNamePattern: request.qualifiedNamePattern,
@@ -127,6 +130,9 @@ export async function searchCode(
     });
     sections.push(`# no symbol named ${JSON.stringify(query)}; text matches:\n${text.text}`);
   }
+
+  const named = await filesNamedLike(context, request.queries, request.filePattern);
+  if (named.length > 0) sections.push(named.join("\n"));
 
   const snippetCount = request.snippets ?? (shown.length === 1 && emptyQueries.length === 0 ? 1 : 0);
   for (const group of shown.slice(0, snippetCount)) {
@@ -360,6 +366,47 @@ async function filesNotShown(
   return [`# matching files not shown (path matching-lines): ${listed}${more}`];
 }
 
+const NAMED_FILES_SHOWN = 12;
+
+/**
+ * Files whose name holds a search word. A search often looks for where
+ * something lives, not for a symbol, and the next call would list files.
+ */
+async function filesNamedLike(
+  context: CodeContext,
+  queries: string[],
+  filePattern: string | undefined,
+): Promise<string[]> {
+  const words = queries.filter((query) => /^[A-Za-z][\w-]{2,}$/.test(query));
+  if (words.length === 0) return [];
+  let filter: RegExp | undefined;
+  try {
+    filter = filePattern === undefined ? undefined : new RegExp(filePattern);
+  } catch {
+    return [];
+  }
+  const tree = (await context.newFiles?.all()) ?? [];
+  const everything = (tree.length > 0 ? tree : await allFilePaths(context.client)).filter(
+    (path) => !BINARY_FILE.test(path) && (filter === undefined || filter.test(path)),
+  );
+  const lines: string[] = [];
+  for (const word of words) {
+    const wanted = word.toLowerCase();
+    const found = everything
+      .filter((path) => path.slice(path.lastIndexOf("/") + 1).toLowerCase().includes(wanted))
+      .sort(
+        (left, right) =>
+          Number(isTestPath(left)) - Number(isTestPath(right)) ||
+          left.split("/").length - right.split("/").length ||
+          left.localeCompare(right),
+      );
+    if (found.length === 0) continue;
+    const more = found.length > NAMED_FILES_SHOWN ? `, +${found.length - NAMED_FILES_SHOWN} more` : "";
+    lines.push(`# files named like ${JSON.stringify(word)}: ${found.slice(0, NAMED_FILES_SHOWN).join(", ")}${more}`);
+  }
+  return lines;
+}
+
 interface TextMatcher {
   /** False when no line of the text can match. */
   text: (text: string) => boolean;
@@ -590,7 +637,10 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   const place = parseLocator(raw);
   if (place.kind === "file" && place.startLine === undefined) return testsOfFile(context, place.path);
   const resolved = await resolveTarget(context, raw);
-  if (!Array.isArray(resolved)) return undefined;
+  if (!Array.isArray(resolved)) {
+    // A bare `module.py` reads as a member access first.
+    return place.kind === "symbol" && couldBeFileName(place) ? testsOfFile(context, place.raw) : undefined;
+  }
 
   const target = resolved[0];
   const definitions = new Set(resolved.map((node) => node.qualifiedName));
@@ -641,6 +691,21 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   if (uses.length === 0) return [`# tests using ${name}: none found`, ...(await nearestTests(context, target))].join("\n");
 
   const files = new Set(uses.map((match) => match.filePath));
+  if (files.size === 1) {
+    // Every test of the symbol is in one small file: a new or changed test is
+    // written from that file as a whole.
+    const [testFile] = files;
+    const lines = await context.reader.lines(testFile);
+    if (lines !== undefined && lines.length <= SMALL_FILE_MAX_LINES) {
+      const printed = headsPrinted.get(context) ?? new Set<string>();
+      headsPrinted.set(context, printed);
+      const at = [...new Set(uses.flatMap((match) => match.lines))].sort((left, right) => left - right);
+      const count = `# tests using ${name}: ${uses.length} in ${testFile}`;
+      if (printed.has(testFile)) return `${count}, printed above (lines ${lineList(at)})`;
+      printed.add(testFile);
+      return [`${count}, printed whole (lines ${lineList(at)})`, "", `# ${testFile}:1-${lines.length}`, ...lines].join("\n");
+    }
+  }
   const sections = [
     `# tests using ${name}: ${uses.length} in ${files.size} file${files.size === 1 ? "" : "s"}`,
   ];
