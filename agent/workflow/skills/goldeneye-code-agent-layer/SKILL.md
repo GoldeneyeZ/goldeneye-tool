@@ -39,6 +39,7 @@ identifier.
 | ---------------------------------- | ------------------------------------------------------------------- |
 | Source of known symbols            | `gcal get A.method B.other` (every overload is included)             |
 | A symbol and the tests that use it | `gcal get A.method --tests` (short tests whole, the rest as rows; with no test of it, the nearest test files and a short one whole) |
+| A file and the tests that import it | `gcal get src/lib/module.py --tests` (test files, the lines using what they import) |
 | A whole type or file               | `gcal get Type File.ext` (a member outline above 500 lines)          |
 | A name you are unsure of           | `gcal search name otherName`; add `--snippets` to include source     |
 | Who calls it                       | `gcal callers Type.member` (call graph plus text references)         |
@@ -76,6 +77,8 @@ identifier.
   `git status`: it names every line that no longer parses, in any language.
 - In PowerShell, write patterns in single quotes. Inside double quotes `\"` ends
   the string, and the whole command line then prints nothing and runs nothing.
+  For a quote character inside a pattern write `\x22` (double) or `\x27`
+  (single): `gcal grep 'from [\x22\x27]\./native[\x22\x27]'`.
 - A name `get` cannot resolve is answered from the text when possible (a macro,
   a symbol added since indexing, the only symbol of that name under another
   owner); read the header line before asking again.

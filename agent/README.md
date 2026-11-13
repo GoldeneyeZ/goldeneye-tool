@@ -175,6 +175,12 @@ Behaviors worth knowing:
   also prints the members of that type that call the symbol.
 - `get --tests` on a symbol no test uses prints the test files nearest to its
   file and the shortest of them whole (up to 80 lines), once per answer.
+- `get --tests` also prints the head of the first test file it shows (imports
+  and fixtures above the first test, up to 40 lines): what a new test there is
+  written from.
+- `get <file> --tests` lists the test files that import the file with the
+  lines that use what they import; for a language that imports by name, the
+  tests of the type the file declares.
 - `grep` without `--limit` shows 30 matching symbols, or all of them when the
   backend returned every match (up to 90).
 - `callers` says when the text search read fewer places than matched.

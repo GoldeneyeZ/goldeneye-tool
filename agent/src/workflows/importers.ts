@@ -283,7 +283,7 @@ function usesRow(importer: Importer, names: string[], bound: boolean): string | 
 export async function importers(
   context: CodeContext,
   path: string,
-  options: { limit: number; exists: boolean },
+  options: { limit: number; exists: boolean; testsOnly?: boolean },
 ): Promise<ReadResult | undefined> {
   const target = describeTarget(path);
   if (target === undefined) return undefined;
@@ -291,7 +291,12 @@ export async function importers(
   const extensions = new Set(scannedExtensions(target));
   const tree = (await context.newFiles?.all()) ?? [];
   const everything = tree.length > 0 ? tree : await allFilePaths(context.client);
-  const files = everything.filter((filePath) => filePath !== path && extensions.has(extensionOf(filePath)));
+  const files = everything.filter(
+    (filePath) =>
+      filePath !== path &&
+      extensions.has(extensionOf(filePath)) &&
+      (options.testsOnly !== true || isTestPath(filePath)),
+  );
   if (files.length > SCAN_MAX_FILES) {
     return { ok: false, text: `# too many files to scan for importers of ${path}: ${files.length}; use gcal grep` };
   }
@@ -329,8 +334,15 @@ export async function importers(
   }
 
   const gone = options.exists ? "" : " (no such file now)";
+  const title = options.testsOnly === true ? "tests importing" : "importers of";
   if (found.length === 0) {
-    return { ok: true, text: `# importers of ${path}${gone}: 0 (scanned ${files.length} files)` };
+    return {
+      ok: true,
+      text:
+        options.testsOnly === true
+          ? `# ${title} ${path}: none found`
+          : `# ${title} ${path}${gone}: 0 (scanned ${files.length} files)`,
+    };
   }
 
   found.sort(
@@ -350,7 +362,7 @@ export async function importers(
   const tests = found.filter((importer) => isTestPath(importer.filePath)).length;
 
   const lines = [
-    `# importers of ${path}${gone}: ${found.length} files${tests > 0 ? ` (${tests} tests)` : ""}; written as ${specifiers
+    `# ${title} ${path}${gone}: ${found.length} files${tests > 0 && options.testsOnly !== true ? ` (${tests} tests)` : ""}; written as ${specifiers
       .map(([specifier, files]) => `"${specifier}" ${files}`)
       .join(", ")}`,
   ];

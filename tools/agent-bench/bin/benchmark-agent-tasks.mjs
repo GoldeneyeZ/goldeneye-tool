@@ -6,13 +6,15 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
-  readdirSync,
+  mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { createInterface } from "node:readline";
@@ -1246,7 +1248,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
   const sourceLanguage = task.source_language ?? "TypeScript, TSX, or Rust";
   const sourceExtensions = (task.source_extensions ?? [".ts", ".tsx", ".rs"]).join(", ");
   const gcalEditCommands =
-    " gcal get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows). gcal check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status. gcal callers <path/File.ext> lists every file that imports that file, each way its path is written, and the lines that use what is imported; run it before moving or renaming a module. When gcal get is given a symbol together with a type or file too long to print whole, it also prints the members of that type that call the symbol. In PowerShell write regex patterns in single quotes.";
+    " gcal get <names...> --tests also prints the tests that use each named symbol (short ones whole, the rest as rows) and the imports and fixtures at the top of their file; given a file, it lists the test files that import it. gcal check parses every file that differs from HEAD and prints the lines that no longer parse; after edits in several files, run it in the same shell call as git status. gcal callers <path/File.ext> lists every file that imports that file, each way its path is written, and the lines that use what is imported; run it before moving or renaming a module. When gcal get is given a symbol together with a type or file too long to print whole, it also prints the members of that type that call the symbol. In PowerShell write regex patterns in single quotes, and a quote character inside a pattern as \\x22 (double) or \\x27 (single).";
   const gcalSyntax =
     "gcal takes the name you already have: Type, Type.member, pkg.Type.member, File.ext, File.ext:42 (symbol at that line), or File.ext:10-60 (raw lines). gcal get accepts several names at once, returns every overload, and returns a type or file whole up to 500 lines (a member outline above that). gcal grep <pattern> [files or dirs...] -C <n> takes an rg-style regex and prints every matching line with context, like rg -C. gcal search falls back to text when no symbol matches. gcal callers adds text references to call-graph edges; gcal callees and gcal impls follow the graph the other way. gcal replace <pattern> <replacement> <files or dirs...> applies one regex replacement ($1 groups; -F for literal text) to every matching file and prints each changed line; use it for a rename or a signature change across many files and patch by hand only what the pattern cannot express; add -g '*.ext' to leave data files and documents under the same directories unchanged." +
     gcalEditCommands;
@@ -1754,8 +1756,36 @@ function runGrader(task, tokens) {
 // Puts the worktree in the uncommitted state a "dirty" task starts from. It runs
 // after indexing, so a code-memory engine faces a tree that changed under it.
 // Returns the paths left dirty, as `git status` names them.
+// A checkout holds its files with LF or CRLF line endings depending on the
+// repository's attributes and the machine's git configuration, and `git apply`
+// needs the patch to match. The patch is tried as stored, then with LF, then
+// with CRLF line endings.
 function applyOverlay(worktree, patchFile) {
-  runChecked("git", ["-C", worktree, "apply", "--whitespace=nowarn", patchFile]);
+  const stored = readFileSync(patchFile, "utf8");
+  const unix = stored.replace(/\r\n/g, "\n");
+  const variants = [stored, unix, unix.replace(/\n/g, "\r\n")].filter(
+    (text, index, all) => all.indexOf(text) === index,
+  );
+  const scratch = mkdtempSync(join(tmpdir(), "gab-overlay-"));
+  try {
+    let chosen = patchFile;
+    for (const [index, text] of variants.entries()) {
+      const candidate = index === 0 ? patchFile : join(scratch, `overlay-${index}.patch`);
+      if (index > 0) writeFileSync(candidate, text);
+      const check = spawnSync("git", ["-C", worktree, "apply", "--check", "--whitespace=nowarn", candidate], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      if (check.status === 0) {
+        chosen = candidate;
+        break;
+      }
+    }
+    // When no variant applies, this reports the failure of the stored patch.
+    runChecked("git", ["-C", worktree, "apply", "--whitespace=nowarn", chosen]);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
   return git(worktree, ["status", "--short", "--untracked-files=all"])
     .split(/\r?\n/)
     .filter(Boolean)

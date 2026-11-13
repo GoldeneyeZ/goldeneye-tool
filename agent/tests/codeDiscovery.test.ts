@@ -1033,6 +1033,12 @@ describe("exploring code", () => {
         "    new Billing().refund(5);",
         "    assertEquals(-5, total());",
         "  }",
+        "",
+        // What a new test is written from: the lines above the first test.
+        `# head of ${BILLING_TEST}:1-3`,
+        "package com.shop;",
+        "",
+        "class BillingTests {",
       ].join("\n"),
     );
 
@@ -1047,12 +1053,14 @@ describe("exploring code", () => {
         return lookup(name, args);
       },
     };
-    expect(await testsUsing(context, "Billing.refund")).toBe(tests);
+    // The head of a test file is printed once per answer.
+    expect(await testsUsing(context, "Billing.refund")).toBe(tests!.split("\n\n# head of")[0]);
 
     const unused = await createContext({ textResults: [textHit(NODES[3], [7])] });
     expect(await testsUsing(unused, "Billing.refund")).toBe("# tests using Billing.refund: none found");
     // A file has no tests of its own to list, and an unknown name is reported by `get` itself.
-    expect(await testsUsing(unused, BILLING)).toBeUndefined();
+    // A Java file is answered through the type it declares.
+    expect(await testsUsing(unused, BILLING)).toBe("# tests using Billing: none found");
     expect(await testsUsing(unused, "Nope.missing")).toBeUndefined();
 
     // With no test of the symbol, the closest test files say where one would go
@@ -1084,6 +1092,44 @@ describe("exploring code", () => {
     expect(await testsUsing(unused, "Billing.charge")).toBe(
       ["# tests using Billing.charge: none found", `# nearest test files: ${ledgerTest} (6 lines), ${far} (1 line)`].join("\n"),
     );
+  });
+
+  it("answers --tests on a file with the test files that import it", async () => {
+    const context = await createContext();
+    const files: Record<string, string> = {
+      "shop/pairs.py": "def pair():\n    return 1\n",
+      "shop/cart.py": "from .pairs import pair\n",
+      "tests/test_pairs.py": "from shop.pairs import pair\n\n\ndef test_pair():\n    assert pair() == 1\n",
+      "tests/test_other.py": "def test_other():\n    assert True\n",
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), text);
+    }
+    context.newFiles = { list: async () => [], all: async () => Object.keys(files) } as unknown as CodeContext["newFiles"];
+
+    expect(await testsUsing(context, "shop/pairs.py")).toBe(
+      [
+        '# tests importing shop/pairs.py: 1 files; written as "shop.pairs" 1',
+        "# imported names (files): pair 1",
+        "tests/test_pairs.py",
+        "  1\tfrom shop.pairs import pair",
+        "  uses\tpair 5",
+      ].join("\n"),
+    );
+    // No test imports it: where its tests would go.
+    expect(await testsUsing(context, "shop/cart.py")).toBe(
+      [
+        "# tests importing shop/cart.py: none found",
+        "# nearest test files: tests/test_other.py (2 lines), tests/test_pairs.py (5 lines)",
+        "",
+        "# example of this project's tests: tests/test_other.py:1-2",
+        "def test_other():",
+        "    assert True",
+      ].join("\n"),
+    );
+    // A test file has no tests of its own.
+    expect(await testsUsing(context, "tests/test_pairs.py")).toBeUndefined();
   });
 
   it("prints matching lines with context, merging overlapping windows", async () => {

@@ -22,6 +22,7 @@ import { importers } from "./importers.js";
 import {
   declarationLine,
   declarationLineNumber,
+  leadingDocStart,
   renderSymbol,
   resolveFilePath,
   symbolRow,
@@ -147,7 +148,8 @@ export async function grepCode(context: CodeContext, request: TextRequest): Prom
   const limit = request.limit ?? TEXT_DEFAULT_LIMIT;
   const found = await findText(context, request.pattern, request.regex, {
     pathFilter,
-    limit: Math.min(TEXT_BACKEND_MAX, limit * TEXT_OVERFETCH_FACTOR),
+    // Without a limit, ask for all the backend gives: every match is then shown when they fit.
+    limit: request.limit === undefined ? TEXT_BACKEND_MAX : Math.min(TEXT_BACKEND_MAX, limit * TEXT_OVERFETCH_FACTOR),
   });
   const unindexed = (
     await unindexedMatches(context, request.pattern, request.regex, pathFilter, paths.length > 0)
@@ -586,7 +588,7 @@ const TEST_PATH_FILTER =
  */
 export async function testsUsing(context: CodeContext, raw: string): Promise<string | undefined> {
   const place = parseLocator(raw);
-  if (place.kind === "file" && place.startLine === undefined) return undefined;
+  if (place.kind === "file" && place.startLine === undefined) return testsOfFile(context, place.path);
   const resolved = await resolveTarget(context, raw);
   if (!Array.isArray(resolved)) return undefined;
 
@@ -669,7 +671,55 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   const listed = printed + rows.length;
   if (rows.length > 0) sections.push(groupByFile(rows).join("\n"));
   if (uses.length > listed) sections.push(`# ... ${uses.length - listed} more: gcal callers ${raw}`);
+  const head = await testFileHead(context, uses[0].filePath);
+  if (head !== undefined) sections.push(head);
   return sections.join("\n\n");
+}
+
+const TEST_HEAD_MAX_LINES = 40;
+/** Heads of test files already printed for a context. */
+const headsPrinted = new WeakMap<CodeContext, Set<string>>();
+
+/**
+ * What a new test in a file is written from besides its neighbours: the
+ * imports and fixtures above the first test. Printed once per file.
+ */
+async function testFileHead(context: CodeContext, filePath: string): Promise<string | undefined> {
+  const printed = headsPrinted.get(context) ?? new Set<string>();
+  headsPrinted.set(context, printed);
+  if (printed.has(filePath)) return undefined;
+  printed.add(filePath);
+
+  const lines = await context.reader.lines(filePath);
+  if (lines === undefined) return undefined;
+  let symbols: GraphNode[];
+  try {
+    symbols = (await nodesInFile(context.client, filePath)).filter((node) => !isContainerNode(node));
+  } catch {
+    return undefined;
+  }
+  // Up to the first callable: imports, constants and fixtures, and the line that opens a test class.
+  const callables = symbols.filter((node) => !isTypeNode(node) && !VALUE_LABELS.has(node.label));
+  if (callables.length === 0) return undefined;
+  const first = Math.min(...callables.map((node) => leadingDocStart(lines, node.startLine)));
+  const end = Math.min(first - 1, TEST_HEAD_MAX_LINES);
+  if (end < 3) return undefined;
+  return [`# head of ${filePath}:1-${end}`, ...lines.slice(0, end)].join("\n");
+}
+
+/** `get <file> --tests`: the test files that import the file, or the tests of the type it declares. */
+async function testsOfFile(context: CodeContext, written: string): Promise<string | undefined> {
+  const filePath = await resolveFilePath(context, written);
+  if (typeof filePath !== "string" || isTestPath(filePath)) return undefined;
+  const listed = await importers(context, filePath, { limit: 20, exists: true, testsOnly: true });
+  if (listed !== undefined) {
+    if (!listed.text.endsWith(": none found")) return listed.text;
+    const nearest = await nearestTests(context, { filePath } as GraphNode);
+    return [listed.text, ...nearest].join("\n");
+  }
+  const stem = filePath.slice(filePath.lastIndexOf("/") + 1).replace(/\.[A-Za-z0-9]+$/, "");
+  const type = (await nodesInFile(context.client, filePath)).find((node) => isTypeNode(node) && node.name === stem);
+  return type === undefined ? undefined : testsUsing(context, type.qualifiedName);
 }
 
 const NEAREST_TESTS_SHOWN = 5;
