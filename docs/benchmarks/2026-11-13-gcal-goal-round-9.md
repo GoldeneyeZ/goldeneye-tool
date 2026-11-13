@@ -225,6 +225,35 @@ No agent run was made on this binary either. The two tasks on these
 repositories are the most expensive of the matrix (468k and 754k tokens per
 run with GCAL).
 
+### Functions and variables, same audit
+
+Asked of functions, methods and variables in the same nine indexes: is the
+name on the first line, and do two symbols of one name start on one line?
+
+| Finding | Count | Before, in an answer |
+|---|---|---|
+| Go: `var x = ..` is two variables, the declaration and its specification | 188 in agentsview | two rows per variable |
+| Go: a grouped `const ( A; B; C )` is one variable named `A` | 431 `const` declarations in agentsview | `B` and `C` were no symbols: `shelleyContentToolUse`, fourth of its group, was found by text only |
+| Makefile: the commands under a target are a second function, named after the first variable they use | all 23 recipes of agentsview's Makefile | a function `CURDIR`, a function `TAURI_SIGNING_PRIVATE_KEY` |
+| PowerShell: `$name` is a variable wherever it is read | 878 in the two repositories | one row per use |
+
+**Fix** (commit `829d3ea`): in Go each specification of a `var` or `const`
+declaration is the symbol; a Makefile rule is one function, named by its
+target; a PowerShell variable is a symbol where it is assigned.
+
+Verification without a model: three corpus tests, each seen failing without
+its rule (the corpus now has 14 tests); `cargo test --workspace`, clippy and
+fmt pass. Indexed again: agentsview has 12,733 variables (12,621 before: the
+duplicates and the PowerShell reads gone, the constants of groups added) and
+12,524 functions (12,547: the 23 recipes); codebase-memory-mcp 8,915
+variables (9,134). Call edges are unchanged in both (41,382 and 37,486).
+`gcal search shelleyContentToolUse` now answers with the constant at its own
+line. Operations benchmark: unchanged on both corpora. Replay of 17 recorded
+runs of three tasks: the same verdicts.
+
+Seen and left: Java methods of anonymous classes are labelled functions (534
+in the indexes read); a zsh variable is a symbol where it is read (27).
+
 ### What the keys and headings do to a search
 
 Every key of a JSON file and every Markdown heading is a symbol. On
