@@ -108,7 +108,7 @@ shell.
 
 ## What was changed
 
-36 commits on `master`, `ce7d73a` to the last one.
+38 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -116,6 +116,7 @@ shell.
 | Backend, index | An anonymous JavaScript function takes the name it is assigned to; a callback is not a symbol | 13 symbols named `native` on terax, one real; `callers native` was "ambiguous" |
 | Backend, index | A lambda or closure in any language is not a symbol; its calls belong to the function around it (Nix functions take the name of their binding) | a Java lambda `csrf -> csrf.disable()` indexed as a function `csrf` and reported as removed by the first version of the check; 3,102 such callables in three Spring modules |
 | Backend, index | A Java `package` line is not a class | an audit of the names in seven indexes: 2,920 classes named `org` or `fr`, one per Java file, a third of the classes of the Spring index; two of five rows of a `search --label Class` answer |
+| Backend, index | A Go type is one symbol, not a class and a struct; a C struct or union without a tag, and a JavaScript class expression without a name, are not symbols named after their first member | the same audit on agentsview and codebase-memory-mcp: 1,563 duplicate Go types, 447 C classes named after a field (`FILE`, `count`) |
 | `arch` | Directories of source are opened before larger directories of documents | the operations benchmark on this repository indexed again: 299 notes took the rows, `ui/src` was not shown |
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
@@ -138,8 +139,10 @@ shell.
 
 ## Not verified
 
-- The final build as such: no run was made on the last binary (Java package
-  lines out of the index). 1 run (StringUtils, passed) was made on `06f7d2a`;
+- The final build as such: no run was made on the last two binaries (Java
+  package lines, duplicate Go types and unnamed C structs out of the index).
+  The Go and C repositories are those of the two most expensive tasks; what
+  the cleaner index does to their cost is not measured. 1 run (StringUtils, passed) was made on `06f7d2a`;
   2, both of the rename task, on `f191eba`; 4 on `1145c8a` before it. The
   changes after `f191eba` (`callers` on changed files, `check --types`,
   lambdas out of the index, the layout rule) were verified by unit tests, the
@@ -180,12 +183,13 @@ shell.
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.
-4. **Audit the index in languages the seven repositories do not have.** The
-   audit of round 9 found one Java rule that turned every `package` line into
-   a class; it covered Java, Python, Rust, TypeScript and little else. The
-   same three questions on a Go, a Kotlin, a C# and a C++ repository cost no
-   tokens. Known and left: a JavaScript destructuring pattern is one variable
-   named by the whole pattern.
+4. **Audit the index in the languages not yet read.** Reading the names of
+   nine indexes next to their files found, at no cost in tokens, a class per
+   Java `package` line, two symbols per Go type and C structs named after a
+   field. It covered Java, Python, Rust, TypeScript, Go and C. Kotlin, C#,
+   C++, PHP and Ruby are next. Known and left: a JavaScript destructuring
+   pattern is one variable named by the whole pattern; PowerShell type
+   references are classes; every JSON key is a variable.
 5. **The Spring redaction feature specifically.** Its four GCAL traces were
    compared with the three plain-shell traces after the last run. No single
    difference explains the failures: the plain-shell agents read 189 to 227 kB

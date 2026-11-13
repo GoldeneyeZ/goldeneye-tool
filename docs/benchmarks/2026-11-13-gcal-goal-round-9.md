@@ -178,6 +178,53 @@ Verification without a model:
 
 No agent run was made on this binary.
 
+### The same audit on a Go and a C repository
+
+agentsview (934 Go files, 456 TypeScript) and codebase-memory-mcp (420 C
+files, 87 headers) were indexed into scratch state, their checkouts untouched,
+and asked the same questions plus one more: is a type's name written on the
+first line of its declaration, and do two type symbols of the same name start
+on the same line?
+
+| Finding | Count | Effect on an answer |
+|---|---|---|
+| Go: every `type X struct` is two symbols, a class for the declaration and a struct for the specification | 1,563 of the 1,693 classes of agentsview | `gcal search resumeResponse` and `gcal symbol` returned two rows for one type |
+| C: a struct or union without a tag is a class named after its first field, or after that field's type | 447 of the 776 classes of codebase-memory-mcp by the first-line test; 463 classes fewer after the fix | `typedef struct { FILE .. } PageBuilder;` was a class `FILE`; `CBMCallArray` was a class `CBMCall` |
+| TypeScript: a class expression without a name is a class named after its first method | 10 | `observe` as a class |
+
+**Fix** (commit `b2b3fac`): the declaration around a Go type
+specification is no symbol; a C-family struct, union or class without a tag is
+no symbol (the `typedef` keeps it under its real name); a JavaScript class
+expression without a name is no symbol.
+
+The first version of the C rule also covered enums and was taken back for
+them after the index was read again: it removed 252 of the 256 enums of
+codebase-memory-mcp, because C code writes constants as `enum { LIMIT = 8 };`
+and the first enumerator's name is how such a constant is found.
+
+Verification without a model:
+
+- A new corpus test (Go, C, TypeScript), seen failing before the change. The
+  corpus (12 tests, 159 languages), `cargo test --workspace`, clippy and fmt
+  pass.
+- The two repositories indexed again. Classes: agentsview 1,693 to 124,
+  codebase-memory-mcp 776 to 313. Call edges: agentsview 41,306 to 41,382,
+  codebase-memory-mcp 37,486 to 37,486. Structs of agentsview: 1,423 to
+  1,420; the three that went were not looked up.
+- Operations benchmark with the final binary: Spring 19 of 19, 11,666 tokens;
+  goldeneye-tool 12 of 12, 2,978 tokens; no scenario changed.
+- Replay of 30 recorded runs of five tasks (TypeScript, Rust, Java) on clones
+  indexed again: the same verdicts (3 failed their grader, 2 of those are
+  reported; 27 passed, none reported).
+
+Seen and left: PowerShell type references (`[string]`, `[System.Environment]`)
+are classes (38 in the two repositories); every key of a JSON file is a
+variable (13,055 in agentsview, its message catalogs among them).
+
+No agent run was made on this binary either. The two tasks on these
+repositories are the most expensive of the matrix (468k and 754k tokens per
+run with GCAL).
+
 ## Limits
 
 - The callable counts are totals; no list of the removed symbols was reviewed
