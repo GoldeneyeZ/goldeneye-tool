@@ -187,6 +187,14 @@ Behaviors worth knowing:
   whole with the head of its file, once per answer, as an example of how the
   project writes its tests.
 - `search` also lists the files whose name holds a search word.
+- `check` without paths goes beyond parsing, from what the index knows: a
+  function, method or type that HEAD declares and the working tree no longer
+  does is named with the lines of its callers that still use it (a method only
+  in files that name its type or call a function returning it); a deleted file
+  is named with the files that still import it; and in Java a `new Type(..)`
+  on an added line is reported when `Type` declares constructors and none
+  takes that number of arguments. None of this is a compiler: it sees names
+  and counts, not types.
 - `get <file> --tests` lists the test files that import the file with the
   lines that use what they import, and prints the test file whole when it is
   the only one (up to 300 lines); for a language that imports by name, the

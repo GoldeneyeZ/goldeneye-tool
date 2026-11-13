@@ -39,6 +39,11 @@ export class NewFiles {
     return [...new Set([...modified, ...untracked])];
   }
 
+  /** Files HEAD has and the working tree does not: deleted or moved away. */
+  deleted(): Promise<string[]> {
+    return this.git(["diff", "--name-only", "--diff-filter=D", "HEAD"]);
+  }
+
   /** The committed text of a file, or undefined when HEAD does not have it. */
   atHead(filePath: string): Promise<string | undefined> {
     return new Promise((resolve) => {

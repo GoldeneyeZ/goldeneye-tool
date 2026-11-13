@@ -23,6 +23,7 @@ import { NewFiles } from "../kernel/newFiles.js";
 import { SourceReader } from "../kernel/sourceFiles.js";
 import { inboundTraceDecision } from "../kernel/tracePolicy.js";
 import type { TraceEdge } from "../domain/types.js";
+import { leftBehind, unmatchedConstructors } from "../workflows/checkReferences.js";
 import { checkSyntax } from "../workflows/checkSyntax.js";
 import {
   architecture,
@@ -448,7 +449,17 @@ export function createProgram(deps: ProgramDeps): Command {
     .argument("[paths...]", "files or directories; default: every file that differs from HEAD")
     .action(async (paths: string[]) => {
       const context = await requireContext(deps, "check");
-      emit(deps, await checkSyntax(context, { paths }));
+      const checked = await checkSyntax(context, { paths });
+      if (paths.length === 0) {
+        try {
+          // Beyond parsing: what the change left behind, as far as the index knows.
+          const left = [...(await leftBehind(context, deps.client)), ...(await unmatchedConstructors(context))];
+          if (left.length > 0) checked.text = [checked.text, ...left].join("\n");
+        } catch {
+          // The parse check stands on its own.
+        }
+      }
+      emit(deps, checked);
     });
 
   program
