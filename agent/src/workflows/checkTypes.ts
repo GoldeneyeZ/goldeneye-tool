@@ -16,6 +16,9 @@ const TYPES_TIMEOUT_MS = 180_000;
 const TYPES_ROWS_CHANGED = 20;
 const TYPES_ROWS_OTHER = 5;
 const TYPES_MESSAGE_MAX_CHARS = 200;
+// Exporting HEAD for the comparison copies every tracked file once.
+const BASELINE_MAX_FILES = 20_000;
+const EXPORT_TIMEOUT_MS = 120_000;
 const TYPESCRIPT_FILE = /\.(tsx?|mts|cts)$/;
 
 export interface TypeError {
@@ -42,6 +45,12 @@ function exportHead(root: string, target: string): Promise<boolean> {
     const extract = spawn("tar", ["-x", "-f", "-", "-C", target], { windowsHide: true });
     archive.stdout.pipe(extract.stdin);
     let failed = false;
+    const timer = setTimeout(() => {
+      failed = true;
+      archive.kill();
+      extract.kill();
+    }, EXPORT_TIMEOUT_MS);
+    extract.once("close", () => clearTimeout(timer));
     archive.once("error", () => (failed = true));
     extract.once("error", () => resolve(false));
     extract.stdin.once("error", () => (failed = true));
@@ -133,7 +142,8 @@ export async function checkTypes(
   // What HEAD already has is not the change's. An error is the same one when
   // file, code and message agree; its line may have moved. Each old error
   // cancels one new one, so a second error of the same kind still shows.
-  const before = await baseline(context.root, compilerArgs, run);
+  const tracked = (await context.newFiles.all?.())?.length ?? 0;
+  const before = tracked > BASELINE_MAX_FILES ? undefined : await baseline(context.root, compilerArgs, run);
   const old = new Map<string, number>();
   const key = (error: TypeError) => `${error.filePath}\u0000${error.code}\u0000${error.message}`;
   for (const error of before === undefined ? [] : parseTypeScriptErrors(before)) {

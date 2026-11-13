@@ -105,7 +105,7 @@ shell.
 
 ## What was changed
 
-26 commits on `master`, `ce7d73a` to the last one.
+27 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -170,8 +170,14 @@ shell.
 4. **Stale call-graph rows in changed files.** In a dirty tree `callers` still
    prints graph rows with the line numbers of the index (`141 RevalidatedPath.as_ref call`
    with no text). Re-locate them by text, as `get` does.
-5. **The Spring redaction feature specifically**: read its four traces side by
-   side with the three plain-shell traces to see what the shell agents read
-   that the GCAL agents did not, before changing anything else for it.
+5. **The Spring redaction feature specifically.** Its four GCAL traces were
+   compared with the three plain-shell traces after the last run. No single
+   difference explains the failures: the plain-shell agents read 189 to 227 kB
+   of output in 12 to 16 calls, the GCAL agents 118 to 245 kB in 8 to 11; the
+   GCAL run that passed last had seen the fewest uses of the class whose
+   constructor an earlier run got wrong. What is left is a higher rate of
+   small API mistakes with nothing compiled before grading. A third and fourth
+   repetition per lane with the build allowed would say whether that rate
+   differs between the lanes at all.
 6. **The harness's 7 to 10 s daemon start**: time each step of its preparation
    once; it costs nothing in tokens.

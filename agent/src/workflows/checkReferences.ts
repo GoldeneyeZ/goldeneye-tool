@@ -176,6 +176,8 @@ export async function leftBehind(context: CodeContext, backend: GcalBackendClien
 
 const JAVA_FILE = /\.java$/;
 const CONSTRUCTOR_ROWS = 8;
+// One index lookup per class named after `new` on an added line.
+const CONSTRUCTOR_TYPES_CHECKED = 40;
 const DECLARATION_MAX_LINES = 12;
 // Constructors the source does not show.
 const GENERATED_CONSTRUCTORS = /@(AllArgsConstructor|RequiredArgsConstructor|NoArgsConstructor|Data|Value|Builder|SuperBuilder)\b/;
@@ -268,7 +270,9 @@ export async function unmatchedConstructors(context: CodeContext): Promise<strin
         const given = argumentCount(text, match.index + match[0].length - 1);
         if (given === undefined) continue;
         const name = match[1];
-        if (!known.has(name)) known.set(name, await declaredConstructors(context, name));
+        if (!known.has(name)) {
+          known.set(name, known.size >= CONSTRUCTOR_TYPES_CHECKED ? undefined : await declaredConstructors(context, name));
+        }
         const constructors = known.get(name);
         if (constructors === undefined || constructors.declared.some((item) => item.parameters === given)) continue;
         const counts = [...new Set(constructors.declared.map((item) => item.parameters))].sort((left, right) => left - right);
