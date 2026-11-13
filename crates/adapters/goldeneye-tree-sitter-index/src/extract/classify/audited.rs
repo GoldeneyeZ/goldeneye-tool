@@ -260,6 +260,12 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
     {
         return None;
     }
+    // `package a.b.c;` at the top of a Java file declares no type. It was a
+    // class called after the first segment: one `org` or `com` per file, a
+    // third of the classes of a Spring index.
+    if language == "java" && kind == "package_declaration" {
+        return None;
+    }
     if is_anonymous_function(kind) && node.child_by_field_name("name").is_none() {
         // A lambda or a closure has no name of its own. Taking the first
         // identifier inside it made a symbol called after a parameter or after

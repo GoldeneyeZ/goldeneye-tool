@@ -490,6 +490,77 @@ fn lambdas_and_closures_are_not_symbols_and_their_calls_belong_to_the_function_a
 }
 
 #[test]
+fn a_java_package_line_is_not_a_class() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::create_dir_all(temp.path().join("org/demo")).expect("package directory");
+    fs::write(
+        temp.path().join("org/demo/Ledger.java"),
+        concat!(
+            "package org.demo;\n",
+            "\n",
+            "import org.demo.util.Clock;\n",
+            "\n",
+            "public class Ledger {\n",
+            "  long stamp() { return Clock.now(); }\n",
+            "}\n",
+        ),
+    )
+    .expect("write Java source");
+    fs::create_dir_all(temp.path().join("org/demo/util")).expect("package directory");
+    fs::write(
+        temp.path().join("org/demo/util/Clock.java"),
+        "package org.demo.util;\n\npublic class Clock {\n  public static long now() { return 0L; }\n}\n",
+    )
+    .expect("write Java source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index Java packages");
+
+    let labels = |name: &str| -> Vec<String> {
+        let mut found: Vec<String> = service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name)
+            .map(|hit| hit.node.label.as_str().to_owned())
+            // A file is a module named after its stem; that is not at issue here.
+            .filter(|label| !matches!(label.as_str(), "File" | "Module"))
+            .collect();
+        found.sort();
+        found
+    };
+
+    // The first segment of the package name is no symbol.
+    assert_eq!(labels("org"), Vec::<String>::new());
+    // The types and the call between the two files are as before.
+    assert_eq!(labels("Ledger"), vec!["Class".to_owned()]);
+    assert_eq!(labels("Clock"), vec!["Class".to_owned()]);
+    let calls = service
+        .repository()
+        .search_nodes(&result.project.id, "stamp", 20)
+        .expect("search nodes")
+        .into_iter()
+        .filter(|hit| hit.node.name == "stamp")
+        .flat_map(|hit| {
+            service
+                .repository()
+                .edges_from(&result.project.id, &hit.node.id)
+                .expect("edges of stamp")
+        })
+        .filter(|edge| edge.kind.as_str() == "CALLS")
+        .count();
+    assert_eq!(calls, 1, "Ledger.stamp calls Clock.now");
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
