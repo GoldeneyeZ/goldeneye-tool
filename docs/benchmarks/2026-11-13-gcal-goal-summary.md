@@ -43,8 +43,12 @@ build `2142804`, 24 on `6062619`, which adds one rule to `gcal check`.
   runs, the final check reports all three failed changes at the line the
   grader named and none of the 51 that passed. No agent run has shown what an
   agent does with such a report.
-- The time the agent saves is spent by the benchmark on preparing an index for
-  each fresh worktree: the whole invocation takes the same in both lanes.
+- The whole harness invocation takes the same in both lanes because the
+  harness built a task's index again before 23 of the 35 GCAL runs, after a
+  change of the GCAL build (1,518 s in all). Over the 12 pairs whose index was
+  ready the whole invocation takes 1,946 s against 2,362 s (0.82). A full
+  index was then made two to three times faster
+  (`2026-11-13-gcal-index-time.md`).
 
 ## Result over the nine rounds
 
@@ -146,7 +150,7 @@ shell.
 
 ## What was changed
 
-60 commits on `master`, `ce7d73a` to the last one.
+62 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -200,8 +204,8 @@ shell.
   made with it the agent had written `@Nullable` itself and nothing was
   reported.
 - The cbm document on the last build, and a third repetition of it.
-- What the benchmark's preparation of the GCAL lane consists of: 1,585 s over
-  35 runs are in no field of the reports (182 s of them are the pre-warm).
+- The time of a full index after the changes of `2026-11-13-gcal-index-time.md`
+  in an agent run: no run was made on that binary.
 - What the index change for lambdas does to `callers` answers in agent runs:
   no recorded run read such a row.
 - What the Go receiver fix does to answers that use the call graph: on
@@ -237,8 +241,8 @@ shell.
 2. **Measure the final build properly**: done, see "Result on the final
    build". What it leaves: the two tasks where GCAL costs more in every pair
    (StringUtils, 2 calls in both lanes; goldeneye rename, one call more), and
-   the preparation time of the GCAL lane in the benchmark, which cancels the
-   wall time the agent saves.
+   the resolver's limit of 100,000 calls per project, which the three Spring
+   modules reach (`2026-11-13-gcal-index-time.md`).
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.

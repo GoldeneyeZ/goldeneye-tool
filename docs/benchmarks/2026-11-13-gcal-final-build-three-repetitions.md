@@ -173,11 +173,15 @@ that is shown such a report then fixes it is still measured on no run.
   in both lanes (7,201 s against 7,161 s for 35 runs each). Agent and grader
   together take 4,929 s against 6,526 s (0.76), and the harness's own
   maintenance 687 s against 506 s. The rest, 1,585 s against 129 s, is in no
-  field of the reports: in that time the GCAL lane prepares an index and a
-  daemon for each fresh worktree (the pre-warm alone is 182 s of it). The
-  split of the remainder was not measured. A benchmark run starts from a new
-  worktree every time; a session that keeps its index does not pay this per
-  task, and that case is not what these numbers measure.
+  field of the reports. It is not paid per run: it is the harness building a
+  task's index again after the GCAL build changed (`snapshot_refreshed` in
+  the report), which happened before 23 of the 35 GCAL runs, because the
+  repetitions followed two builds and each task keeps its own snapshot. Those
+  23 runs account for 1,518 s (10 to 152 s each); the 12 GCAL runs that found
+  their snapshot ready account for 67 s (3 to 13 s each), against 3.7 s per
+  plain-shell run. Over those 12 pairs the whole invocation takes 1,946 s
+  against 2,362 s (0.82). What the rebuild consists of, and what was done
+  about it, is in `2026-11-13-gcal-index-time.md`.
 - **Spread**: the agentsview question took 933k and 15 calls in f3 after 381k
   and 337k with 6 calls; the cbm document 915k and 429k. In the 933k run the
   agent asked in fifteen commands with answers of 2 to 32 kB what the run of
