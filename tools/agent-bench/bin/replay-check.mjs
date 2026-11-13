@@ -16,6 +16,7 @@
 // --attempts  attempt ids to replay (default: every attempt of the task)
 // --types     link the repository's node_modules into the clone, as the
 //             harness does, and run `gcal check --types`
+// --reindex   index the clones again (after a change of the backend binary)
 //
 // The task's repository is only read: it is cloned with `git clone`.
 
@@ -27,7 +28,7 @@ import { fileURLToPath } from "node:url";
 const benchRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(benchRoot, "..", "..");
 
-const options = { state: undefined, attempts: ".", types: false, entry: join(repoRoot, "agent", "dist", "main.js"), goldeneye: join(repoRoot, "target", "release", process.platform === "win32" ? "goldeneye.exe" : "goldeneye") };
+const options = { state: undefined, attempts: ".", types: false, reindex: false, entry: join(repoRoot, "agent", "dist", "main.js"), goldeneye: join(repoRoot, "target", "release", process.platform === "win32" ? "goldeneye.exe" : "goldeneye") };
 const tasks = [];
 const args = process.argv.slice(2);
 for (let index = 0; index < args.length; index += 1) {
@@ -37,6 +38,7 @@ for (let index = 0; index < args.length; index += 1) {
   else if (arg === "--gcal-entry") options.entry = args[++index];
   else if (arg === "--goldeneye") options.goldeneye = args[++index];
   else if (arg === "--types") options.types = true;
+  else if (arg === "--reindex") options.reindex = true;
   else tasks.push(arg);
 }
 if (options.state === undefined || tasks.length === 0) {
@@ -81,12 +83,18 @@ for (const task of tasks) {
   const gcal = (gcalArgs) =>
     spawnSync(process.execPath, [options.entry, ...gcalArgs], { cwd: clone, env: environment, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
-  if (!existsSync(clone)) {
+  const fresh = !existsSync(clone);
+  if (fresh) {
     const cloned = spawnSync("git", ["clone", "-q", "-c", "core.longpaths=true", "--no-hardlinks", repository, clone], { encoding: "utf8" });
     if (cloned.status !== 0 || git(clone, ["checkout", "-q", config.base_ref]).status !== 0) {
       console.log(`${task}: could not clone ${repository} at ${config.base_ref}: ${cloned.stderr.slice(0, 200)}`);
       continue;
     }
+  }
+  if (fresh || options.reindex) {
+    // The index is of the base commit: no patch may be applied while it is built.
+    git(clone, ["checkout", "-q", "--", "."]);
+    git(clone, ["clean", "-fdq"]);
     rmSync(environment.GCAL_HOME, { recursive: true, force: true });
     for (const suffix of ["", "-wal", "-shm"]) rmSync(`${environment.GOLDENEYE_DB_PATH}${suffix}`, { force: true });
     const started = Date.now();
