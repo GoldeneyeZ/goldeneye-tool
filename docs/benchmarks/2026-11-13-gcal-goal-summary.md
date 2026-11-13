@@ -1,6 +1,8 @@
 # GCAL improvement goal: summary
 
-Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-9.md`.
+Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-9.md`;
+the final build against plain shell on one day:
+`2026-11-13-gcal-final-build-three-repetitions.md`.
 
 ## The goal
 
@@ -10,7 +12,41 @@ same or better pass rate. Work in a loop: take the weakest measured point, find
 its cause in recorded agent traces, fix it, verify without a model, then spend
 agent runs. At most 15M tokens of agent runs.
 
-## Result
+## Result on the final build
+
+Measured after the nine rounds, with a second budget of about 27M tokens
+(26,388k used): 70 runs on 2026-11-13, the twelve tasks, GCAL and plain shell
+in alternation, three repetitions (two for the cbm document). 46 runs are on
+build `2142804`, 24 on `6062619`, which adds one rule to `gcal check`.
+
+| | GCAL | Plain shell | Ratio |
+|---|---|---|---|
+| Runs passed | 34 of 35 | 33 of 35 | |
+| Input tokens, sum of the task medians | 3,101k | 6,062k | 0.51 |
+| Input tokens, all runs | 8,819k | 17,218k | 0.51 |
+| of which not cached | 1,213k | 1,621k | 0.75 |
+| Output tokens, all runs | 143k | 208k | 0.69 |
+| Tool calls, all runs | 173 | 270 | 0.64 |
+| Wall time of the agent, all runs | 4,236 s | 5,763 s | 0.74 |
+| Whole harness invocation, preparation and grading included | 7,201 s | 7,161 s | 1.01 |
+
+- The GCAL median is lower on input for 9 of 12 tasks, on calls for 8, on wall
+  time for 10. Above plain shell on input: StringUtils (1.06), goldeneye
+  rename (1.24), LOD refactor (1.01, at half the wall time).
+- Pass rate: one run apart, which 35 runs per lane cannot tell from equal. The
+  GCAL failure is the Spring redaction feature in the first repetition (a
+  nullable return the project's build rejects); the two plain-shell failures
+  are a rename that left one reference behind, on the terax module move and
+  the LOD refactor.
+- `gcal check` was given a rule for that nullable return between the
+  repetitions. Replayed without a model on the 54 recorded patches of these
+  runs, the final check reports all three failed changes at the line the
+  grader named and none of the 51 that passed. No agent run has shown what an
+  agent does with such a report.
+- The time the agent saves is spent by the benchmark on preparing an index for
+  each fresh worktree: the whole invocation takes the same in both lanes.
+
+## Result over the nine rounds
 
 61 agent runs with GCAL over nine rounds, 14,928k tokens. Each run is one
 Codex agent (`gpt-5.6-terra`, reasoning high, codex-cli 0.159.0) on one task of
@@ -73,7 +109,9 @@ shell.
 ### What did not improve
 
 - **Pass rate: 56 of 61 (92%) against 42 of 43 (98%) for plain shell.** The
-  goal asked for the same or better, and this is not it. All five failures are
+  goal asked for the same or better, and over the nine rounds this is not it.
+  (On the final build, both lanes on the same day: 34 of 35 against 33 of 35,
+  see above.) All five failures are
   in rounds 5 and 6; the seven runs made after the last fixes for them (rounds 7
   to 9, five tasks) all passed, which is too few runs to call the gap closed.
   - Spring redaction feature, 2 of 4 (plain shell 3 of 3; GCAL v5: 1 of 2).
@@ -108,7 +146,7 @@ shell.
 
 ## What was changed
 
-57 commits on `master`, `ce7d73a` to the last one.
+58 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -127,6 +165,7 @@ shell.
 | `grep`, `replace`, `search` | `grep` shows every fetched match; `-g` in `replace`, repeatable in both; `search` lists files by name, caps its backend page, accepts `--tests` | cut-and-repeat greps; a JSON manifest rewritten by a replace; shell file listings; two refused commands |
 | `search` | Symbols of code come before headings and keys of prose and data files; a full first page of those is fetched again, larger | on agentsview 19 of the 20 rows of `gcal search session` were JSON keys and Markdown headings |
 | `check` | Reports callers that still use a symbol the change removed or renamed, imports of a deleted file, and Java constructor calls no constructor takes; with `--types`, the new type errors (TypeScript) | the five failed runs; replay of 47 recorded patches |
+| `check` | In a Java package that is non-null by default, reports a `return` of `null` or of a `@Nullable` parameter or local from a method the change wrote whose return type has no `@Nullable` | the one failed GCAL run of the final measurement; replay of its 54 recorded patches; 4 reports on 4,116 Spring files read as new |
 | Exit status | A lookup that finds nothing exits 0 | `&&` chains cancelled by "not found" |
 | Daemon | Loads the project graph after the first answer of a session | 1.2 to 3 s on the first graph query |
 | Skill and lane prompt | The new lookups; `\x22`/`\x27` for quotes in PowerShell patterns; `--tests` for one to three symbols | commands lost to quoting; `--tests` on 13 names |
@@ -135,6 +174,11 @@ shell.
 ## Failures and incidents, in one place
 
 - 5 failed agent runs of 61 (above).
+- In the final measurement: 1 failed GCAL run of 35 and 2 failed plain-shell
+  runs of 35; no harness refusal in 70 runs. The Spring redaction pair of the
+  second repetition was run after the rest of its repetition, on the later
+  build; the cbm document has no third repetition, for lack of
+  budget.
 - 5 harness refusals before any model call: two overlays with CRLF line
   endings, one configuration path, one stale snapshot accepted after a failed
   preparation, one backend shutdown that timed out while a test suite was
@@ -144,18 +188,20 @@ shell.
 
 ## Not verified
 
-- The final build as such: no run was made on the last four binaries (Java
-  package lines; duplicate Go types and unnamed C structs; Go variables and
-  constants, Makefile recipes, PowerShell reads; C structs without a body),
-  nor with `get` following a C typedef and `impls` answering for Go
-  nor with the last change of `search` (code before keys and headings).
-  The Go and C repositories are those of the two most expensive tasks; what
-  the cleaner index does to their cost is not measured. 1 run (StringUtils, passed) was made on `06f7d2a`;
-  2, both of the rename task, on `f191eba`; 4 on `1145c8a` before it. The
-  changes after `f191eba` (`callers` on changed files, `check --types`,
-  lambdas out of the index, the layout rule) were verified by unit tests, the
-  language corpus, the operations benchmark and the replay of recorded
-  patches; the one run does not exercise them.
+- The final build is now measured as a whole (above), not change by change:
+  the 70 runs do not say which of the last changes (Java package lines;
+  duplicate Go types and unnamed C structs; Go variables and constants; `get`
+  following a C typedef; `impls` for Go; `search` putting code first; lambdas
+  out of the index) moved which number. On the Go and C repositories, the two
+  most expensive tasks, the medians went from 468k to 381k (agentsview) and
+  from 754k to 672k (cbm, two runs); the runs of each spread wider than that
+  difference.
+- What the nullness rule of `gcal check` does in an agent run: in the two runs
+  made with it the agent had written `@Nullable` itself and nothing was
+  reported.
+- The cbm document on the last build, and a third repetition of it.
+- What the benchmark's preparation of the GCAL lane consists of: 1,585 s over
+  35 runs are in no field of the reports (182 s of them are the pre-warm).
 - What the index change for lambdas does to `callers` answers in agent runs:
   no recorded run read such a row.
 - What the Go receiver fix does to answers that use the call graph: on
@@ -163,9 +209,9 @@ shell.
   lost edges were links by bare name; how many were right was not counted.
 - That an agent fixes what the extended `gcal check` reports: in the two runs
   made with it the agent left nothing behind, so nothing was reported.
-- Whether the last change (one whole test as an example) raises the pass rate
-  of the Spring redaction feature: one run, which passed.
-- The plain-shell lane on today's date: its runs are one to two days older.
+- Whether the pass rate of the Spring redaction feature differs between the
+  lanes: 2 of 3 against 3 of 3 on the final build, 4 of 7 against 6 of 6 with
+  the rounds before.
 - The index change for JavaScript on anything but terax and the 159-language
   corpus; the importers lookup for anything but TypeScript on terax and the
   unit tests for Python.
@@ -188,9 +234,11 @@ shell.
    build's compile task), and measure with the one-shot rule relaxed
    for both lanes: plain shell would then be allowed to compile too, which is
    the comparison that matters in real use.
-2. **Measure the final build properly**: three runs per task of both lanes on
-   the same day (about 27M tokens for GCAL and plain shell together at
-   today's costs). The pooled table above mixes eight builds.
+2. **Measure the final build properly**: done, see "Result on the final
+   build". What it leaves: the two tasks where GCAL costs more in every pair
+   (StringUtils, 2 calls in both lanes; goldeneye rename, one call more), and
+   the preparation time of the GCAL lane in the benchmark, which cancels the
+   wall time the agent saves.
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.
