@@ -8,20 +8,79 @@ use goldeneye_ports::{
 use serde_json::Value;
 
 use super::names::{
-    binding_key, call_receiver, class_method_tail, expand_alias, import_reaches, is_builtin,
-    is_callable_label, is_definition_label, is_lsp_wired, is_type_label, language_compatible,
-    normalize_name, normalized_suffix, owner_type, parent_qn, tail_eq,
+    binding_key, call_receiver, class_method_tail, ends_with_joined, ends_with_segment, is_builtin,
+    is_callable_label, is_definition_label, is_lsp_wired, is_type_label, joined_ends_with,
+    language_compatible, normalize_name, owner_type, parent_qn, tail_eq,
 };
 
 #[derive(Debug, Clone)]
 pub(super) struct DefinitionRef {
     pub(super) id: NodeId,
-    pub(super) name: String,
     pub(super) qualified_name: String,
     pub(super) label: String,
     pub(super) language: LanguageId,
     pub(super) module_qn: String,
-    pub(super) owner_type: Option<String>,
+    /// `qualified_name` normalized. A call is compared with every definition of its name,
+    /// and a name is normalized by copying it several times: this is done once.
+    normalized_qn: String,
+    /// The key `name` is looked up by.
+    binding: String,
+    /// For a method, the type it belongs to, normalized.
+    normalized_owner: Option<String>,
+    /// The class and the method a JVM call names its target by.
+    jvm_tail: Option<String>,
+}
+
+/// One import of a file, with the names a reference is compared with computed once.
+#[derive(Debug)]
+pub(super) struct FileImport {
+    /// The name the import binds in its file.
+    alias: String,
+    /// The imported path, normalized.
+    module: String,
+    /// The last segment of the imported path.
+    module_binding: String,
+    /// `module` as it is searched for in a qualified name.
+    reach: String,
+    reach_prefix: String,
+    reach_infix: String,
+}
+
+impl FileImport {
+    pub(super) fn new(import: &ExtractedImport) -> Self {
+        let module = normalize_name(&import.module_path);
+        let reach = normalize_name(&module);
+        Self {
+            alias: binding_key(&import.alias),
+            module_binding: binding_key(&import.module_path),
+            reach_prefix: format!("{reach}."),
+            reach_infix: format!(".{reach}."),
+            reach,
+            module,
+        }
+    }
+
+    /// Whether a normalized qualified name lies in, or is, the imported module.
+    fn reaches(&self, normalized_qn: &str) -> bool {
+        normalized_qn.starts_with(&self.reach_prefix)
+            || normalized_qn.contains(&self.reach_infix)
+            || ends_with_segment(normalized_qn, &self.reach)
+    }
+}
+
+/// A normalized name with its first segment replaced by the module an import binds it to.
+fn expand_alias(normalized: &str, imports: &[FileImport]) -> String {
+    let prefix = normalized.split('.').next().unwrap_or_default();
+    imports
+        .iter()
+        .find(|import| import.alias == prefix)
+        .map_or_else(
+            || normalized.to_owned(),
+            |import| {
+                let suffix = normalized.strip_prefix(prefix).unwrap_or_default();
+                format!("{}{suffix}", import.module)
+            },
+        )
 }
 
 #[derive(Debug)]
@@ -125,12 +184,14 @@ impl DefinitionIndex {
             .unwrap_or_else(|| parent_qn(&qualified_name));
         Some(DefinitionRef {
             id: node.id.clone(),
-            name: node.name.clone(),
+            binding: binding_key(&node.name),
+            normalized_qn: normalize_name(&qualified_name),
+            normalized_owner: owner_type.as_deref().map(normalize_name),
+            jvm_tail: class_method_tail(&qualified_name),
             qualified_name,
             label: node.label.as_str().to_owned(),
             language,
             module_qn,
-            owner_type,
         })
     }
 
@@ -141,10 +202,10 @@ impl DefinitionIndex {
         let mut by_qn = BTreeMap::new();
         for (index, definition) in definitions.iter().enumerate() {
             by_name
-                .entry(binding_key(&definition.name))
+                .entry(definition.binding.clone())
                 .or_default()
                 .push(index);
-            by_qn.insert(normalize_name(&definition.qualified_name), index);
+            by_qn.insert(definition.normalized_qn.clone(), index);
         }
         (by_name, by_qn)
     }
@@ -152,7 +213,7 @@ impl DefinitionIndex {
     pub(super) fn resolve_call<'a>(
         &'a self,
         call: &ExtractedCall,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Option<(&'a DefinitionRef, ResolutionStrategy)> {
         if !is_lsp_wired(call.language.as_str()) {
             return None;
@@ -188,7 +249,7 @@ impl DefinitionIndex {
         call: &ExtractedCall,
         short_name: &str,
         callee: &str,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Vec<&'a DefinitionRef> {
         self.candidate_indices(short_name, callee, imports)
             .into_iter()
@@ -203,15 +264,15 @@ impl DefinitionIndex {
     fn resolve_receiver_type<'a>(
         candidates: &[&'a DefinitionRef],
         call: &ExtractedCall,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Option<&'a DefinitionRef> {
-        let receiver_type = call.receiver_type.as_ref()?;
-        let expanded = expand_alias(receiver_type, imports);
+        let receiver_type = normalize_name(call.receiver_type.as_ref()?);
+        let expanded = normalize_name(&expand_alias(&receiver_type, imports));
         unique(candidates.iter().copied().filter(|definition| {
             definition
-                .owner_type
+                .normalized_owner
                 .as_ref()
-                .is_some_and(|owner| tail_eq(owner, receiver_type) || tail_eq(owner, &expanded))
+                .is_some_and(|owner| tail_eq(owner, &receiver_type) || tail_eq(owner, &expanded))
         }))
     }
 
@@ -225,12 +286,12 @@ impl DefinitionIndex {
             .file_modules
             .get(&call.file)
             .map_or(fallback_module.as_str(), String::as_str);
-        let caller_owner = owner_type(&call.caller_qn, "");
+        let caller_owner = normalize_name(&owner_type(&call.caller_qn, ""));
         unique(candidates.iter().copied().filter(|definition| {
             definition.module_qn == caller_module
                 && (definition.label != "Method"
                     || definition
-                        .owner_type
+                        .normalized_owner
                         .as_ref()
                         .is_some_and(|owner| tail_eq(owner, &caller_owner)))
         }))
@@ -244,11 +305,13 @@ impl DefinitionIndex {
         if !callee.contains('.') {
             return None;
         }
+        let suffix = normalize_name(callee);
         unique(candidates.iter().copied().filter(|definition| {
-            normalized_suffix(&definition.qualified_name, callee)
-                || definition.owner_type.as_ref().is_some_and(|owner| {
-                    let tail = format!("{}.{}", normalize_name(owner), short_name);
-                    callee.ends_with(&tail) || tail.ends_with(callee)
+            definition.normalized_qn == suffix
+                || ends_with_segment(&definition.normalized_qn, &suffix)
+                || definition.normalized_owner.as_ref().is_some_and(|owner| {
+                    ends_with_joined(callee, owner, short_name)
+                        || joined_ends_with(owner, short_name, callee)
                 })
         }))
     }
@@ -262,10 +325,12 @@ impl DefinitionIndex {
             return None;
         }
         let call_tail = class_method_tail(callee)?;
-        unique(candidates.iter().copied().filter(|definition| {
-            class_method_tail(&definition.qualified_name)
-                .is_some_and(|target_tail| target_tail == call_tail)
-        }))
+        unique(
+            candidates
+                .iter()
+                .copied()
+                .filter(|definition| definition.jvm_tail.as_ref() == Some(&call_tail)),
+        )
     }
 
     fn resolve_unique_name<'a>(
@@ -285,7 +350,7 @@ impl DefinitionIndex {
     pub(super) fn resolve_relation<'a>(
         &'a self,
         relation: &ExtractedRelation,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Option<&'a DefinitionRef> {
         if !is_lsp_wired(relation.language.as_str()) && relation.language.as_str() != "graphql" {
             return None;
@@ -330,21 +395,20 @@ impl DefinitionIndex {
         &self,
         short_name: &str,
         reference: &str,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Vec<usize> {
-        let mut names = BTreeSet::from([short_name.to_owned()]);
+        let mut names = BTreeSet::from([short_name]);
         let prefix = reference.split('.').next().unwrap_or(reference);
         if !reference.contains('.') {
             for import in imports {
-                let alias = binding_key(&import.alias);
-                if alias == prefix || alias == short_name {
-                    names.insert(binding_key(&import.module_path));
+                if import.alias == prefix || import.alias == short_name {
+                    names.insert(import.module_binding.as_str());
                 }
             }
         }
         names
             .into_iter()
-            .filter_map(|name| self.by_name.get(&name))
+            .filter_map(|name| self.by_name.get(name))
             .flatten()
             .copied()
             .collect::<BTreeSet<_>>()
@@ -356,26 +420,21 @@ impl DefinitionIndex {
         candidates: &[&'a DefinitionRef],
         callee: &str,
         short_name: &str,
-        imports: &[ExtractedImport],
+        imports: &[FileImport],
     ) -> Option<&'a DefinitionRef> {
         let prefix = callee.split('.').next().unwrap_or(callee);
         let mut matches = Vec::new();
         for import in imports {
-            let alias = binding_key(&import.alias);
-            let module = normalize_name(&import.module_path);
-            if alias != prefix && alias != short_name {
+            if import.alias != prefix && import.alias != short_name {
                 continue;
             }
             let suffix = callee.strip_prefix(prefix).unwrap_or_default();
-            let expected = if suffix.is_empty() {
-                module.clone()
-            } else {
-                format!("{module}{suffix}")
-            };
+            let expected = normalize_name(&format!("{}{suffix}", import.module));
             matches.extend(candidates.iter().copied().filter(|definition| {
-                normalized_suffix(&definition.qualified_name, &expected)
-                    || (binding_key(&definition.name) == short_name
-                        && import_reaches(&definition.qualified_name, &module))
+                definition.normalized_qn == expected
+                    || ends_with_segment(&definition.normalized_qn, &expected)
+                    || (definition.binding == short_name
+                        && import.reaches(&definition.normalized_qn))
             }));
         }
         unique(matches)

@@ -11,22 +11,15 @@ use goldeneye_ports::{
 use serde_json::{Value, json};
 
 use super::{
-    index::{DefinitionIndex, DefinitionRef, ResolutionStrategy},
+    index::{DefinitionIndex, DefinitionRef, FileImport, ResolutionStrategy},
     names::{is_lsp_wired, normalize_name},
 };
 use crate::IndexError;
 
-const MAX_RESOLUTION_PASSES: usize = 3;
 const MAX_PROJECT_PENDING_FACTS: usize = 100_000;
 
 type EdgeIdentity = (NodeId, NodeId, String, String);
-type ImportsByFile = BTreeMap<ProjectRelativePath, Vec<ExtractedImport>>;
-
-enum ResolvedFact<T> {
-    Added,
-    Ignored,
-    Unresolved(T),
-}
+type ImportsByFile = BTreeMap<ProjectRelativePath, Vec<FileImport>>;
 
 struct ResolutionState<'a> {
     project: &'a ProjectId,
@@ -56,7 +49,7 @@ pub(crate) fn resolve_project(
         identities: &mut identities,
         edges,
     }
-    .resolve(calls, relations)?;
+    .resolve(&calls, &relations)?;
     sort_edges(edges);
     Ok(())
 }
@@ -133,13 +126,13 @@ fn provisional_relation_sites(
 }
 
 fn imports_by_file(imports: Vec<ExtractedImport>) -> ImportsByFile {
-    imports.into_iter().fold(
-        BTreeMap::<ProjectRelativePath, Vec<ExtractedImport>>::new(),
-        |mut by_file, import| {
-            by_file.entry(import.file.clone()).or_default().push(import);
+    imports
+        .into_iter()
+        .fold(ImportsByFile::new(), |mut by_file, import| {
+            let prepared = FileImport::new(&import);
+            by_file.entry(import.file).or_default().push(prepared);
             by_file
-        },
-    )
+        })
 }
 
 fn edge_identities(edges: &[GraphEdge]) -> BTreeSet<EdgeIdentity> {
@@ -157,52 +150,31 @@ fn edge_identities(edges: &[GraphEdge]) -> BTreeSet<EdgeIdentity> {
 }
 
 impl ResolutionState<'_> {
+    /// Resolves every pending fact once.
+    ///
+    /// A fact is resolved from the definitions and the imports of its file. Neither changes
+    /// while facts are resolved, so a fact left unresolved stays so however often it is tried.
     fn resolve(
         &mut self,
-        calls: Vec<ExtractedCall>,
-        relations: Vec<ExtractedRelation>,
+        calls: &[ExtractedCall],
+        relations: &[ExtractedRelation],
     ) -> Result<(), IndexError> {
-        let mut unresolved_calls = calls;
-        let mut unresolved_relations = relations;
-        for _ in 0..MAX_RESOLUTION_PASSES {
-            let (next_calls, call_progress) = self.resolve_calls(unresolved_calls)?;
-            unresolved_calls = next_calls;
-            let (next_relations, relation_progress) =
-                self.resolve_relations(unresolved_relations)?;
-            unresolved_relations = next_relations;
-            if call_progress + relation_progress == 0 {
-                break;
-            }
+        for call in calls {
+            self.resolve_call(call)?;
+        }
+        for relation in relations {
+            self.resolve_relation(relation)?;
         }
         Ok(())
     }
 
-    fn resolve_calls(
-        &mut self,
-        calls: Vec<ExtractedCall>,
-    ) -> Result<(Vec<ExtractedCall>, usize), IndexError> {
-        let mut unresolved = Vec::new();
-        let mut progress = 0;
-        for call in calls {
-            match self.resolve_call(call)? {
-                ResolvedFact::Added => progress += 1,
-                ResolvedFact::Ignored => {}
-                ResolvedFact::Unresolved(call) => unresolved.push(call),
-            }
-        }
-        Ok((unresolved, progress))
-    }
-
-    fn resolve_call(
-        &mut self,
-        call: ExtractedCall,
-    ) -> Result<ResolvedFact<ExtractedCall>, IndexError> {
+    fn resolve_call(&mut self, call: &ExtractedCall) -> Result<(), IndexError> {
         let file_imports = self.file_imports(&call.file);
-        let Some((target, strategy)) = self.index.resolve_call(&call, file_imports) else {
-            return Ok(ResolvedFact::Unresolved(call));
+        let Some((target, strategy)) = self.index.resolve_call(call, file_imports) else {
+            return Ok(());
         };
         if call.source == target.id {
-            return Ok(ResolvedFact::Ignored);
+            return Ok(());
         }
         let discriminator = call.start_byte.to_string();
         let identity = (
@@ -212,44 +184,25 @@ impl ResolutionState<'_> {
             discriminator.clone(),
         );
         if !self.identities.insert(identity) {
-            return Ok(ResolvedFact::Ignored);
+            return Ok(());
         }
         self.edges.push(resolved_call_edge(
             self.project,
-            &call,
+            call,
             target,
             strategy,
             discriminator,
         )?);
-        Ok(ResolvedFact::Added)
+        Ok(())
     }
 
-    fn resolve_relations(
-        &mut self,
-        relations: Vec<ExtractedRelation>,
-    ) -> Result<(Vec<ExtractedRelation>, usize), IndexError> {
-        let mut unresolved = Vec::new();
-        let mut progress = 0;
-        for relation in relations {
-            match self.resolve_relation(relation)? {
-                ResolvedFact::Added => progress += 1,
-                ResolvedFact::Ignored => {}
-                ResolvedFact::Unresolved(relation) => unresolved.push(relation),
-            }
-        }
-        Ok((unresolved, progress))
-    }
-
-    fn resolve_relation(
-        &mut self,
-        relation: ExtractedRelation,
-    ) -> Result<ResolvedFact<ExtractedRelation>, IndexError> {
+    fn resolve_relation(&mut self, relation: &ExtractedRelation) -> Result<(), IndexError> {
         let file_imports = self.file_imports(&relation.file);
-        let Some(target) = self.index.resolve_relation(&relation, file_imports) else {
-            return Ok(ResolvedFact::Unresolved(relation));
+        let Some(target) = self.index.resolve_relation(relation, file_imports) else {
+            return Ok(());
         };
         if relation.source == target.id {
-            return Ok(ResolvedFact::Ignored);
+            return Ok(());
         }
         let discriminator = normalize_name(&relation.target_name);
         let identity = (
@@ -259,7 +212,7 @@ impl ResolutionState<'_> {
             discriminator.clone(),
         );
         if !self.identities.insert(identity) {
-            return Ok(ResolvedFact::Ignored);
+            return Ok(());
         }
         self.edges.push(graph_edge(
             self.project,
@@ -269,10 +222,10 @@ impl ResolutionState<'_> {
             Some(discriminator),
             GraphProperties::new(),
         )?);
-        Ok(ResolvedFact::Added)
+        Ok(())
     }
 
-    fn file_imports(&self, file: &ProjectRelativePath) -> &[ExtractedImport] {
+    fn file_imports(&self, file: &ProjectRelativePath) -> &[FileImport] {
         self.imports_by_file
             .get(file)
             .map(Vec::as_slice)

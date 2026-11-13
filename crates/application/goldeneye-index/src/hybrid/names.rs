@@ -1,5 +1,3 @@
-use goldeneye_ports::IndexExtractedImport as ExtractedImport;
-
 pub(super) fn is_definition_label(label: &str) -> bool {
     is_callable_label(label) || is_type_label(label)
 }
@@ -94,36 +92,35 @@ pub(super) fn call_receiver(callee: &str) -> Option<String> {
         .filter(|receiver| !receiver.is_empty())
 }
 
-pub(super) fn expand_alias(value: &str, imports: &[ExtractedImport]) -> String {
-    let normalized = normalize_name(value);
-    let prefix = normalized.split('.').next().unwrap_or_default();
-    imports
-        .iter()
-        .find(|import| binding_key(&import.alias) == prefix)
-        .map_or(normalized.clone(), |import| {
-            let suffix = normalized.strip_prefix(prefix).unwrap_or_default();
-            format!("{}{suffix}", normalize_name(&import.module_path))
-        })
+/// Whether `value` ends with `.{tail}`.
+pub(super) fn ends_with_segment(value: &str, tail: &str) -> bool {
+    value
+        .strip_suffix(tail)
+        .is_some_and(|rest| rest.ends_with('.'))
 }
 
+/// Whether two normalized names are equal or one is the last segments of the other.
 pub(super) fn tail_eq(left: &str, right: &str) -> bool {
-    let left = normalize_name(left);
-    let right = normalize_name(right);
-    left == right || left.ends_with(&format!(".{right}")) || right.ends_with(&format!(".{left}"))
+    left == right || ends_with_segment(left, right) || ends_with_segment(right, left)
 }
 
-pub(super) fn normalized_suffix(qualified_name: &str, suffix: &str) -> bool {
-    let qualified_name = normalize_name(qualified_name);
-    let suffix = normalize_name(suffix);
-    qualified_name == suffix || qualified_name.ends_with(&format!(".{suffix}"))
+/// Whether `value` ends with `{owner}.{name}`.
+pub(super) fn ends_with_joined(value: &str, owner: &str, name: &str) -> bool {
+    value
+        .strip_suffix(name)
+        .and_then(|rest| rest.strip_suffix('.'))
+        .is_some_and(|rest| rest.ends_with(owner))
 }
 
-pub(super) fn import_reaches(qualified_name: &str, module: &str) -> bool {
-    let qualified_name = normalize_name(qualified_name);
-    let module = normalize_name(module);
-    qualified_name.starts_with(&format!("{module}."))
-        || qualified_name.contains(&format!(".{module}."))
-        || qualified_name.ends_with(&format!(".{module}"))
+/// Whether `{owner}.{name}` ends with `value`.
+pub(super) fn joined_ends_with(owner: &str, name: &str, value: &str) -> bool {
+    if value.len() <= name.len() {
+        return name.ends_with(value);
+    }
+    value
+        .strip_suffix(name)
+        .and_then(|rest| rest.strip_suffix('.'))
+        .is_some_and(|rest| owner.ends_with(rest))
 }
 
 pub(super) fn class_method_tail(value: &str) -> Option<String> {
@@ -213,5 +210,49 @@ pub(super) fn is_builtin(language: &str, name: &str) -> bool {
             "array" | "count" | "echo" | "isset" | "print" | "strlen"
         ),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ends_with_joined, ends_with_segment, joined_ends_with, tail_eq};
+
+    const NAMES: [&str; 11] = [
+        "", "a", "b", "a.b", "x.a.b", "ab", "a.b.c", "b.c", "a.", ".b", "é.b",
+    ];
+
+    #[test]
+    fn segment_checks_agree_with_the_strings_they_stand_for() {
+        for value in NAMES {
+            for owner in NAMES {
+                assert_eq!(
+                    ends_with_segment(value, owner),
+                    value.ends_with(&format!(".{owner}")),
+                    "{value:?} ends with .{owner:?}"
+                );
+                for name in NAMES {
+                    let joined = format!("{owner}.{name}");
+                    assert_eq!(
+                        ends_with_joined(value, owner, name),
+                        value.ends_with(&joined),
+                        "{value:?} ends with {joined:?}"
+                    );
+                    assert_eq!(
+                        joined_ends_with(owner, name, value),
+                        joined.ends_with(value),
+                        "{joined:?} ends with {value:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_name_matches_another_when_one_is_the_last_segments_of_the_other() {
+        assert!(tail_eq("Engine", "Engine"));
+        assert!(tail_eq("Engine", "sync.Engine"));
+        assert!(tail_eq("sync.Engine", "Engine"));
+        assert!(!tail_eq("Engine", "SyncEngine"));
+        assert!(!tail_eq("sync.Engine", "db.Engine"));
     }
 }

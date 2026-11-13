@@ -7,6 +7,13 @@ use super::{
     upsert_file_in, upsert_file_with, validate_project_replacement, validate_replacement,
 };
 
+/// Page cache of the connection while a whole project is replaced, in KiB.
+///
+/// A full index writes every table and index of the project once. Under the default cache
+/// of 2 MiB the pages of the five indexes are evicted and read back for nearly every row,
+/// and the inserts take three to seven times longer.
+const BULK_REPLACE_CACHE_KIB: i64 = 262_144;
+
 impl Store {
     /// Transactionally replaces one file's graph using deterministic insertion order.
     ///
@@ -52,6 +59,24 @@ impl Store {
         validate_project_replacement(&project.id, &files, &nodes, &edges)?;
         order_project_graph(&mut files, &mut nodes, &mut edges);
 
+        let cache_size: i64 = self
+            .connection
+            .pragma_query_value(None, "cache_size", |row| row.get(0))?;
+        self.connection
+            .pragma_update(None, "cache_size", -BULK_REPLACE_CACHE_KIB)?;
+        let outcome = self.replace_ordered_project_graph(project, files, nodes, edges);
+        self.connection
+            .pragma_update(None, "cache_size", cache_size)?;
+        outcome
+    }
+
+    fn replace_ordered_project_graph(
+        &mut self,
+        project: &ProjectRecord,
+        mut files: Vec<FileRecord>,
+        mut nodes: Vec<GraphNode>,
+        mut edges: Vec<GraphEdge>,
+    ) -> Result<ProjectReplacementOutcome, StoreError> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -258,4 +283,32 @@ fn reconcile_project_rows(
         )?;
     }
     Ok(removed_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use goldeneye_domain::{ProjectId, ProjectRecord};
+
+    use crate::Store;
+
+    fn cache_size(store: &Store) -> i64 {
+        store
+            .connection
+            .pragma_query_value(None, "cache_size", |row| row.get(0))
+            .expect("cache size")
+    }
+
+    #[test]
+    fn replacing_a_project_leaves_the_page_cache_as_it_was() {
+        let mut store = Store::open_in_memory().expect("store");
+        let before = cache_size(&store);
+        let project = ProjectRecord::new(ProjectId::new("demo").expect("project id"), "/demo")
+            .expect("project");
+
+        store
+            .replace_project_graph(&project, Vec::new(), Vec::new(), Vec::new())
+            .expect("replace an empty project");
+
+        assert_eq!(cache_size(&store), before);
+    }
 }
