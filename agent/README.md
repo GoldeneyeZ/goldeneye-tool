@@ -135,6 +135,8 @@ gcal get src/app                            # a directory: its files and their s
 
 gcal replace "charge\(" "bill(" src test    # the same edit in every file; prints each changed line
 gcal replace -F "a.b" "a.c" . --dry-run     # literal text, preview only
+gcal check                                  # what the edit broke or left behind (parse errors, old names still called)
+gcal check --types                          # ...and the new type errors (TypeScript: tsc --noEmit against HEAD)
 gcal replace "charge\(" "bill(" src -g "*.java" # only the files a glob selects; the others that match are named
 
 gcal arch                                   # directory layout by file count
@@ -195,6 +197,12 @@ Behaviors worth knowing:
   on an added line is reported when `Type` declares constructors and none
   takes that number of arguments. None of this is a compiler: it sees names
   and counts, not types.
+- `check --types` also runs the project's own type checker. TypeScript only:
+  `tsc --noEmit` with the `typescript` of the project's `node_modules` and its
+  `tsconfig.json`. When it reports errors, HEAD is exported to a temporary
+  directory and type-checked too, and only the errors HEAD does not have are
+  printed, those of the changed files first. Two compiler runs take 25 to 30 s
+  on a 500-file project. It is off by default: it is a build step.
 - `get <file> --tests` lists the test files that import the file with the
   lines that use what they import, and prints the test file whole when it is
   the only one (up to 300 lines); for a language that imports by name, the

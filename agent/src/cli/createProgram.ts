@@ -25,6 +25,7 @@ import { inboundTraceDecision } from "../kernel/tracePolicy.js";
 import type { TraceEdge } from "../domain/types.js";
 import { leftBehind, unmatchedConstructors } from "../workflows/checkReferences.js";
 import { checkSyntax } from "../workflows/checkSyntax.js";
+import { checkTypes } from "../workflows/checkTypes.js";
 import {
   architecture,
   callees,
@@ -447,7 +448,8 @@ export function createProgram(deps: ProgramDeps): Command {
       "parse the files that differ from HEAD (or the given files and directories) and print the lines with syntax errors",
     )
     .argument("[paths...]", "files or directories; default: every file that differs from HEAD")
-    .action(async (paths: string[]) => {
+    .option("--types", "also run the project's own type checker (TypeScript: tsc --noEmit)", false)
+    .action(async (paths: string[], options: { types: boolean }) => {
       const context = await requireContext(deps, "check");
       const checked = await checkSyntax(context, { paths });
       if (paths.length === 0) {
@@ -458,6 +460,10 @@ export function createProgram(deps: ProgramDeps): Command {
         } catch {
           // The parse check stands on its own.
         }
+      }
+      if (options.types) {
+        const typed = await checkTypes(context);
+        checked.text = [checked.text, typed.text].join("\n");
       }
       emit(deps, checked);
     });

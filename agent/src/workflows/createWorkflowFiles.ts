@@ -92,6 +92,8 @@ export const goldeneyeGcalSkillMd = [
   "  larger batch it only lists where the tests are.",
   "- After edits in several files, end with `gcal check` in the same shell call as",
   "  `git status`: it names every line that no longer parses, in any language.",
+  "- When the project may be compiled, `gcal check --types` adds the type errors",
+  "  the change introduced (TypeScript: `tsc --noEmit`, compared with HEAD).",
   "- In PowerShell, write patterns in single quotes. Inside double quotes `\\\"` ends",
   "  the string, and the whole command line then prints nothing and runs nothing.",
   "  For a quote character inside a pattern write `\\x22` (double) or `\\x27`",
