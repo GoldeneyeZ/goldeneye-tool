@@ -336,7 +336,10 @@ the type of its receiver.
 Verification without a model: a corpus test seen failing without the fix
 (`Parse` and `Parse#2` under the package) and one unit test; the corpus (15
 tests), `cargo test --workspace`, clippy, fmt and `pnpm check` (230 tests)
-pass; operations benchmark unchanged on both corpora, neither of which is Go.
+pass; operations benchmark unchanged on both corpora, neither of which is Go. On the
+final binary of the round, the replay of 30 recorded runs of five tasks gives
+the same verdicts (3 failed their grader, 2 of those reported; 27 passed, none
+reported) and the harness tests pass (88).
 
 ### What the keys and headings do to a search
 
