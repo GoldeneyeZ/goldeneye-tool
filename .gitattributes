@@ -1,2 +1,3 @@
 crates/adapters/goldeneye-discovery/data/languages.tsv text eol=lf
 crates/application/goldeneye-query/assets/nomic/code_tokens.txt text eol=lf
+tools/agent-bench/overlays/*.patch text eol=lf
