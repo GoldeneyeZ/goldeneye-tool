@@ -554,6 +554,36 @@ export async function references(
     }
   }
 
+  // A call the graph knows and the text search did not attach to its caller
+  // has the line of the index and no text. In a file changed since indexing
+  // that line is another one by now: find the call in the caller as it is.
+  if (request.depth === 1) {
+    const called = new RegExp(`(?<![\\w$])${escapeForRegex(resolved[0].name)}\\s*\\(`);
+    for (const [key, row] of rows) {
+      if (row.kind !== "call" || row.callSite.length > 0) continue;
+      const fileLines = await context.reader.lines(row.filePath);
+      if (fileLines === undefined) continue;
+      let line = row.lines[0];
+      if (!called.test(fileLines[line - 1] ?? "")) {
+        const caller = locateDeclaration(fileLines, row.name.split(".").at(-1) ?? row.name, line);
+        const found =
+          caller === undefined
+            ? -1
+            : fileLines.slice(caller.startLine - 1, caller.endLine).findIndex((text) => called.test(text));
+        if (caller === undefined || found < 0) continue;
+        line = caller.startLine + found;
+      }
+      row.lines = [line];
+      row.callSite = await lineText(context, row.filePath, line);
+      // The same place may also be there as a line no symbol was known for.
+      const loose = `${row.filePath}:${line}`;
+      if (loose !== key && rows.get(loose)?.kind === "text" && rows.get(loose)?.name === "") {
+        rows.delete(loose);
+        textOnly -= 1;
+      }
+    }
+  }
+
   const ordered = [...rows.values()].sort(
     (left, right) =>
       left.hop - right.hop ||

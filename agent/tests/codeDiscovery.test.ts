@@ -751,6 +751,33 @@ describe("exploring code", () => {
     expect(declared.text.split("\n").slice(2)).toEqual([`  7\t\ttext\t${fileLines[6]}`]);
   });
 
+  it("finds a call of the graph again when its line moved since indexing", async () => {
+    const context = await createContext();
+    const refund = NODES.find((item) => item.qualifiedName.endsWith("Billing.refund"))!;
+    const record = NODES.find((item) => item.name === "record")!;
+    // The index says line 3; the call is on line 15 of the file as it is.
+    const stale = backend({
+      callers: async () => [
+        {
+          sourceQualifiedName: refund.qualifiedName,
+          targetQualifiedName: record.qualifiedName,
+          relatedQualifiedName: refund.qualifiedName,
+          hop: 1,
+          filePath: BILLING,
+          line: 3,
+        },
+      ],
+    });
+
+    const result = await references(context, stale, { target: "Ledger.record", depth: 1, limit: 20, includeText: false });
+
+    expect(result.text).toBe(
+      ["# callers of Ledger.record: 1 (graph 1, text-only 0)", BILLING, "  15\tBilling.refund\tcall\t    record(-cents);"].join(
+        "\n",
+      ),
+    );
+  });
+
   it("lists subtypes from the graph", async () => {
     const ledger = NODES.find((item) => item.label === "Interface")!;
     const context = await createContext({ subtypes: { [ledger.qualifiedName]: [NODES[1]] } });
