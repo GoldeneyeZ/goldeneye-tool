@@ -21,7 +21,6 @@ import { couldBeFileName, normalizePath, parseLocator, parseSymbolLocator } from
 import { importers } from "./importers.js";
 import {
   declarationLine,
-  SMALL_FILE_MAX_LINES,
   declarationLineNumber,
   leadingDocStart,
   renderSymbol,
@@ -252,6 +251,12 @@ export function globPattern(glob: string): string {
     else pattern += escapeForRegex(char === "\\" ? "/" : char);
   }
   return `(^|/)${pattern}$`;
+}
+
+/** One path filter for several globs: `-g '*.ts' -g '*.tsx'` keeps a file that matches either. */
+export function globsPattern(globs: string[] | undefined): string | undefined {
+  if (globs === undefined || globs.length === 0) return undefined;
+  return globs.length === 1 ? globPattern(globs[0]) : globs.map((glob) => `(?:${globPattern(glob)})`).join("|");
 }
 
 const VALUE_LABELS = new Set(["Variable", "Field", "Constant", "Property"]);
@@ -633,7 +638,12 @@ const TEST_PATH_FILTER =
  * usually comes with a change to its tests, and reading them otherwise takes a
  * second call. The first few are printed whole, the rest as rows.
  */
-export async function testsUsing(context: CodeContext, raw: string): Promise<string | undefined> {
+export async function testsUsing(
+  context: CodeContext,
+  raw: string,
+  // brief: the answer for one name of a large batch, where a few rows per name are what fits.
+  options: { brief?: boolean } = {},
+): Promise<string | undefined> {
   const place = parseLocator(raw);
   if (place.kind === "file" && place.startLine === undefined) return testsOfFile(context, place.path);
   const resolved = await resolveTarget(context, raw);
@@ -667,11 +677,14 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
     .sort((left, right) => near(left.match.filePath) - near(right.match.filePath) || left.index - right.index)
     .map((entry) => entry.match);
 
+  const name = displayName(target, context.project);
+  const scoped = await namingOwner(context, ordered, target, name);
+
   // A use inside a lambda or a local function belongs to the test around it:
   // that test is what a reader wants, once.
   const uses: TextMatch[] = [];
   const byTest = new Map<string, TextMatch>();
-  for (const [index, match] of ordered.entries()) {
+  for (const [index, match] of scoped.entries()) {
     const test = index < TESTS_LIFTED ? await outermostCallable(context, match) : match.enclosing;
     if (test === undefined) {
       uses.push(match);
@@ -687,25 +700,29 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
     uses.push(use);
   }
 
-  const name = displayName(target, context.project);
-  if (uses.length === 0) return [`# tests using ${name}: none found`, ...(await nearestTests(context, target))].join("\n");
+  if (uses.length === 0) {
+    const none = `# tests using ${name}: none found`;
+    return options.brief === true ? none : [none, ...(await nearestTests(context, target))].join("\n");
+  }
 
   const files = new Set(uses.map((match) => match.filePath));
-  if (files.size === 1) {
-    // Every test of the symbol is in one small file: a new or changed test is
-    // written from that file as a whole.
-    const [testFile] = files;
-    const lines = await context.reader.lines(testFile);
-    if (lines !== undefined && lines.length <= SMALL_FILE_MAX_LINES) {
-      const printed = headsPrinted.get(context) ?? new Set<string>();
-      headsPrinted.set(context, printed);
-      const at = [...new Set(uses.flatMap((match) => match.lines))].sort((left, right) => left - right);
-      const count = `# tests using ${name}: ${uses.length} in ${testFile}`;
-      if (printed.has(testFile)) return `${count}, printed above (lines ${lineList(at)})`;
-      printed.add(testFile);
-      return [`${count}, printed whole (lines ${lineList(at)})`, "", `# ${testFile}:1-${lines.length}`, ...lines].join("\n");
-    }
+  if (options.brief === true || isTypeNode(target)) {
+    const whole = options.brief === true ? undefined : await wholeTestFile(context, name, uses, files);
+    if (whole !== undefined) return whole;
+    // The tests of a type are its test files; of one name among many, where to look.
+    const perFile = new Map<string, number[]>();
+    for (const match of uses) perFile.set(match.filePath, [...(perFile.get(match.filePath) ?? []), ...match.lines]);
+    const shown = [...perFile].slice(0, TESTS_FILES_LISTED);
+    const more = perFile.size > shown.length ? `, +${perFile.size - shown.length} more files` : "";
+    return [
+      `# tests using ${name}: ${uses.length} in ${files.size} file${files.size === 1 ? "" : "s"}`,
+      ...shown.map(([filePath, lines]) => `  ${filePath}:${lineList([...new Set(lines)].sort((left, right) => left - right))}`),
+    ].join("\n") + more;
   }
+  // Every test of the symbol is in one small file: a new or changed test is
+  // written from that file as a whole.
+  const whole = await wholeTestFile(context, name, uses, files);
+  if (whole !== undefined) return whole;
   const sections = [
     `# tests using ${name}: ${uses.length} in ${files.size} file${files.size === 1 ? "" : "s"}`,
   ];
@@ -739,6 +756,60 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   const head = await testFileHead(context, uses[0].filePath);
   if (head !== undefined) sections.push(head);
   return sections.join("\n\n");
+}
+
+const TESTS_FILES_LISTED = 5;
+// A test file is read whole to add a test to it; up to this size that costs
+// less than the call that would read it.
+const TEST_FILE_WHOLE_MAX_LINES = 300;
+
+/** The one small test file that holds every test of a symbol, whole; undefined when there is no such file. */
+async function wholeTestFile(
+  context: CodeContext,
+  name: string,
+  uses: TextMatch[],
+  files: Set<string>,
+): Promise<string | undefined> {
+  if (files.size !== 1) return undefined;
+  const [testFile] = files;
+  const lines = await context.reader.lines(testFile);
+  if (lines === undefined || lines.length > TEST_FILE_WHOLE_MAX_LINES) return undefined;
+  const printed = headsPrinted.get(context) ?? new Set<string>();
+  headsPrinted.set(context, printed);
+  const at = [...new Set(uses.flatMap((match) => match.lines))].sort((left, right) => left - right);
+  const count = `# tests using ${name}: ${uses.length} in ${testFile}`;
+  if (printed.has(testFile)) return `${count}, printed above (lines ${lineList(at)})`;
+  printed.add(testFile);
+  return [`${count}, printed whole (lines ${lineList(at)})`, "", `# ${testFile}:1-${lines.length}`, ...lines].join("\n");
+}
+
+/**
+ * `wrap(` is called on many things. A test of `ObjectError.wrap` names
+ * `ObjectError` somewhere in its file; matches in files that do not are other
+ * methods of the same name. When no file names the owner the matches are kept:
+ * the method may be reached through a subtype.
+ */
+async function namingOwner(
+  context: CodeContext,
+  matches: TextMatch[],
+  target: GraphNode,
+  name: string,
+): Promise<TextMatch[]> {
+  const owner = name.split(".").at(-2);
+  if (isTypeNode(target) || owner === undefined || !/^[A-Z]/.test(owner)) return matches;
+  const word = new RegExp(`\\b${escapeForRegex(owner)}\\b`);
+  const names = new Map<string, boolean>();
+  const kept: TextMatch[] = [];
+  for (const match of matches) {
+    let known = names.get(match.filePath);
+    if (known === undefined) {
+      const lines = await context.reader.lines(match.filePath);
+      known = lines === undefined || lines.some((line) => word.test(line));
+      names.set(match.filePath, known);
+    }
+    if (known) kept.push(match);
+  }
+  return kept.length > 0 ? kept : matches;
 }
 
 const TEST_HEAD_MAX_LINES = 40;
@@ -778,7 +849,18 @@ async function testsOfFile(context: CodeContext, written: string): Promise<strin
   if (typeof filePath !== "string" || isTestPath(filePath)) return undefined;
   const listed = await importers(context, filePath, { limit: 20, exists: true, testsOnly: true });
   if (listed !== undefined) {
-    if (!listed.text.endsWith(": none found")) return listed.text;
+    if (!listed.text.endsWith(": none found")) {
+      // One test file imports it: that is where its tests are changed or added.
+      const importing = listed.text.split("\n").filter((line) => /^[^#\s]/.test(line));
+      if (importing.length !== 1) return listed.text;
+      const lines = await context.reader.lines(importing[0]);
+      if (lines === undefined || lines.length > TEST_FILE_WHOLE_MAX_LINES) return listed.text;
+      const printed = headsPrinted.get(context) ?? new Set<string>();
+      headsPrinted.set(context, printed);
+      if (printed.has(importing[0])) return listed.text;
+      printed.add(importing[0]);
+      return [listed.text, "", `# ${importing[0]}:1-${lines.length}`, ...lines].join("\n");
+    }
     const nearest = await nearestTests(context, { filePath } as GraphNode);
     return [listed.text, ...nearest].join("\n");
   }

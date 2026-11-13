@@ -116,7 +116,13 @@ export async function replaceText(context: CodeContext, request: ReplaceRequest)
       };
     }
   }
-  return { ok: false, text: `# no match: ${request.pattern} in ${request.paths.join(" ")}` };
+  // Nothing in the files a glob selects, though other files match: say so, or
+  // the next command is the same one without the glob.
+  const leftOut = ofKind === undefined ? [] : await elsewhere(expression);
+  return {
+    ok: false,
+    text: [`# no match: ${request.pattern} in ${request.paths.join(" ")}`, ...leftOut].join("\n"),
+  };
 }
 
 function compile(pattern: string, literal: boolean): RegExp | undefined {

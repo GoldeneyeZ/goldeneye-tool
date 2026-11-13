@@ -88,6 +88,8 @@ export const goldeneyeGcalSkillMd = [
   "- `get` given a symbol together with a type or file too long to print whole",
   "  (`gcal get Billing.refund BillingTests`) also prints the members of that type",
   "  that call the symbol; do not read them again.",
+  "- Put `--tests` on the one to three symbols you will change. On a type or on a",
+  "  larger batch it only lists where the tests are.",
   "- After edits in several files, end with `gcal check` in the same shell call as",
   "  `git status`: it names every line that no longer parses, in any language.",
   "- In PowerShell, write patterns in single quotes. Inside double quotes `\\\"` ends",

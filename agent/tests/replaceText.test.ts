@@ -125,6 +125,27 @@ describe("replacing text", () => {
       ].join("\n"),
     );
     expect(await read("src/data/rows.json")).toBe('{"note": "canonical(row)"}\n');
+
+    // A glob that selects no matching file: the files it left out are named.
+    const none = await replaceText(context, {
+      ...request,
+      pattern: "canonical\\(",
+      replacement: "canonical_json(",
+      paths: ["src", "docs"],
+      filePattern: globPattern("*.md"),
+      dryRun: true,
+    });
+    expect(none.text).toBe("# would replace 1 occurrence in 1 file\ndocs/guide.md\t1\n  1: call canonical_json(row)\n# the pattern also matches in files left out, unchanged (path occurrences): src/data/rows.json 1");
+    const nothing = await replaceText(context, {
+      ...request,
+      pattern: "canonical\\(",
+      replacement: "canonical_json(",
+      paths: ["src", "docs"],
+      filePattern: globPattern("*.rs"),
+    });
+    expect(nothing.text).toBe(
+      "# no match: canonical\\( in src docs\n# the pattern also matches in files left out, unchanged (path occurrences): src/data/rows.json 1, docs/guide.md 1",
+    );
   });
 
   it("refuses to run without a scope and reports a pattern that matches nothing", async () => {

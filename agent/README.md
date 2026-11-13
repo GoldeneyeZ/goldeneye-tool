@@ -180,10 +180,14 @@ Behaviors worth knowing:
   written from.
 - `get --tests` is read as the intent to change the symbols: one that sits in
   a file of at most 150 lines comes with the whole file, and when all its
-  tests are in one test file of at most 150 lines that file is printed whole.
+  tests are in one test file of at most 300 lines that file is printed whole.
+- `get --tests` for a method keeps to the test files that name its type; for
+  a type, or for a batch of more than three names, it lists where the tests
+  are (file and lines) instead of printing them.
 - `search` also lists the files whose name holds a search word.
 - `get <file> --tests` lists the test files that import the file with the
-  lines that use what they import; for a language that imports by name, the
+  lines that use what they import, and prints the test file whole when it is
+  the only one (up to 300 lines); for a language that imports by name, the
   tests of the type the file declares.
 - `grep` without `--limit` shows 30 matching symbols, or all of them when the
   backend returned every match (up to 90).

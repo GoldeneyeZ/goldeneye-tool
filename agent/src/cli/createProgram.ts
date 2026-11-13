@@ -27,7 +27,7 @@ import { checkSyntax } from "../workflows/checkSyntax.js";
 import {
   architecture,
   callees,
-  globPattern,
+  globsPattern,
   grepCode,
   implementations,
   references,
@@ -108,7 +108,7 @@ interface GetCommandOptions {
 interface GrepCommandOptions {
   fixedStrings: boolean;
   file?: string;
-  glob?: string;
+  glob?: string[];
   path?: string;
   context?: number;
   limit?: number;
@@ -138,6 +138,11 @@ interface WorkflowCommandOptions {
   js?: string;
   maxCalls: number;
   timeoutMs: number;
+}
+
+/** An option given several times keeps every value. */
+function collect(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), value];
 }
 
 function numberOption(value: string): number {
@@ -202,6 +207,7 @@ async function codeContext(deps: ProgramDeps): Promise<CodeContext | undefined> 
 // A second call to see the rows a first one cut costs far more than the rows:
 // a refactor needs every caller, and most symbols have fewer than this.
 const GRAPH_TRACE_ROWS = 60;
+const TESTS_FULL_MAX_NAMES = 3;
 const RAW_TRACE_ROWS = 20;
 
 function emit(deps: ProgramDeps, result: ReadResult): void {
@@ -349,7 +355,7 @@ export function createProgram(deps: ProgramDeps): Command {
     .addOption(new Option("--regex", "default; kept for compatibility").hideHelp())
     .option("-C, --context <n>", "print matching lines with n lines of context", numberOption)
     .option("--file <regex>", "restrict to matching file paths")
-    .option("-g, --glob <glob>", "restrict to file paths matching a glob, as in rg: -g '*.py'")
+    .option("-g, --glob <glob>", "restrict to file paths matching a glob, as in rg: -g '*.py'; repeatable", collect)
     .addOption(pathAlias())
     .option("--limit <n>", "maximum matching symbols (default: 30, or all of them up to 90)", positiveNumberOption)
     .action(async (pattern: string, paths: string[], options: GrepCommandOptions) => {
@@ -361,7 +367,7 @@ export function createProgram(deps: ProgramDeps): Command {
           regex: !options.fixedStrings,
           filePattern:
             normalizeFilePattern(options.file ?? options.path) ??
-            (options.glob === undefined ? undefined : globPattern(options.glob)),
+            globsPattern(options.glob),
           paths,
           context: options.context,
           limit: options.limit,
@@ -379,13 +385,13 @@ export function createProgram(deps: ProgramDeps): Command {
     .argument("<paths...>", "files or directories to rewrite; . for the whole repository")
     .option("-F, --fixed-strings", "treat pattern and replacement as literal text", false)
     .option("--dry-run", "print what would change and write nothing", false)
-    .option("-g, --glob <glob>", "rewrite only file paths matching a glob, as in rg: -g '*.py'")
+    .option("-g, --glob <glob>", "rewrite only file paths matching a glob, as in rg: -g '*.py'; repeatable", collect)
     .action(
       async (
         pattern: string,
         replacement: string,
         paths: string[],
-        options: { fixedStrings: boolean; dryRun: boolean; glob?: string },
+        options: { fixedStrings: boolean; dryRun: boolean; glob?: string[] },
       ) => {
         const context = await requireContext(deps, "replace");
         emit(
@@ -396,7 +402,7 @@ export function createProgram(deps: ProgramDeps): Command {
             paths,
             literal: options.fixedStrings,
             dryRun: options.dryRun,
-            filePattern: options.glob === undefined ? undefined : globPattern(options.glob),
+            filePattern: globsPattern(options.glob),
           }),
         );
       },
@@ -528,7 +534,8 @@ export function createProgram(deps: ProgramDeps): Command {
           const sections = [read.text];
           for (const name of qualifiedNames) {
             try {
-              const tests = await testsUsing(context, name);
+              // Tests of many names at once: a few rows each, not their sources.
+              const tests = await testsUsing(context, name, { brief: qualifiedNames.length > TESTS_FULL_MAX_NAMES });
               if (tests !== undefined) sections.push(tests);
             } catch (error) {
               // The source above is already read; a failed test lookup must not discard it.

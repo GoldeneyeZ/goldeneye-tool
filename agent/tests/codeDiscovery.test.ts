@@ -11,6 +11,7 @@ import { locateDeclaration } from "../src/kernel/relocate.js";
 import { SourceReader } from "../src/kernel/sourceFiles.js";
 import {
   globPattern,
+  globsPattern,
   grepCode,
   implementations,
   pathsPattern,
@@ -307,7 +308,7 @@ describe("reading code", () => {
     expect(result.text).toBe(
       [
         `# Billing.refund Method ${BILLING}:17-19`,
-        "# note: file changed since indexing; located by text (refresh: gcal index .)",
+        "# current: these are the lines of the working tree (the file changed since indexing)",
         "  public void refund(int cents) {",
         "    record(-cents);",
         "  }",
@@ -324,6 +325,10 @@ describe("reading code", () => {
     expect(header).toMatch(new RegExp(`^# ${BILLING}:1-${source.length} whole \\(small file\\); refund \\d+, charge \\d+`));
     // Once, however many of its symbols were named.
     expect(body).toEqual(source);
+
+    // A type in a small file comes with the file's package and imports too.
+    const type = await readLocators(context, ["Billing"], { forEdit: true });
+    expect(type.text.split("\n").slice(1)).toEqual(source);
 
     // Without the intent to edit, a symbol is its own lines.
     const plain = await readLocators(context, ["Billing.refund"]);
@@ -1135,6 +1140,38 @@ describe("exploring code", () => {
     );
   });
 
+  it("keeps the tests of a method to files that name its type, and is brief for a type or a large batch", async () => {
+    const testMethod = NODES.find((item) => item.qualifiedName.endsWith("BillingTests.refund"))!;
+    const OTHER = "src/test/java/com/shop/WalletTests.java";
+    const elsewhere = node(OTHER, "Method", ["WalletTests", "refundsElsewhere"], 2, 4);
+    const prepare = async () => {
+      const context = await createContext({ textResults: [textHit(elsewhere, [3]), textHit(testMethod, [6])] });
+      for (const [path, text] of [
+        [BILLING_TEST, "package com.shop;\n\nclass BillingTests {\n  @Test\n  void refund() {\n    new Billing().refund(5);\n  }\n}\n"],
+        // Another `refund(`, on something that is not a Billing.
+        [OTHER, "class WalletTests {\n  void refundsElsewhere() {\n    wallet.refund(1);\n  }\n}\n"],
+      ]) {
+        await mkdir(join(context.root, dirname(path)), { recursive: true });
+        await writeFile(join(context.root, path), text);
+      }
+      return context;
+    };
+
+    const method = await testsUsing(await prepare(), "Billing.refund");
+    expect(method!.split("\n")[0]).toBe(`# tests using Billing.refund: 1 in ${BILLING_TEST}, printed whole (lines 6)`);
+    expect(method).not.toContain("WalletTests");
+
+    // One name of a large batch: where its tests are, not their source.
+    expect(await testsUsing(await prepare(), "Billing.refund", { brief: true })).toBe(
+      [`# tests using Billing.refund: 1 in 1 file`, `  ${BILLING_TEST}:6`].join("\n"),
+    );
+
+    // The tests of a type are its test files.
+    expect(await testsUsing(await prepare(), "Billing")).toBe(
+      [`# tests using Billing: 2 in 2 files`, `  ${BILLING_TEST}:6`, `  ${OTHER}:3`].join("\n"),
+    );
+  });
+
   it("answers --tests on a file with the test files that import it", async () => {
     const context = await createContext();
     const files: Record<string, string> = {
@@ -1156,6 +1193,14 @@ describe("exploring code", () => {
         "tests/test_pairs.py",
         "  1\tfrom shop.pairs import pair",
         "  uses\tpair 5",
+        "",
+        // The one test file that imports it, whole.
+        "# tests/test_pairs.py:1-5",
+        "from shop.pairs import pair",
+        "",
+        "",
+        "def test_pair():",
+        "    assert pair() == 1",
       ].join("\n"),
     );
     // No test imports it: where its tests would go.
@@ -1292,6 +1337,10 @@ describe("exploring code", () => {
     expect(matches("src/**/*.ts", "src/app/hooks/use.ts")).toBe(true);
     expect(matches("src/**/*.ts", "lib/app/use.ts")).toBe(false);
     expect(matches("*.{ts,tsx}", "src/App.tsx")).toBe(true);
+    // `-g '*.ts' -g '*.tsx'`: a file that matches either glob.
+    const either = new RegExp(globsPattern(["*.ts", "*.tsx"])!);
+    expect(["src/a.ts", "src/App.tsx", "src/a.py"].map((path) => either.test(path))).toEqual([true, true, false]);
+    expect(globsPattern([])).toBeUndefined();
     expect(matches("tests/*.py", "tests/codec/test_a.py")).toBe(false);
   });
 

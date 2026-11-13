@@ -43,7 +43,7 @@ const AMBIGUOUS_FILE = "# ambiguous file:";
 const DIRECTORY_MAX_FILES = 120;
 const ALSO_DECLARED_MAX = 3;
 const DECLARATION_MAX_CHARS = 160;
-const STALE_NOTE = "# note: file changed since indexing; located by text (refresh: gcal index .)";
+const STALE_NOTE = "# current: these are the lines of the working tree (the file changed since indexing)";
 const STALE_LOST_NOTE =
   "# warning: file changed since indexing and the declaration was not found; lines may be off";
 
@@ -66,6 +66,8 @@ export interface ReadResult {
   outlined?: OutlinedRange;
   /** The functions and methods the item resolved to. */
   callables?: GraphNode[];
+  /** Every symbol the item resolved to, types included. */
+  symbols?: GraphNode[];
 }
 
 interface OutlinedRange {
@@ -153,7 +155,7 @@ export async function readLocators(
 export const SMALL_FILE_MAX_LINES = 150;
 
 /**
- * A function read together with its tests is about to be edited, and in a small
+ * A symbol read together with its tests is about to be edited, and in a small
  * file the edit is written from the whole file: its imports, its neighbours.
  * Printing the file costs a few lines more than the function and saves the
  * call that would read it.
@@ -162,7 +164,7 @@ async function wholeSmallFiles(context: CodeContext, results: ReadResult[], opti
   if (options.forEdit !== true || (options.detail ?? "auto") !== "auto") return;
   const byFile = new Map<string, ReadResult[]>();
   for (const result of results) {
-    const files = new Set((result.callables ?? []).map((node) => node.filePath));
+    const files = new Set((result.symbols ?? []).map((node) => node.filePath));
     if (files.size !== 1 || result.outlined !== undefined) continue;
     const [filePath] = files;
     byFile.set(filePath, [...(byFile.get(filePath) ?? []), result]);
@@ -170,7 +172,7 @@ async function wholeSmallFiles(context: CodeContext, results: ReadResult[], opti
   for (const [filePath, sameFile] of byFile) {
     const lines = await context.reader.lines(filePath);
     if (lines === undefined || lines.length > SMALL_FILE_MAX_LINES) continue;
-    const names = sameFile.flatMap((result) => (result.callables ?? []).map((node) => `${node.name} ${node.startLine}`));
+    const names = sameFile.flatMap((result) => (result.symbols ?? []).map((node) => `${node.name} ${node.startLine}`));
     const [first, ...rest] = sameFile;
     first.text = [`# ${filePath}:1-${lines.length} whole (small file); ${[...new Set(names)].join(", ")}`, ...lines].join("\n");
     first.compact = undefined;
@@ -304,6 +306,7 @@ export async function readLocator(
               endLine: outlinedType.endLine,
             },
       callables: resolution.nodes.filter(isCallable),
+      symbols: resolution.nodes,
       compact:
         options.detail !== "outline" && resolution.nodes.some(outlinable)
           ? async () => {
