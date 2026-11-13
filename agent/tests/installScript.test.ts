@@ -43,7 +43,7 @@ describe("PowerShell installer", () => {
     expect(readme.toLowerCase()).not.toContain("codebase-memory");
     expect(readme).toContain("sole model-facing code-discovery surface");
     expect(readme).toContain("Limits default to 5 rows for `search` and");
-    expect(readme).toContain("20 for `callers` and `callees`");
+    expect(readme).toContain("60 for `callers` and `callees`");
     expect(readme).toContain("directory layout by file count");
   });
 });

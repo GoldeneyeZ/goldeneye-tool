@@ -807,6 +807,165 @@ describe("exploring code", () => {
     expect(sameLanguageFilter("Makefile")).toBeUndefined();
   });
 
+  it("lists the files that import a module, under every spelling of its path", async () => {
+    const context = await createContext();
+    const files: Record<string, string> = {
+      "src/lib/native.ts": "export const native = {};\nexport type Entry = string;\n",
+      "src/app/App.tsx": [
+        'import { cn } from "@/lib/utils";',
+        "import {",
+        "  native,",
+        "  type Entry as Row,",
+        '} from "@/lib/native";',
+        "const rows: Row[] = [];",
+        "native.open(rows);",
+      ].join("\n"),
+      "src/lib/transport.ts": 'import { native } from "./native.js";\nexport const send = () => native.send();\n',
+      "src/lib/transport.test.ts": 'vi.mock("./native", () => ({\n  native: { send: vi.fn() },\n}));\n',
+      // Another module with the same base name, and the bare word in prose.
+      "src/os/native.ts": "export const os = 1;\n",
+      "src/os/use.ts": 'import { os } from "./native";\nconst label = "native";\n',
+      "src/app/lazy.ts": 'const loaded = await import("../lib/native");\n',
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), text);
+    }
+    context.newFiles = { list: async () => [], all: async () => Object.keys(files) } as unknown as CodeContext["newFiles"];
+    const callersOf = async (target: string) =>
+      (await references(context, backend({}), { target, depth: 1, limit: 20, includeText: true })).text;
+
+    const listed = [
+      '"@/lib/native" 1, "../lib/native" 1, "./native.js" 1, "./native" 1',
+      "# imported names (files): native 2, Entry 1",
+      "src/app/App.tsx",
+      '  5\t} from "@/lib/native";',
+      "  uses\tnative 7; Row 6",
+      "src/app/lazy.ts",
+      '  1\tconst loaded = await import("../lib/native");',
+      "  uses\tloaded -",
+      "src/lib/transport.ts",
+      '  1\timport { native } from "./native.js";',
+      "  uses\tnative 2",
+      "src/lib/transport.test.ts",
+      '  1\tvi.mock("./native", () => ({',
+      "  uses\tnative 2",
+    ].join("\n");
+    expect(await callersOf("src/lib/native.ts")).toBe(
+      `# importers of src/lib/native.ts: 4 files (1 tests); written as ${listed}`,
+    );
+
+    // After the move the old path is still what the files name.
+    await rm(join(context.root, "src/lib/native.ts"));
+    expect(await callersOf("src/lib/native.ts")).toBe(
+      `# importers of src/lib/native.ts (no such file now): 4 files (1 tests); written as ${listed}`,
+    );
+    expect(await callersOf("src/lib/nativeBridge.ts")).toBe(
+      "# importers of src/lib/nativeBridge.ts (no such file now): 0 (scanned 7 files)",
+    );
+  });
+
+  it("lists Python importers, and answers a Java file with the callers of its type", async () => {
+    const context = await createContext();
+    const files: Record<string, string> = {
+      "shop/pairs.py": "def pair():\n    return 1\n",
+      "shop/cart.py": "from .pairs import pair as two\nvalue = two()\n",
+      "shop/api/views.py": "from shop.pairs import (\n    pair,\n)\nfrom .. import pairs\nprint(pair(), pairs)\n",
+      "tools/run.py": "import shop.pairs as p\nimport pairs\np.pair()\n",
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), text);
+    }
+    context.newFiles = { list: async () => [], all: async () => Object.keys(files) } as unknown as CodeContext["newFiles"];
+    const callersOf = async (target: string) =>
+      (await references(context, backend({}), { target, depth: 1, limit: 20, includeText: false })).text;
+
+    expect(await callersOf("shop/pairs.py")).toBe(
+      [
+        '# importers of shop/pairs.py: 3 files; written as "shop.pairs" 2, ".. import pairs" 1, ".pairs" 1, "pairs" 1',
+        "# imported names (files): pair 2",
+        "shop/api/views.py",
+        "  1\tfrom shop.pairs import (",
+        "  4\tfrom .. import pairs",
+        "  uses\tpair 5; pairs 5",
+        "shop/cart.py",
+        "  1\tfrom .pairs import pair as two",
+        "  uses\ttwo 2",
+        "tools/run.py",
+        "  1\timport shop.pairs as p",
+        // A bare module name is trusted because the target sits near the root.
+        "  2\timport pairs",
+        "  uses\tp 3; pairs -",
+      ].join("\n"),
+    );
+
+    expect(await callersOf(BILLING)).toBe("# callers of Billing: 0 (graph 0, text-only 0)");
+  });
+
+  it("adds to an outlined type the members that call a symbol read with it", async () => {
+    const BIG = "src/test/java/com/shop/BigTests.java";
+    const big = (rest: string[], label: string, start: number, end: number) => node(BIG, label, rest, start, end);
+    const context = await createContext({
+      extraNodes: [
+        big(["BigTests"], "Class", 3, 600),
+        big(["BigTests", "refundsTwice"], "Method", 10, 14),
+        // A lambda inside the test above: its use belongs to that test.
+        big(["BigTests", "refundsTwice", "lambda"], "Function", 12, 12),
+        big(["BigTests", "unrelated"], "Method", 20, 22),
+        big(["BigTests", "refundsLater"], "Method", 30, 32),
+      ],
+    });
+    const lines = Array.from({ length: 600 }, () => "");
+    lines[2] = "class BigTests {";
+    lines[9] = "  void refundsTwice() {";
+    lines[10] = "    billing.refund(1);";
+    lines[11] = "    run(() -> billing.refund(2));";
+    lines[13] = "  }";
+    lines[19] = "  void unrelated() {";
+    lines[20] = "    billing.charge(1);";
+    lines[21] = "  }";
+    lines[29] = "  void refundsLater() {";
+    lines[30] = "    billing.refund(3);";
+    lines[31] = "  }";
+    lines[599] = "}";
+    await mkdir(join(context.root, dirname(BIG)), { recursive: true });
+    await writeFile(join(context.root, BIG), lines.join("\n"));
+
+    const read = await readLocators(context, ["Billing.refund", "BigTests"]);
+
+    expect(read.text).toContain("# outline BigTests Class");
+    expect(read.text).toContain(
+      [
+        "# in BigTests, 2 members call refund",
+        "",
+        `# BigTests.refundsTwice Method ${BIG}:10-14`,
+        "  void refundsTwice() {",
+        "    billing.refund(1);",
+        "    run(() -> billing.refund(2));",
+        "",
+        "  }",
+        "",
+        `# BigTests.refundsLater Method ${BIG}:30-32`,
+        "  void refundsLater() {",
+        "    billing.refund(3);",
+        "  }",
+      ].join("\n"),
+    );
+    // The other member stays a row of the outline: its body is not printed.
+    expect(read.text).not.toContain("billing.charge(1);");
+
+    // Asked for alone, the type is only outlined; a small type is printed whole anyway.
+    expect((await readLocators(context, ["BigTests"])).text).not.toContain("members call");
+    expect((await readLocators(context, ["Billing.refund", "BillingTests"])).text).not.toContain(
+      "members call",
+    );
+    // The file form of the same request behaves the same way.
+    expect((await readLocators(context, ["Billing.refund", BIG])).text).toContain(
+      `# in ${BIG}, 2 members call refund`,
+    );
+  });
+
   it("prints the tests that use a symbol, whole when they are short", async () => {
     const testMethod = NODES.find((item) => item.qualifiedName.endsWith("BillingTests.refund"))!;
     const context = await createContext({

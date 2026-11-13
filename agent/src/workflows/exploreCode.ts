@@ -10,13 +10,15 @@ import {
   isContainerNode,
   isTypeNode,
   nodesAtLine,
+  nodesInFile,
   subtypesOf,
   textSearch,
   type GraphNode,
   type TextMatch,
 } from "../kernel/codeGraph.js";
 import { displayName, isTestPath } from "../kernel/displayName.js";
-import { normalizePath, parseLocator, parseSymbolLocator } from "../kernel/locator.js";
+import { couldBeFileName, normalizePath, parseLocator, parseSymbolLocator } from "../kernel/locator.js";
+import { importers } from "./importers.js";
 import {
   declarationLine,
   declarationLineNumber,
@@ -378,7 +380,12 @@ export async function references(
   backend: GcalBackendClient,
   request: ReferenceRequest,
 ): Promise<ReadResult> {
-  const resolved = await resolveTarget(context, request.target);
+  let resolved = await moduleUsers(context, request, false);
+  if (resolved === undefined) {
+    resolved = await resolveTarget(context, request.target);
+    // `native.ts` reads as a member access first, and as a file when no symbol answers.
+    if (!Array.isArray(resolved)) resolved = (await moduleUsers(context, request, true)) ?? resolved;
+  }
   if (!Array.isArray(resolved)) return resolved;
 
   const definitions = new Set(resolved.map((node) => node.qualifiedName));
@@ -474,6 +481,48 @@ export async function references(
     );
   }
   return { text: lines.join("\n"), ok: true };
+}
+
+/**
+ * A target that is a file: the files importing it, or, in a language that
+ * imports by name, the type the file is named after. Undefined when the target
+ * is not a file.
+ */
+async function moduleUsers(
+  context: CodeContext,
+  request: ReferenceRequest,
+  bareName: boolean,
+): Promise<GraphNode[] | ReadResult | undefined> {
+  const place = parseLocator(request.target);
+  let written: string;
+  if (place.kind === "file") {
+    if (bareName || place.startLine !== undefined) return undefined;
+    written = place.path;
+  } else {
+    if (!bareName || !couldBeFileName(place)) return undefined;
+    written = place.raw;
+  }
+
+  const found = await resolveFilePath(context, written);
+  let path: string;
+  if (typeof found === "string") path = found;
+  else if (found.length > 1) {
+    return { ok: false, text: [`# ambiguous: ${written} is ${found.length} files`, ...found.slice(0, 20)].join("\n") };
+  } else if (place.kind === "file" && /\.[A-Za-z0-9]+$/.test(written)) {
+    // Not there (any more): a moved file is still named by the files that import it.
+    path = isAbsolute(written) ? normalizePath(relative(context.root, written)) : written;
+  } else return undefined;
+
+  const listed = await importers(context, path, {
+    limit: request.limit,
+    exists: existsSync(join(context.root, path)),
+  });
+  if (listed !== undefined) return listed;
+
+  const stem = path.slice(path.lastIndexOf("/") + 1).replace(/\.[A-Za-z0-9]+$/, "");
+  const type = (await nodesInFile(context.client, path)).find((node) => isTypeNode(node) && node.name === stem);
+  if (type !== undefined) return [type];
+  return { ok: false, text: `# not found: ${path} declares no type named ${stem}; name a symbol of it` };
 }
 
 export async function callees(

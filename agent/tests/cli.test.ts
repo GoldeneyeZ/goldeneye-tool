@@ -245,6 +245,26 @@ describe("GCAL CLI", () => {
     });
   });
 
+  it("answers a lookup that finds nothing with exit status 0, so a command chain goes on", async () => {
+    // A graph that holds nothing.
+    const tool = vi.fn(async (name: string) => (name === "index_status" ? { root_path: tmpdir() } : {}));
+    const writes: string[] = [];
+
+    const exitCode = await runCli({
+      argv: ["node", "gcal", "callers", "Missing.member"],
+      env: {},
+      currentDirectory: "C:\\code\\example\\src",
+      homeDir: "C:\\Users\\example",
+      resolveProject: async () => "registered-project",
+      createClient: () => fakeClient({ tool }),
+      writeOut: (text) => writes.push(text),
+      writeErr: () => undefined,
+    });
+
+    expect(writes.join("")).toContain("# not found: Missing.member");
+    expect(exitCode).toBe(0);
+  });
+
   it("suggests init when the current directory is not registered", async () => {
     const errors: string[] = [];
     const createClient = vi.fn(() => fakeClient());

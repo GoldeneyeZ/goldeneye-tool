@@ -90,7 +90,7 @@ interface SearchCommandOptions {
 
 interface TraceCommandOptions {
   depth: number;
-  limit: number;
+  limit?: number;
   text: boolean;
 }
 
@@ -199,9 +199,23 @@ async function codeContext(deps: ProgramDeps): Promise<CodeContext | undefined> 
   };
 }
 
+// A second call to see the rows a first one cut costs far more than the rows:
+// a refactor needs every caller, and most symbols have fewer than this.
+const GRAPH_TRACE_ROWS = 60;
+const RAW_TRACE_ROWS = 20;
+
 function emit(deps: ProgramDeps, result: ReadResult): void {
   if (result.text.length > 0) writeLine(deps.writeOut, result.text);
   if (!result.ok) throw new CommandFailedError();
+}
+
+/**
+ * Prints the result of a lookup. "Not found", "ambiguous" and "no matches" are
+ * answers, not failures: agents chain lookups with `&&`, and a failing exit
+ * code would skip the commands that follow.
+ */
+function answer(deps: ProgramDeps, result: ReadResult): void {
+  if (result.text.length > 0) writeLine(deps.writeOut, result.text);
 }
 
 function pathAlias(): Option {
@@ -242,7 +256,7 @@ export function createProgram(deps: ProgramDeps): Command {
       // `search <pattern> [paths...] -C n` is a grep in every way but its name.
       if (options.context !== undefined) {
         const context = await requireContext(deps, "search -C");
-        emit(
+        answer(
           deps,
           await grepCode(context, {
             pattern: queries[0],
@@ -262,7 +276,7 @@ export function createProgram(deps: ProgramDeps): Command {
 
       const context = await codeContext(deps);
       if (context !== undefined) {
-        emit(
+        answer(
           deps,
           await searchCode(context, deps.client, {
             queries: [...queries, ...options.query],
@@ -340,7 +354,7 @@ export function createProgram(deps: ProgramDeps): Command {
     .option("--limit <n>", "maximum matching symbols", positiveNumberOption, 30)
     .action(async (pattern: string, paths: string[], options: GrepCommandOptions) => {
       const context = await requireContext(deps, "grep");
-      emit(
+      answer(
         deps,
         await grepCode(context, {
           pattern,
@@ -431,7 +445,7 @@ export function createProgram(deps: ProgramDeps): Command {
           includeText: false,
         });
         if (!inbound.ok) {
-          emit(deps, inbound);
+          answer(deps, inbound);
           return;
         }
         const outbound = await callees(context, deps.client, {
@@ -521,7 +535,7 @@ export function createProgram(deps: ProgramDeps): Command {
           }
           read.text = sections.join("\n\n");
         }
-        emit(deps, read);
+        answer(deps, read);
         return;
       }
 
@@ -583,7 +597,7 @@ export function createProgram(deps: ProgramDeps): Command {
           return;
         }
       }
-      emit(deps, await readLocators(context, [target], { detail: "outline" }));
+      answer(deps, await readLocators(context, [target], { detail: "outline" }));
     });
 
   program
@@ -592,17 +606,17 @@ export function createProgram(deps: ProgramDeps): Command {
     .description("call sites of a symbol: graph edges plus text references")
     .argument("<symbol>")
     .option("--depth <n>", "trace depth", numberOption, 1)
-    .option("--limit <n>", "maximum rows", numberOption, 20)
+    .option("--limit <n>", "maximum rows (default: 60 from the graph, 20 otherwise)", numberOption)
     .option("--no-text", "graph edges only")
     .action(async (qualifiedName: string, options: TraceCommandOptions) => {
       const context = await codeContext(deps);
       if (context !== undefined) {
-        emit(
+        answer(
           deps,
           await references(context, deps.client, {
             target: qualifiedName,
             depth: options.depth,
-            limit: options.limit,
+            limit: options.limit ?? GRAPH_TRACE_ROWS,
             includeText: options.text,
           }),
         );
@@ -610,7 +624,7 @@ export function createProgram(deps: ProgramDeps): Command {
       }
 
       const trace = await deps.client.callers(qualifiedName, { depth: options.depth });
-      writeBoundedTrace(deps, "callers", trace, options.limit);
+      writeBoundedTrace(deps, "callers", trace, options.limit ?? RAW_TRACE_ROWS);
     });
 
   program
@@ -618,23 +632,23 @@ export function createProgram(deps: ProgramDeps): Command {
     .description("what a symbol calls")
     .argument("<symbol>")
     .option("--depth <n>", "trace depth", numberOption, 1)
-    .option("--limit <n>", "maximum rows", numberOption, 20)
+    .option("--limit <n>", "maximum rows (default: 60 from the graph, 20 otherwise)", numberOption)
     .action(async (qualifiedName: string, options: TraceCommandOptions) => {
       const context = await codeContext(deps);
       if (context !== undefined) {
-        emit(
+        answer(
           deps,
           await callees(context, deps.client, {
             target: qualifiedName,
             depth: options.depth,
-            limit: options.limit,
+            limit: options.limit ?? GRAPH_TRACE_ROWS,
           }),
         );
         return;
       }
 
       const trace = await deps.client.callees(qualifiedName, { depth: options.depth });
-      writeBoundedTrace(deps, "callees", trace, options.limit);
+      writeBoundedTrace(deps, "callees", trace, options.limit ?? RAW_TRACE_ROWS);
     });
 
   program
@@ -645,7 +659,7 @@ export function createProgram(deps: ProgramDeps): Command {
     .option("--depth <n>", "inheritance levels to follow", positiveNumberOption, 1)
     .action(async (target: string, options: { depth: number }) => {
       const context = await requireContext(deps, "impls");
-      emit(deps, await implementations(context, target, Math.min(options.depth, 4)));
+      answer(deps, await implementations(context, target, Math.min(options.depth, 4)));
     });
 
   program

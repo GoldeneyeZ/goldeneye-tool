@@ -62,6 +62,17 @@ export interface ReadResult {
   ok: boolean;
   /** A smaller rendering (an outline) for when a batch exceeds the output budget. */
   compact?: () => Promise<string>;
+  /** Set when the item was printed as an outline: what it covers. */
+  outlined?: OutlinedRange;
+  /** The functions and methods the item resolved to. */
+  callables?: GraphNode[];
+}
+
+interface OutlinedRange {
+  name: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
 }
 
 export interface ReadOptions {
@@ -92,6 +103,18 @@ export async function readLocators(
     }
   }
 
+  // `get Billing.charge BillingTests`: the second item is too large to print
+  // and comes back as an outline. What is wanted from it is the part that
+  // concerns the first item, and reading that otherwise takes another call.
+  const callables = results.flatMap((result) => result.callables ?? []);
+  if (callables.length > 0) {
+    for (const result of results) {
+      if (result.outlined === undefined) continue;
+      const related = await relatedMembers(context, result.outlined, callables);
+      if (related !== undefined) result.text += `\n\n${related}`;
+    }
+  }
+
   // Over budget: the largest whole types become outlines first, so every item
   // stays usable instead of being cut mid-body.
   const texts = results.map((result) => result.text);
@@ -117,6 +140,87 @@ export async function readLocators(
   };
 }
 
+const RELATED_MEMBERS_SHOWN = 4;
+const RELATED_MEMBER_MAX_LINES = 40;
+const RELATED_LINES_LISTED = 12;
+const NON_CALLABLE_LABELS = new Set(["Variable", "Field", "Constant", "Property", "Parameter"]);
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isCallable(node: GraphNode): boolean {
+  return !isTypeNode(node) && !isContainerNode(node) && !NON_CALLABLE_LABELS.has(node.label);
+}
+
+/**
+ * The functions and methods inside an outlined range that call one of
+ * `targets`: the first few whole, the rest as line numbers.
+ */
+async function relatedMembers(
+  context: CodeContext,
+  outlined: OutlinedRange,
+  targets: GraphNode[],
+): Promise<string | undefined> {
+  const lines = await context.reader.lines(outlined.filePath);
+  if (lines === undefined) return undefined;
+  const names = [...new Set(targets.map((node) => node.name))];
+  const called = new RegExp(`\\b(?:${names.map(escapeRegExp).join("|")})\\s*\\(`);
+  const hits: number[] = [];
+  for (let line = outlined.startLine; line <= Math.min(outlined.endLine, lines.length); line += 1) {
+    if (called.test(lines[line - 1])) hits.push(line);
+  }
+  if (hits.length === 0) return undefined;
+
+  let inFile: GraphNode[];
+  try {
+    inFile = (await nodesInFile(context.client, outlined.filePath)).filter(isCallable);
+  } catch {
+    return undefined;
+  }
+  const defined = new Set(targets.map((node) => node.qualifiedName));
+  const members = new Map<string, GraphNode>();
+  const loose: number[] = [];
+  for (const line of hits) {
+    const around = inFile.filter(
+      (node) =>
+        node.startLine <= line &&
+        node.endLine >= line &&
+        node.startLine >= outlined.startLine &&
+        node.endLine <= outlined.endLine,
+    );
+    if (around.length === 0) {
+      loose.push(line);
+      continue;
+    }
+    // A use inside a lambda belongs to the method around it.
+    const member = around.reduce((widest, node) =>
+      node.endLine - node.startLine > widest.endLine - widest.startLine ? node : widest,
+    );
+    if (!defined.has(member.qualifiedName)) members.set(member.qualifiedName, member);
+  }
+  if (members.size === 0 && loose.length === 0) return undefined;
+
+  const whole = [...members.values()].filter(
+    (member) => member.endLine - member.startLine + 1 <= RELATED_MEMBER_MAX_LINES,
+  );
+  const shown = whole.slice(0, RELATED_MEMBERS_SHOWN);
+  const listed = [
+    ...[...members.values()].filter((member) => !shown.includes(member)).map((member) => member.startLine),
+    ...loose,
+  ].sort((left, right) => left - right);
+  const sections = [
+    `# in ${outlined.name}, ${members.size} member${members.size === 1 ? "" : "s"} call ${names.join(", ")}`,
+  ];
+  for (const member of shown) sections.push(await renderSymbol(context, member));
+  if (listed.length > 0) {
+    const lineList = listed.slice(0, RELATED_LINES_LISTED).join(", ");
+    const more = listed.length > RELATED_LINES_LISTED ? `, +${listed.length - RELATED_LINES_LISTED}` : "";
+    sections.push(`# more at lines ${lineList}${more}: gcal get ${outlined.filePath}:<line>`);
+  }
+  return sections.join("\n\n");
+}
+
 export async function readLocator(
   context: CodeContext,
   raw: string,
@@ -138,9 +242,26 @@ export async function readLocator(
         : `\n# also declared: ${declared.slice(0, ALSO_DECLARED_MAX).map(location).join(", ")}${
             declared.length > ALSO_DECLARED_MAX ? `, +${declared.length - ALSO_DECLARED_MAX}` : ""
           }`;
+    const detail = options.detail ?? "auto";
+    const outlinedType = resolution.nodes.find(
+      (node) =>
+        isTypeNode(node) &&
+        (detail === "outline" ||
+          (detail === "auto" && node.endLine - node.startLine + 1 > FULL_SOURCE_MAX_LINES)),
+    );
     return {
       text: blocks.join("\n\n") + alsoDeclared,
       ok: true,
+      outlined:
+        outlinedType === undefined
+          ? undefined
+          : {
+              name: displayName(outlinedType, context.project),
+              filePath: outlinedType.filePath,
+              startLine: outlinedType.startLine,
+              endLine: outlinedType.endLine,
+            },
+      callables: resolution.nodes.filter(isCallable),
       compact:
         options.detail !== "outline" && resolution.nodes.some(outlinable)
           ? async () => {
@@ -569,7 +690,11 @@ async function readFileLocator(
     };
   }
 
-  return { ok: true, text: await renderFileOutline(context, resolved, lines) };
+  return {
+    ok: true,
+    text: await renderFileOutline(context, resolved, lines),
+    outlined: { name: resolved, filePath: resolved, startLine: 1, endLine: lines.length },
+  };
 }
 
 /**

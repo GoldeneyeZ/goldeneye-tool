@@ -123,6 +123,7 @@ gcal search "*Test" --label Class --file "src/test/.*"
 gcal symbol "cancel.*" --qn ".*BookingService.*"   # regular expression on names
 
 gcal callers Billing.charge                 # call graph plus text references
+gcal callers src/lib/native.ts              # a file: every file that imports it, and the lines using what it imports
 gcal callees Billing.charge --depth 2
 gcal impls PaymentGateway                   # implementations and subclasses
 
@@ -147,7 +148,7 @@ Output is compact and reusable. Symbol rows are
 `Type.member<TAB>Kind<TAB>path:line<TAB>declaration`; source blocks start with
 `# Type.member Kind path:start-end`, so they can be passed back to `gcal get` or
 used directly as edit targets. Limits default to 5 rows for `search` and
-`symbol` and 20 for `callers` and `callees`; override with `--limit`.
+`symbol` and 60 for `callers` and `callees`; override with `--limit`.
 
 Behaviors worth knowing:
 
@@ -162,6 +163,18 @@ Behaviors worth knowing:
 - `callers` marks each row `call` (graph edge) or `text` (reference the graph
   did not resolve, such as a call through an interface). Use `--no-text` for
   graph edges only.
+- `callers` given a file lists its importers: imports, re-exports, dynamic
+  imports and test mocks, under each spelling of the path (alias, relative,
+  with or without extension), for JavaScript and TypeScript, Python, C-family
+  includes, and assets imported by path. It answers for a path that no longer
+  exists, which is how to find what a moved file left behind. In languages
+  that import by name (Java, Go, Rust, ...) it answers with the callers of the
+  type the file is named after.
+- `get` given a symbol together with a type or file too long to print whole
+  also prints the members of that type that call the symbol.
+- A lookup that finds nothing (`# not found`, `# ambiguous`, `# no text
+  matches`) exits 0, so a chain written with `&&` goes on; `replace`, `check`
+  and backend failures keep a failing exit status.
 - Several commands can be chained in one shell call: `gcal get A; gcal callers A.run`.
 
 `gcal get <name> --chunk <n> [--expected-source-sha <sha256>]` remains available

@@ -77,6 +77,8 @@ With the Goldeneye backend and a selected project, commands answer from the grap
 - `inspect`: candidate block when applicable, selected metadata, warnings, inbound/outbound sections, no full source.
 - `get`: one `# name Kind path:start-end` header per item, then its source; an outline for a type or file above 500 lines; with `--tests`, the tests that use each symbol.
 - `grep`, `callers`, `callees`, `impls`: the file path once, then indented rows that keep the line as it is in the file. A cut `grep` names the matching files it did not show.
+- `callers` on a file: a header with the number of importing files and each spelling of the path, then per file the lines that name the module and a `uses` row with the lines using what it imports.
+- A lookup that finds nothing prints `# not found`, `# ambiguous` or `# no text matches` and exits 0.
 - `replace`: a count line, then each changed line by file, then where else the pattern still matches.
 - `check`: the lines that do not parse in the files that differ from HEAD.
 - `arch`: directory layout by file count. `status` and `index`: compact JSON.
