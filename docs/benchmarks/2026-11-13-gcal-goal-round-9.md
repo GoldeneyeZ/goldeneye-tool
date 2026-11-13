@@ -322,3 +322,15 @@ Their recorded traces were not read for this.
   cannot show the effect on `callers` answers.
 - The prose rule of `arch` is a list of extensions (`md`, `mdx`, `markdown`,
   `txt`, `rst`, `adoc`). It was checked on two repositories.
+- Everything after the one agent run of this round (the Java, Go, C, Makefile
+  and PowerShell rules of the index, the order of `search`, `get` on a C
+  typedef) was verified without a model only: unit and corpus tests, node and
+  edge counts of indexes built again, the operations benchmark, the replay of
+  recorded patches. None of it has been in front of an agent.
+- The index rules remove symbols. What was checked is that call edges did not
+  drop and that the names removed were not declarations; a lookup that
+  happened to work through one of them (a struct known only by a forward
+  declaration, for one) now falls back to text.
+- The audit read nine indexes: Java, Python, Rust, TypeScript, Go and C in
+  volume, the rest in passing. It says nothing about the other languages of
+  the grammar pack.
