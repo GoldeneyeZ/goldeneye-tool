@@ -1,4 +1,4 @@
-# GCAL improvement goal, round 9: lambdas in the index, the layout of a repository with many notes
+# GCAL improvement goal, round 9: lambdas and package lines in the index, the layout, the slow pre-warm
 
 Date: 2026-11-13. Follows `2026-11-13-gcal-goal-round-8.md`.
 
@@ -136,6 +136,47 @@ starts its agent sooner? Reads of the new worktree are served from memory:
 writes, the pre-warm takes it, and the pre-warm is not part of the wall time
 compared between the lanes (`wall_ms` is the agent's time only). What was not
 measured is the end of a run, where both lanes write (patches) on that disk.
+
+## An audit of the index's names, and what it found
+
+With no tokens left, the next point was taken from the index itself: after
+lambdas, what else does it call by a name nobody wrote? Three scripts read the
+SQLite index of seven repositories indexed with the new binary (abyssal, LOD,
+PyFinance, Spring's three modules, terax, ViV-Wallet, goldeneye-tool) next to
+the files.
+
+| Question | Result |
+|---|---|
+| Is the symbol's name written in the first 8 lines of its span? | 174,882 symbols; 66 are not, of which 46 are Java declarations under a long annotation, 18 uses of a zsh variable and 2 YAML anchors |
+| Is the name one identifier? | 183,434 symbols; 94 are a JavaScript or TypeScript destructuring pattern taken whole (`{ rows }`, `[isOpen, setIsOpen]`). Left as they are: the search finds them by either name. |
+| Is a type or function declared on a `package`, `import` or `namespace` line? | **2,920 Java classes are `package` lines**, named after the first segment of the package: one `org` per file in Spring (2,614 of its 8,549 classes), one `fr` per file in abyssal |
+
+The third is a defect of the Java language rules as they were
+written: `package_declaration` is listed among the kinds that declare a class.
+It was visible in the operations benchmark, in an answer that passed
+its scenario: `gcal search 'MergedAnnotations|TypeDescriptor' --label Class`
+returned five rows, two of them `org Class ...MergedAnnotations.java:17
+package org.springframework.core.annotation;`.
+
+**Fix** (commit `de7ad90`): a Java `package` line declares no symbol.
+
+Verification without a model:
+
+- A new corpus test, seen failing before the change (`org` was two classes
+  in a two-file fixture) and passing after it; it also asserts the call from
+  one file to a class of another package is still linked. The 159-language
+  corpus, `cargo test --workspace` (101 test binaries), clippy and fmt pass.
+- Spring's three modules indexed again: 50,474 nodes become 47,860, which is
+  2,614 fewer, the number of files.
+- Operations benchmark: Spring 19 of 19, 20 calls, 11,666 tokens (before:
+  11,735; the one scenario that changed is the search above, 198 tokens to
+  129); goldeneye-tool 12 of 12, 2,978 tokens, unchanged.
+- Replay of the 16 recorded runs of the three Java tasks on clones indexed
+  again: the same verdicts (of the 2 that failed their grader the constructor
+  call is reported, the nullness error is not; of the 14 that passed, none is
+  reported).
+
+No agent run was made on this binary.
 
 ## Limits
 
