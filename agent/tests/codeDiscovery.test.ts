@@ -476,6 +476,34 @@ describe("reading code", () => {
     expect(leadingDocStart(python, 4)).toBe(2);
   });
 
+  it("follows a forward typedef to the struct it names", async () => {
+    const header = "src/store/store.h";
+    const other = "src/pipeline/pipeline.h";
+    const source = "src/store/store.c";
+    const context = await createContext({
+      extraNodes: [
+        node(header, "Type", ["cbm_store_t"], 3, 3),
+        node(other, "Type", ["cbm_store_t"], 1, 1),
+        node(source, "Class", ["cbm_store"], 2, 5),
+      ],
+    });
+    await mkdir(join(workspace!, "src/store"), { recursive: true });
+    await mkdir(join(workspace!, "src/pipeline"), { recursive: true });
+    await writeFile(join(workspace!, header), "#pragma once\n\ntypedef struct cbm_store cbm_store_t;\n");
+    await writeFile(join(workspace!, other), "typedef struct cbm_store cbm_store_t;\n");
+    await writeFile(join(workspace!, source), '#include "store.h"\nstruct cbm_store {\n    int handle;\n    int open;\n};\n');
+
+    // The same typedef in two headers is one type, and the struct is what was asked for.
+    const read = await readLocators(context, ["cbm_store_t"]);
+
+    expect(read.ok).toBe(true);
+    expect(read.text).not.toContain("# ambiguous");
+    expect(read.text).toContain("typedef struct cbm_store cbm_store_t;");
+    expect(read.text).toContain(`cbm_store Class ${source}:2-5`);
+    expect(read.text).toContain("    int handle;");
+    expect(read.text).toContain(`# also declared: ${other}:1`);
+  });
+
   it("reads symbols from files created after indexing", async () => {
     const context = await createContext();
     const created = "src/main/java/com/shop/Refunds.java";

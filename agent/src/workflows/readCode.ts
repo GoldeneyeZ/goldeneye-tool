@@ -276,7 +276,11 @@ export async function readLocator(
   const resolution = await resolveSymbol(context.client, context.project, locator);
   if (resolution.kind === "resolved") {
     const blocks: string[] = [];
-    for (const node of resolution.nodes) blocks.push(await renderSymbol(context, node, options));
+    for (const node of resolution.nodes) {
+      const rendered = await renderSymbol(context, node, options);
+      const named = await typedefTarget(context, node, options, resolution.nodes);
+      blocks.push(named === undefined ? rendered : `${rendered}\n\n${named}`);
+    }
     const outlinable = (node: GraphNode) =>
       isTypeNode(node) && node.endLine - node.startLine + 1 > BATCH_OUTLINE_MIN_LINES;
     const declared = resolution.declarations ?? [];
@@ -321,6 +325,23 @@ export async function readLocator(
   }
 
   if (resolution.kind === "ambiguous") {
+    // C headers repeat `typedef struct tag name_t;`: one type, not a choice.
+    const tags = await Promise.all(resolution.nodes.map((node) => forwardTypedefTag(context, node)));
+    if (tags[0] !== undefined && tags.every((tag) => tag === tags[0])) {
+      const [first, ...others] = resolution.nodes;
+      const named = await typedefTarget(context, first, options, resolution.nodes);
+      return {
+        ok: true,
+        symbols: [first],
+        text: [
+          await renderSymbol(context, first, options),
+          ...(named === undefined ? [] : ["", named]),
+          `# also declared: ${others.slice(0, ALSO_DECLARED_MAX).map(location).join(", ")}${
+            others.length > ALSO_DECLARED_MAX ? `, +${others.length - ALSO_DECLARED_MAX}` : ""
+          }`,
+        ].join("\n"),
+      };
+    }
     return renderAmbiguous(context, locator, resolution.nodes);
   }
 
@@ -397,6 +418,43 @@ export async function readLocator(
         : ["no symbol with that name is indexed; try: gcal grep <text>"]),
     ].join("\n"),
   };
+}
+
+const FORWARD_TYPEDEF = /^\s*typedef\s+(?:struct|union|enum)\s+([A-Za-z_]\w*)\s*\*?\s*([A-Za-z_]\w*)\s*;/;
+
+/** `typedef struct tag name_t;` on one line: the tag, whose definition holds the members. */
+async function forwardTypedefTag(context: CodeContext, node: GraphNode): Promise<string | undefined> {
+  if (node.endLine !== node.startLine) return undefined;
+  const lines = await context.reader.lines(node.filePath);
+  const match = FORWARD_TYPEDEF.exec(lines?.[node.startLine - 1] ?? "");
+  return match !== null && match[2] === node.name ? match[1] : undefined;
+}
+
+/**
+ * The source of the struct, union or enum a forward typedef names. Asked for
+ * `name_t`, the one-line typedef alone costs a second call for the members.
+ */
+async function typedefTarget(
+  context: CodeContext,
+  node: GraphNode,
+  options: ReadOptions,
+  shown: GraphNode[],
+): Promise<string | undefined> {
+  const tag = await forwardTypedefTag(context, node);
+  if (tag === undefined) return undefined;
+  const locator = parseLocator(tag);
+  if (locator.kind === "file") return undefined;
+  const target = await resolveSymbol(context.client, context.project, locator);
+  if (target.kind !== "resolved") return undefined;
+  const bodies = target.nodes.filter(
+    (candidate) =>
+      candidate.endLine > candidate.startLine &&
+      !shown.some((other) => other.qualifiedName === candidate.qualifiedName),
+  );
+  if (bodies.length === 0) return undefined;
+  const blocks = [];
+  for (const body of bodies) blocks.push(await renderSymbol(context, body, options));
+  return blocks.join("\n\n");
 }
 
 const TEXT_LOCATED_NOTE = "# note: not in the index; declaration located by text";

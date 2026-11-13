@@ -114,6 +114,7 @@ gcal init                                   # index and register the project (on
 gcal get Billing.charge Ledger.record       # source; several names, every overload
 gcal get Billing                            # whole type; a member outline above 500 lines
 gcal get Billing --full                     # whole source whatever the size
+gcal get store_t                            # C: a forward typedef, and the struct it names
 gcal get src/app/Billing.java:120-180       # raw line range
 gcal outline Billing                        # force the outline
 
