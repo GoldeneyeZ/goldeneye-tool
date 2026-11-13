@@ -476,6 +476,28 @@ describe("reading code", () => {
     expect(leadingDocStart(python, 4)).toBe(2);
   });
 
+  it("finds a Go method by its receiver", async () => {
+    const providers = "internal/parser/providers.go";
+    const context = await createContext({
+      extraNodes: [node(providers, "Method", ["Parse"], 3, 3), node(providers, "Method", ["Parse#2"], 5, 5)],
+    });
+    await mkdir(join(workspace!, "internal/parser"), { recursive: true });
+    await writeFile(
+      join(workspace!, providers),
+      "package parser\n\nfunc (p *claudeProvider) Parse(path string) error { return nil }\n\nfunc (p codexProvider) Parse(path string) error { return p.read(path) }\n",
+    );
+
+    const exact = await readLocators(context, ["parser.codexProvider.Parse"]);
+    expect(exact.text).toContain("return p.read(path)");
+    expect(exact.text).not.toContain("claudeProvider");
+
+    // Written with another case than the receiver has.
+    const cased = await readLocators(context, ["ClaudeProvider.Parse"]);
+    expect(cased.text).toContain("func (p *claudeProvider) Parse(path string) error { return nil }");
+    expect(cased.text).not.toContain("# not found");
+    expect(cased.text).not.toContain("codexProvider");
+  });
+
   it("follows a forward typedef to the struct it names", async () => {
     const header = "src/store/store.h";
     const other = "src/pipeline/pipeline.h";

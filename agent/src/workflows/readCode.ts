@@ -345,6 +345,15 @@ export async function readLocator(
     return renderAmbiguous(context, locator, resolution.nodes);
   }
 
+  // Go: a method is indexed under its package, not under its receiver, so
+  // `Type.Method` is unknown as written. The receiver is on the declaration.
+  const ofReceiver = await goMethodsOfReceiver(context, locator, resolution.suggestions);
+  if (ofReceiver.length > 0) {
+    const blocks = [];
+    for (const node of ofReceiver) blocks.push(await renderSymbol(context, node, options));
+    return { ok: true, text: blocks.join("\n\n"), callables: ofReceiver, symbols: ofReceiver };
+  }
+
   // `Makefile` and `Dockerfile` look like symbols; the working tree knows better.
   const namesFile = async () =>
     ((await context.newFiles?.all()) ?? []).some(
@@ -418,6 +427,34 @@ export async function readLocator(
         : ["no symbol with that name is indexed; try: gcal grep <text>"]),
     ].join("\n"),
   };
+}
+
+const GO_RECEIVER = /^func\s*\(\s*(?:\w+\s+)?\*?\s*(\w+)(?:\[[^\]]*\])?\s*\)\s*(\w+)\s*[([]/;
+
+/**
+ * Of the methods suggested for `Owner.member`, those declared in Go with the
+ * receiver `Owner`; with another case of the same name (`owner`) when none
+ * has it exactly.
+ */
+async function goMethodsOfReceiver(
+  context: CodeContext,
+  locator: SymbolLocator,
+  suggestions: GraphNode[],
+): Promise<GraphNode[]> {
+  if (locator.segments.length < 2) return [];
+  const owner = locator.segments[locator.segments.length - 2];
+  const member = locator.segments[locator.segments.length - 1];
+  const received: { node: GraphNode; receiver: string }[] = [];
+  for (const node of suggestions) {
+    if (!node.filePath.endsWith(".go") || node.name !== member) continue;
+    const lines = await context.reader.lines(node.filePath);
+    const match = GO_RECEIVER.exec(lines?.[node.startLine - 1] ?? "");
+    if (match !== null && match[2] === member) received.push({ node, receiver: match[1] });
+  }
+  const exact = received.filter((item) => item.receiver === owner);
+  const chosen =
+    exact.length > 0 ? exact : received.filter((item) => item.receiver.toLowerCase() === owner.toLowerCase());
+  return chosen.map((item) => item.node);
 }
 
 const FORWARD_TYPEDEF = /^\s*typedef\s+(?:struct|union|enum)\s+([A-Za-z_]\w*)\s*\*?\s*([A-Za-z_]\w*)\s*;/;
