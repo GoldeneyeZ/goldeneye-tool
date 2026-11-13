@@ -94,7 +94,7 @@ fn known_label_and_field(
             "method_declaration" => ("Method", "name"),
             "field_declaration" => ("Field", "name"),
             "short_var_declaration" => ("Variable", "left"),
-            "var_spec" => ("Variable", "name"),
+            "var_spec" | "const_spec" => ("Variable", "name"),
             "import_spec" => ("Import", "path"),
             _ => return None,
         },

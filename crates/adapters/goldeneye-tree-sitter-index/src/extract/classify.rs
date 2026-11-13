@@ -38,15 +38,32 @@ pub(super) use tree::{
     find_descendant_kind, first_identifier, first_name_like, gomod_requirement_name,
 };
 
-/// Type-shaped nodes that would otherwise become a second symbol, or a symbol
-/// named after whatever identifier comes first inside them.
-fn declares_no_type_of_its_own(language: &str, node: Node<'_>) -> bool {
+/// Nodes that would otherwise become a second symbol, or a symbol named after
+/// whatever identifier comes first inside them.
+fn declares_nothing_of_its_own(language: &str, node: Node<'_>) -> bool {
     let kind = node.kind();
+    // Makefile: the rule is the symbol, named by its target. The commands
+    // under it were a second function, named after the first variable they use.
+    if language == "makefile" && kind == "recipe" {
+        return true;
+    }
     // Go: `type X struct { .. }` is a declaration around a specification. The
     // specification is the symbol (struct, interface or type); the declaration
     // was a class of the same name on the same line, and in a grouped
     // `type ( .. )` a class named after the first of the group.
-    if language == "go" && kind == "type_declaration" {
+    // The same holds for `var` and `const`: each name of a declaration, also
+    // of a grouped `const ( .. )`, is a symbol through its own specification.
+    if language == "go"
+        && matches!(
+            kind,
+            "type_declaration" | "var_declaration" | "const_declaration"
+        )
+    {
+        return true;
+    }
+    // PowerShell: `$name` wherever it is read was a variable of its own. The
+    // assignment is the symbol.
+    if language == "powershell" && kind == "variable" {
         return true;
     }
     let unnamed = node.child_by_field_name("name").is_none();
@@ -81,7 +98,7 @@ pub(super) fn classify(
         // The function is the symbol; it takes the declared name.
         return None;
     }
-    if declares_no_type_of_its_own(language, node) {
+    if declares_nothing_of_its_own(language, node) {
         return None;
     }
     if let Some(definition) = classify_known(language, node, scope, source) {

@@ -580,6 +580,13 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
             ")\n",
             "\n",
             "func (ledger *Ledger) Read() int { return ledger.Total }\n",
+            "\n",
+            "var defaultLedger = Ledger{}\n",
+            "\n",
+            "const (\n",
+            "\tPhaseScan = iota\n",
+            "\tPhaseWrite\n",
+            ")\n",
         ),
     )
     .expect("write Go source");
@@ -642,6 +649,10 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
     assert_eq!(labels("Ledger"), vec!["Struct".to_owned()]);
     assert_eq!(labels("Reader"), vec!["Interface".to_owned()]);
     assert_eq!(labels("Cents"), vec!["Type".to_owned()]);
+    // Go: one symbol per variable, and one per constant of a group.
+    assert_eq!(labels("defaultLedger"), vec!["Variable".to_owned()]);
+    assert_eq!(labels("PhaseScan"), vec!["Variable".to_owned()]);
+    assert_eq!(labels("PhaseWrite"), vec!["Variable".to_owned()]);
     // C: an untagged struct is not named after its first field; an untagged
     // enum is still found by its first enumerator.
     assert_eq!(labels("capacity"), vec!["Field".to_owned()]);
@@ -652,6 +663,87 @@ fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
     // TypeScript: a class expression without a name is not called after its first method.
     assert_eq!(labels("observe"), vec!["Method".to_owned()]);
     assert_eq!(labels("Named"), vec!["Class".to_owned()]);
+}
+
+#[test]
+fn a_makefile_rule_is_one_function_named_by_its_target() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("Makefile"),
+        concat!(
+            "DIST_DIR := dist\n",
+            "\n",
+            "package: build\n",
+            "\tmkdir -p $(DIST_DIR)/bin\n",
+            "\tcp app $(DIST_DIR)/bin\n",
+            "\n",
+            "build:\n",
+            "\tgo build ./...\n",
+        ),
+    )
+    .expect("write Makefile");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index Makefile");
+
+    let labels = |name: &str| -> Vec<String> {
+        let mut found: Vec<String> = service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name)
+            .map(|hit| hit.node.label.as_str().to_owned())
+            .collect();
+        found.sort();
+        found
+    };
+
+    assert_eq!(labels("package"), vec!["Function".to_owned()]);
+    assert_eq!(labels("build"), vec!["Function".to_owned()]);
+    // The variable the commands use is the variable, not a function.
+    assert_eq!(labels("DIST_DIR"), vec!["Variable".to_owned()]);
+}
+
+#[test]
+fn a_powershell_variable_is_a_symbol_where_it_is_assigned_only() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("install.ps1"),
+        concat!(
+            "$Repo = \"owner/name\"\n",
+            "Write-Host \"https://example.test/$Repo/releases\"\n",
+            "Write-Host $Repo\n",
+        ),
+    )
+    .expect("write PowerShell source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index PowerShell");
+
+    let named: Vec<String> = service
+        .repository()
+        .search_nodes(&result.project.id, "Repo", 20)
+        .expect("search nodes")
+        .into_iter()
+        .filter(|hit| hit.node.name.trim_start_matches('$') == "Repo")
+        .map(|hit| hit.node.label.as_str().to_owned())
+        .collect();
+    assert_eq!(named, vec!["Variable".to_owned()]);
 }
 
 #[test]
