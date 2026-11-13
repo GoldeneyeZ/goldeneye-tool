@@ -233,9 +233,9 @@ name on the first line, and do two symbols of one name start on one line?
 | Finding | Count | Before, in an answer |
 |---|---|---|
 | Go: `var x = ..` is two variables, the declaration and its specification | 188 in agentsview | two rows per variable |
-| Go: a grouped `const ( A; B; C )` is one variable named `A` | 431 `const` declarations in agentsview | `B` and `C` were no symbols: `shelleyContentToolUse`, fourth of its group, was found by text only |
+| Go: a grouped `const ( A; B; C )` is one variable named `A` | 431 `const` declarations in the indexes read | `B` and `C` were no symbols: `shelleyContentToolUse`, fourth of its group, was found by text only |
 | Makefile: the commands under a target are a second function, named after the first variable they use | all 23 recipes of agentsview's Makefile | a function `CURDIR`, a function `TAURI_SIGNING_PRIVATE_KEY` |
-| PowerShell: `$name` is a variable wherever it is read | 878 in the two repositories | one row per use |
+| PowerShell: `$name` is a variable wherever it is read | 878 in the indexes read (the count in commit `829d3ea` says "the two repositories"; it is of all eight) | one row per use |
 
 **Fix** (commit `829d3ea`): in Go each specification of a `var` or `const`
 declaration is the symbol; a Makefile rule is one function, named by its
