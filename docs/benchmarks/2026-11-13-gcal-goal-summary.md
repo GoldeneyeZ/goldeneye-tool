@@ -146,7 +146,7 @@ shell.
 
 ## What was changed
 
-58 commits on `master`, `ce7d73a` to the last one.
+60 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
