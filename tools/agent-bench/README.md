@@ -65,6 +65,27 @@ Reported per lane: calls, failed calls, output tokens (characters / 4), wall tim
 
 A step written as `{ "cmd": ..., "when": "after-failure" }` is a recovery attempt and runs only once an earlier step of the chain exited non-zero. GCAL chains start from the name an agent would naturally type; vanilla chains are deliberately tight (`rg` with bounded context and exact globs), so the comparison is conservative for GCAL.
 
+### Replaying recorded patches against `gcal check` (no model)
+
+Every one-shot run leaves the agent's final diff and the grader's verdict.
+`replay-check.mjs` applies each recorded diff to a clone of the task's
+repository at its base commit, indexed at that commit, runs `gcal check` on
+the result and prints what the check reports beyond parsing next to the
+verdict. A report on a run that passed is a false alarm; no report on a run
+that failed is a miss. A change to `gcal check` is measured this way before
+any agent run is spent on it.
+
+```powershell
+node tools/agent-bench/bin/replay-check.mjs `
+  --state target/replay `
+  --attempts "^m-gr" `
+  goldeneye-rename-refactor-dirty terax-fuzzy-diacritics
+```
+
+`--types` links the repository's `node_modules` into the clone for the time of
+each check and runs `gcal check --types`. The task's repository is only read.
+Clones and indexes are kept in `--state` and reused.
+
 ### Task variants
 
 A task may start from a dirty working tree and may be graded on what the agent writes instead of on tests:

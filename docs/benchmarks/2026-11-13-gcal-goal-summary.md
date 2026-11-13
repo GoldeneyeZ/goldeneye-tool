@@ -105,7 +105,7 @@ shell.
 
 ## What was changed
 
-27 commits on `master`, `ce7d73a` to the last one.
+28 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -118,7 +118,7 @@ shell.
 | Exit status | A lookup that finds nothing exits 0 | `&&` chains cancelled by "not found" |
 | Daemon | Loads the project graph after the first answer of a session | 1.2 to 3 s on the first graph query |
 | Skill and lane prompt | The new lookups; `\x22`/`\x27` for quotes in PowerShell patterns; `--tests` for one to three symbols | commands lost to quoting; `--tests` on 13 names |
-| Harness | Overlays apply with either line ending; a failed preparation is prepared again; three configurations pointed at another machine layout | four refusals before any model call |
+| Harness | Overlays apply with either line ending; a failed preparation is prepared again; three configurations pointed at another machine layout; `replay-check.mjs` replays recorded patches against `gcal check` without a model | four refusals before any model call; the need to verify a check without spending runs |
 
 ## Failures and incidents, in one place
 
