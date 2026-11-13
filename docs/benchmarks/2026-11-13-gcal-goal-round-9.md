@@ -305,6 +305,39 @@ the methods it asks for are read from its source and listed by receiver. It is
 a text answer: a type is not checked to have all the methods. One unit test;
 `pnpm check` passes (229 tests); operations benchmark unchanged.
 
+### Go methods and their receivers
+
+From the same traces: `gcal get parser.ClaudeProvider.ParseIncremental
+parser.ClaudeProvider.Parse` answered "not found" twice (636 bytes) and the
+agent asked again. The cause is in the index: the receiver's type was read as
+the first identifier of `(p *claudeProvider)`, which is `p`, so every Go
+method with a named receiver was indexed under its package (`parser.Parse`).
+Methods of one name collided, and across files one of them stayed.
+
+**Fix** (commits `ba7ed2e`, `b5c9ff7`): the receiver's type is its type. For
+a receiver whose type is declared in another file, `gcal get Owner.member`
+takes the method declared with that receiver.
+
+| agentsview, indexed again | Before | After |
+|---|---|---|
+| Methods in the index | 2,766 | 3,360 |
+| `gcal get parser.ClaudeProvider.Parse`, `teeEmitter.Emit`, `claudeProvider.Parse` | not found, or not in the index | the method |
+| Call edges | 41,382 | **38,070** |
+
+The last row is a cost. A call `x.Parse()` was linked by name to the one
+`parser.Parse` that had survived the collision; with methods under their
+types the link needs the receiver's type, which the resolver often does not
+have. Those edges pointed at one method of several of the same name, so many
+were wrong, but how many was not counted. `gcal callers` still lists the
+calls from text; `gcal callees` of a Go function now shows fewer method
+calls. This is the first thing to look at next: resolve a Go method call by
+the type of its receiver.
+
+Verification without a model: a corpus test seen failing without the fix
+(`Parse` and `Parse#2` under the package) and one unit test; the corpus (15
+tests), `cargo test --workspace`, clippy, fmt and `pnpm check` (230 tests)
+pass; operations benchmark unchanged on both corpora, neither of which is Go.
+
 ### What the keys and headings do to a search
 
 Every key of a JSON file and every Markdown heading is a symbol. On

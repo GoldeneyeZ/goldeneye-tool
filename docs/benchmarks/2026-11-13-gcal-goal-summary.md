@@ -108,7 +108,7 @@ shell.
 
 ## What was changed
 
-53 commits on `master`, `ce7d73a` to the last one.
+56 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -118,6 +118,7 @@ shell.
 | Backend, index | A Java `package` line is not a class | an audit of the names in seven indexes: 2,920 classes named `org` or `fr`, one per Java file, a third of the classes of the Spring index; two of five rows of a `search --label Class` answer |
 | Backend, index | A Go type is one symbol, not a class and a struct; a C struct or union without a tag, and a JavaScript class expression without a name, are not symbols named after their first member | the same audit on agentsview and codebase-memory-mcp: 1,563 duplicate Go types, 447 C classes named after a field (`FILE`, `count`), and 194 more that were uses or forward declarations of a struct: the classes of the C index went from 776 to 80 |
 | Backend, index | Go: one symbol per variable and per constant of a group. Makefile: a rule is one function, named by its target. PowerShell: a variable is a symbol where it is assigned | the same audit, for functions and variables: 188 duplicate Go variables, constants of groups that could not be looked up, 23 functions named after a variable, 878 variable reads |
+| Backend, index | A Go method is under the type of its receiver (the receiver's name was taken for its type); `get` also finds a method by the receiver on its declaration | `gcal get parser.ClaudeProvider.Parse` "not found" in a recorded run; 594 Go methods of agentsview were missing from the index. Cost: 8% fewer call edges on that repository |
 | `arch` | Directories of source are opened before larger directories of documents | the operations benchmark on this repository indexed again: 299 notes took the rows, `ui/src` was not shown |
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
@@ -157,6 +158,9 @@ shell.
   patches; the one run does not exercise them.
 - What the index change for lambdas does to `callers` answers in agent runs:
   no recorded run read such a row.
+- What the Go receiver fix does to answers that use the call graph: on
+  agentsview the index has 594 more methods and 3,312 fewer call edges. The
+  lost edges were links by bare name; how many were right was not counted.
 - That an agent fixes what the extended `gcal check` reports: in the two runs
   made with it the agent left nothing behind, so nothing was reported.
 - Whether the last change (one whole test as an example) raises the pass rate
@@ -190,14 +194,17 @@ shell.
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.
-4. **Audit the index in the languages not yet read.** Reading the names of
+4. **Resolve a Go method call by the type of its receiver**, to win back the
+   call edges the receiver fix of round 9 cost (41,382 to 38,070 on
+   agentsview), this time pointing at the right method.
+5. **Audit the index in the languages not yet read.** Reading the names of
    nine indexes next to their files found, at no cost in tokens, a class per
    Java `package` line, two symbols per Go type and C structs named after a
    field. It covered Java, Python, Rust, TypeScript, Go and C. Kotlin, C#,
    C++, PHP and Ruby are next. Known and left: a JavaScript destructuring
    pattern is one variable named by the whole pattern; PowerShell type
    references are classes; every JSON key is a variable.
-5. **The Spring redaction feature specifically.** Its four GCAL traces were
+6. **The Spring redaction feature specifically.** Its four GCAL traces were
    compared with the three plain-shell traces after the last run. No single
    difference explains the failures: the plain-shell agents read 189 to 227 kB
    of output in 12 to 16 calls, the GCAL agents 118 to 245 kB in 8 to 11; the
@@ -206,7 +213,7 @@ shell.
    small API mistakes with nothing compiled before grading. A third and fourth
    repetition per lane with the build allowed would say whether that rate
    differs between the lanes at all.
-6. **Move the benchmark's worktrees and caches to the NVMe disk**, for both
+7. **Move the benchmark's worktrees and caches to the NVMe disk**, for both
    lanes on the same day. Preparation of a Spring run is 45 to 57 s of
    `git worktree add` on a hard disk, and the GCAL pre-warm after it 8 to 12 s.
    For GCAL itself: open the index without creating `-wal` and `-shm` files
