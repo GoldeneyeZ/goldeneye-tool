@@ -228,7 +228,7 @@ run with GCAL).
 ### What the keys and headings do to a search
 
 Every key of a JSON file and every Markdown heading is a symbol. On
-agentsview, which has message catalogs for nine locales and 89 Markdown
+agentsview, which has 4 JSON message catalogs and 89 indexed Markdown
 files, a search for a plain word was answered with those:
 
 | `gcal search <word> --limit 20` on agentsview | Rows from JSON and Markdown, before | After |
