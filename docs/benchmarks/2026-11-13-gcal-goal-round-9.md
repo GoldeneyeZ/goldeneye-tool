@@ -296,7 +296,7 @@ gcal callers Emitter.Emit`. Repeated on the re-indexed repository:
 
 | Command | Before | After (commit `43af3ea`) |
 |---|---|---|
-| `gcal impls Emitter` | "ambiguous": the interface, or a struct field of the same name | the methods named `Emit` by receiver: `Broadcaster`, `teeEmitter` and six test doubles |
+| `gcal impls Emitter` | "ambiguous": the interface, or a struct field of the same name | the methods named `Emit` by receiver: `Broadcaster`, `teeEmitter` and the test doubles |
 | `gcal impls serviceManager` | "none in graph", then one comment line that says "implements" | the seven methods of the interface by receiver: `launchdManager`, `systemdManager` |
 
 Only a type has subtypes, so a type is taken over a field or variable of its
