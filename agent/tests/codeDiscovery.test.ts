@@ -109,6 +109,8 @@ interface FakeGraphOptions {
   subtypes?: Record<string, GraphNode[]>;
   /** Symbols indexed besides the Java fixture. */
   extraNodes?: GraphNode[];
+  /** What the backend says matched before its limit. */
+  textTotal?: number;
 }
 
 function fakeGraph(root: string, options: FakeGraphOptions = {}): ToolClient {
@@ -135,7 +137,7 @@ function fakeGraph(root: string, options: FakeGraphOptions = {}): ToolClient {
       if (toolName === "search_code") {
         options.textSearchModes?.push(args.regex === true);
         const empty = options.regexFindsNothing === true && args.regex === true;
-        return { results: empty ? [] : (options.textResults ?? []), total_results: 0 };
+        return { results: empty ? [] : (options.textResults ?? []), total_results: options.textTotal ?? 0 };
       }
       if (toolName === "search_graph") {
         const pattern = args.name_pattern === undefined ? undefined : String(args.name_pattern);
@@ -662,6 +664,18 @@ describe("exploring code", () => {
         "  7\tBilling.charge\ttext\t    record(cents);",
       ].join("\n"),
     );
+
+    // The backend read fewer places than matched: the answer says so.
+    const cut = await createContext({ textResults: [textHit(NODES[3], [7])], textTotal: 90 });
+    const partial = await references(cut, backend({}), {
+      target: "Ledger.record",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+    expect(partial.text.split("\n").at(-1)).toBe(
+      "# text references: the first 1 of 90 places were read; gcal grep '\\brecord\\s*\\(' lists every line",
+    );
   });
 
   it("lists subtypes from the graph", async () => {
@@ -723,6 +737,25 @@ describe("exploring code", () => {
     // Nothing is cut: no scan and no footer.
     const whole = await grepCode(context, { ...request, limit: 10 });
     expect(whole.text).not.toContain("# matching files not shown");
+  });
+
+  it("shows every match the backend returned unless a limit was asked for", async () => {
+    const hits = Array.from({ length: 35 }, (_, index) =>
+      textHit(node(BILLING, "Method", ["Billing", `step${index}`], index + 1, index + 1), [index + 1]),
+    );
+    const whole = await grepCode(await createContext({ textResults: hits }), { pattern: "record", regex: false });
+    expect(whole.text.split("\n")).toHaveLength(36);
+    expect(whole.text).not.toContain("more matches not shown");
+
+    const asked = await grepCode(await createContext({ textResults: hits }), { pattern: "record", regex: false, limit: 30 });
+    expect(asked.text).toContain("# ... 5 more matches not shown; give paths or raise --limit");
+
+    // The backend matched more than it returned: the default limit applies.
+    const partial = await grepCode(await createContext({ textResults: hits, textTotal: 200 }), {
+      pattern: "record",
+      regex: false,
+    });
+    expect(partial.text).toContain("# ... 170 more matches not shown; give paths or raise --limit");
   });
 
   it("reads doubled backslashes as single ones when the pattern matches nothing", async () => {
@@ -1021,6 +1054,36 @@ describe("exploring code", () => {
     // A file has no tests of its own to list, and an unknown name is reported by `get` itself.
     expect(await testsUsing(unused, BILLING)).toBeUndefined();
     expect(await testsUsing(unused, "Nope.missing")).toBeUndefined();
+
+    // With no test of the symbol, the closest test files say where one would go
+    // and the shortest shows what the project's tests look like.
+    const far = "src/test/java/com/other/FarTests.java";
+    const ledgerTest = "src/test/java/com/shop/LedgerTests.java";
+    const ledgerSource = ["package com.shop;", "", "class LedgerTests {", "  @Test", "  void records() {}", "}"];
+    for (const [path, text] of [
+      [far, "class FarTests {}\n"],
+      [ledgerTest, `${ledgerSource.join("\n")}\n`],
+    ]) {
+      await mkdir(join(unused.root, dirname(path)), { recursive: true });
+      await writeFile(join(unused.root, path), text);
+    }
+    unused.newFiles = {
+      list: async () => [],
+      all: async () => [BILLING, far, ledgerTest, "docs/test/notes.md"],
+    } as unknown as CodeContext["newFiles"];
+    expect(await testsUsing(unused, "Billing.refund")).toBe(
+      [
+        "# tests using Billing.refund: none found",
+        `# nearest test files: ${ledgerTest} (6 lines), ${far} (1 line)`,
+        "",
+        `# example of this project's tests: ${far}:1-1`,
+        "class FarTests {}",
+      ].join("\n"),
+    );
+    // The example is printed once per answer.
+    expect(await testsUsing(unused, "Billing.charge")).toBe(
+      ["# tests using Billing.charge: none found", `# nearest test files: ${ledgerTest} (6 lines), ${far} (1 line)`].join("\n"),
+    );
   });
 
   it("prints matching lines with context, merging overlapping windows", async () => {

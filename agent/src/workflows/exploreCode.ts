@@ -41,6 +41,7 @@ const TEXT_LINES_SHOWN = 5;
 // production code can be ordered first locally.
 const TEXT_OVERFETCH_FACTOR = 3;
 const TEXT_BACKEND_MAX = 120;
+const TEXT_DEFAULT_LIMIT = 30;
 const CONTEXT_MAX_LINES = 400;
 const CONTEXT_LINE_MAX_CHARS = 240;
 const LOCAL_SCAN_MAX_FILES = 2000;
@@ -67,7 +68,8 @@ export interface TextRequest {
   paths?: string[];
   /** Lines of context around each match; prints source lines instead of one row per symbol. */
   context?: number;
-  limit: number;
+  /** Matching symbols shown. Unset: 30, or every match when the backend returned them all. */
+  limit?: number;
 }
 
 export interface ReferenceRequest {
@@ -142,9 +144,10 @@ export async function grepCode(context: CodeContext, request: TextRequest): Prom
     (path) => !/^\.?[\\/]*$/.test(path),
   );
   const pathFilter = paths.length > 0 ? pathsPattern(context.root, paths) : request.filePattern;
+  const limit = request.limit ?? TEXT_DEFAULT_LIMIT;
   const found = await findText(context, request.pattern, request.regex, {
     pathFilter,
-    limit: Math.min(TEXT_BACKEND_MAX, request.limit * TEXT_OVERFETCH_FACTOR),
+    limit: Math.min(TEXT_BACKEND_MAX, limit * TEXT_OVERFETCH_FACTOR),
   });
   const unindexed = (
     await unindexedMatches(context, request.pattern, request.regex, pathFilter, paths.length > 0)
@@ -168,7 +171,10 @@ export async function grepCode(context: CodeContext, request: TextRequest): Prom
     return { text: NO_TEXT_MATCHES, ok: true };
   }
 
-  const shown = sortMatches(matches).slice(0, request.limit);
+  // Over-fetching often brings every match. Cutting those at the default limit
+  // only sends the caller back for the rest, which costs a whole call.
+  const complete = request.limit === undefined && Math.max(total, matches.length) <= matches.length;
+  const shown = complete ? sortMatches(matches) : sortMatches(matches).slice(0, limit);
   const hidden = Math.max(total, matches.length) - shown.length;
   const hiddenFiles = (printed: Set<string>) =>
     filesNotShown(context, printed, {
@@ -408,6 +414,7 @@ export async function references(
   }
 
   let textOnly = 0;
+  let textCut: string | undefined;
   if (request.includeText && request.depth === 1) {
     const name = resolved[0].name;
     // A callable is used where it is called; a type or a value wherever it is named.
@@ -416,13 +423,17 @@ export async function references(
       isTypeNode(resolved[0]) || isValue
         ? `\\b${escapeForRegex(name)}\\b`
         : `\\b${escapeForRegex(name)}\\s*\\(`;
-    const { matches } = await textSearch(context.client, pattern, {
+    const { matches, total } = await textSearch(context.client, pattern, {
       regex: true,
       limit: TEXT_REFERENCE_LIMIT,
       // The bare name of a value is often an ordinary word in prose and
       // configuration; its uses are in code of its own language.
       pathFilter: isValue ? sameLanguageFilter(resolved[0].filePath) : undefined,
     });
+    if (total > matches.length) {
+      // Silence here would read as "these are all the uses".
+      textCut = `# text references: the first ${matches.length} of ${total} places were read; gcal grep '${pattern}' lists every line`;
+    }
     for (const match of matches) {
       const enclosing = match.enclosing;
       if (enclosing !== undefined && definitions.has(enclosing.qualifiedName)) continue;
@@ -480,6 +491,7 @@ export async function references(
       `# ... ${ordered.length - shown.length} more (${hiddenTests} in tests); rerun with --limit ${ordered.length}`,
     );
   }
+  if (textCut !== undefined) lines.push(textCut);
   return { text: lines.join("\n"), ok: true };
 }
 
@@ -624,7 +636,7 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   }
 
   const name = displayName(target, context.project);
-  if (uses.length === 0) return `# tests using ${name}: none found`;
+  if (uses.length === 0) return [`# tests using ${name}: none found`, ...(await nearestTests(context, target))].join("\n");
 
   const files = new Set(uses.map((match) => match.filePath));
   const sections = [
@@ -658,6 +670,58 @@ export async function testsUsing(context: CodeContext, raw: string): Promise<str
   if (rows.length > 0) sections.push(groupByFile(rows).join("\n"));
   if (uses.length > listed) sections.push(`# ... ${uses.length - listed} more: gcal callers ${raw}`);
   return sections.join("\n\n");
+}
+
+const NEAREST_TESTS_SHOWN = 5;
+const EXAMPLE_TEST_MAX_LINES = 80;
+const TEST_MARKERS = new Set(["main", "test", "tests", "__tests__", "spec", "specs", "testing"]);
+/** Example tests already printed for a context: one is enough per answer. */
+const examplesPrinted = new WeakMap<CodeContext, Set<string>>();
+
+/**
+ * When no test uses a symbol, the next question is where its tests would go
+ * and what the project's tests look like: the test files closest to the
+ * symbol's file, and the shortest of them whole.
+ */
+async function nearestTests(context: CodeContext, target: GraphNode): Promise<string[]> {
+  const extension = /\.[A-Za-z0-9]+$/.exec(target.filePath)?.[0];
+  if (extension === undefined) return [];
+  const tree = (await context.newFiles?.all()) ?? [];
+  const everything = tree.length > 0 ? tree : await allFilePaths(context.client);
+  const place = (filePath: string) => filePath.split("/").slice(0, -1).filter((segment) => !TEST_MARKERS.has(segment));
+  const home = place(target.filePath);
+  const shared = (filePath: string) => {
+    const other = place(filePath);
+    let count = 0;
+    while (count < home.length && count < other.length && home[count] === other[count]) count += 1;
+    return count;
+  };
+  const nearest = everything
+    .filter((filePath) => filePath.endsWith(extension) && isTestPath(filePath))
+    .map((filePath) => ({ filePath, shared: shared(filePath) }))
+    .sort((left, right) => right.shared - left.shared || left.filePath.localeCompare(right.filePath))
+    .slice(0, NEAREST_TESTS_SHOWN);
+  if (nearest.length === 0) return [];
+
+  const sized: Array<{ filePath: string; lines: string[] }> = [];
+  for (const { filePath } of nearest) {
+    const lines = await context.reader.lines(filePath);
+    if (lines !== undefined) sized.push({ filePath, lines });
+  }
+  if (sized.length === 0) return [];
+  const answer = [`# nearest test files: ${sized.map((file) => `${file.filePath} (${file.lines.length} line${file.lines.length === 1 ? "" : "s"})`).join(", ")}`];
+
+  const printed = examplesPrinted.get(context) ?? new Set<string>();
+  examplesPrinted.set(context, printed);
+  const example = sized
+    .filter((file) => file.lines.length <= EXAMPLE_TEST_MAX_LINES)
+    .sort((left, right) => left.lines.length - right.lines.length)[0];
+  if (example !== undefined && !printed.has(example.filePath)) {
+    printed.add(example.filePath);
+    const lines = example.lines.at(-1) === "" ? example.lines.slice(0, -1) : example.lines;
+    answer.push("", `# example of this project's tests: ${example.filePath}:1-${lines.length}`, ...lines);
+  }
+  return answer;
 }
 
 /** The widest function or method around a match, or its indexed enclosing symbol. */

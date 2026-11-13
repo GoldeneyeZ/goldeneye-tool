@@ -38,7 +38,7 @@ identifier.
 | Need                               | Command                                                             |
 | ---------------------------------- | ------------------------------------------------------------------- |
 | Source of known symbols            | `gcal get A.method B.other` (every overload is included)             |
-| A symbol and the tests that use it | `gcal get A.method --tests` (short tests whole, the rest as rows)    |
+| A symbol and the tests that use it | `gcal get A.method --tests` (short tests whole, the rest as rows; with no test of it, the nearest test files and a short one whole) |
 | A whole type or file               | `gcal get Type File.ext` (a member outline above 500 lines)          |
 | A name you are unsure of           | `gcal search name otherName`; add `--snippets` to include source     |
 | Who calls it                       | `gcal callers Type.member` (call graph plus text references)         |
@@ -63,7 +63,8 @@ identifier.
   instead of a search followed by range reads.
 - A rename or a signature change across many files is one `gcal replace` per
   pattern (a regex with `$1` groups, `-F` for literal text, `--dry-run` to
-  preview); patch by hand only what the pattern cannot express.
+  preview); patch by hand only what the pattern cannot express. Add `-g '*.py'`
+  to keep data files and documents under the same directories unchanged.
 - Before moving or renaming a module, `gcal callers <its path>` lists every file
   that imports it, each way its path is written (alias, relative, in a mock) and
   the lines that use what each file imports. It still answers for the old path

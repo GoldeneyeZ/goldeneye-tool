@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FreshnessProbe } from "../src/kernel/freshness.js";
 import type { NewFiles } from "../src/kernel/newFiles.js";
 import { SourceReader } from "../src/kernel/sourceFiles.js";
+import { globPattern } from "../src/workflows/exploreCode.js";
 import type { CodeContext } from "../src/workflows/readCode.js";
 import { REPLACE_MAX_LINES_SHOWN, replaceText } from "../src/workflows/replaceText.js";
 
@@ -98,6 +99,32 @@ describe("replacing text", () => {
 
     await replaceText(context, { pattern: "$1", replacement: "$&", paths: ["b"], literal: true, dryRun: false });
     expect(await read("b/c.py")).toBe("price = cost * $&\n");
+  });
+
+  it("rewrites only the files a glob selects and names the others that match", async () => {
+    const context = await createContext({
+      "src/a.py": "value = canonical(row)\n",
+      "src/data/rows.json": '{"note": "canonical(row)"}\n',
+      "docs/guide.md": "call canonical(row)\n",
+    });
+
+    const result = await replaceText(context, {
+      ...request,
+      pattern: "canonical\\(",
+      replacement: "canonical_json(",
+      paths: ["src", "docs"],
+      filePattern: globPattern("*.py"),
+    });
+
+    expect(result.text).toBe(
+      [
+        "# replaced 1 occurrence in 1 file",
+        "src/a.py\t1",
+        "  1: value = canonical_json(row)",
+        "# the pattern also matches in files left out, unchanged (path occurrences): src/data/rows.json 1, docs/guide.md 1",
+      ].join("\n"),
+    );
+    expect(await read("src/data/rows.json")).toBe('{"note": "canonical(row)"}\n');
   });
 
   it("refuses to run without a scope and reports a pattern that matches nothing", async () => {

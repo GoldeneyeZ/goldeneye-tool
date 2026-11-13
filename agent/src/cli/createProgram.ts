@@ -111,7 +111,7 @@ interface GrepCommandOptions {
   glob?: string;
   path?: string;
   context?: number;
-  limit: number;
+  limit?: number;
 }
 
 const HELP_EXAMPLES = `
@@ -351,7 +351,7 @@ export function createProgram(deps: ProgramDeps): Command {
     .option("--file <regex>", "restrict to matching file paths")
     .option("-g, --glob <glob>", "restrict to file paths matching a glob, as in rg: -g '*.py'")
     .addOption(pathAlias())
-    .option("--limit <n>", "maximum matching symbols", positiveNumberOption, 30)
+    .option("--limit <n>", "maximum matching symbols (default: 30, or all of them up to 90)", positiveNumberOption)
     .action(async (pattern: string, paths: string[], options: GrepCommandOptions) => {
       const context = await requireContext(deps, "grep");
       answer(
@@ -379,12 +379,13 @@ export function createProgram(deps: ProgramDeps): Command {
     .argument("<paths...>", "files or directories to rewrite; . for the whole repository")
     .option("-F, --fixed-strings", "treat pattern and replacement as literal text", false)
     .option("--dry-run", "print what would change and write nothing", false)
+    .option("-g, --glob <glob>", "rewrite only file paths matching a glob, as in rg: -g '*.py'")
     .action(
       async (
         pattern: string,
         replacement: string,
         paths: string[],
-        options: { fixedStrings: boolean; dryRun: boolean },
+        options: { fixedStrings: boolean; dryRun: boolean; glob?: string },
       ) => {
         const context = await requireContext(deps, "replace");
         emit(
@@ -395,6 +396,7 @@ export function createProgram(deps: ProgramDeps): Command {
             paths,
             literal: options.fixedStrings,
             dryRun: options.dryRun,
+            filePattern: options.glob === undefined ? undefined : globPattern(options.glob),
           }),
         );
       },

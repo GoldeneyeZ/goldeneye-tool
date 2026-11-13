@@ -135,6 +135,7 @@ gcal get src/app                            # a directory: its files and their s
 
 gcal replace "charge\(" "bill(" src test    # the same edit in every file; prints each changed line
 gcal replace -F "a.b" "a.c" . --dry-run     # literal text, preview only
+gcal replace "charge\(" "bill(" src -g "*.java" # only the files a glob selects; the others that match are named
 
 gcal arch                                   # directory layout by file count
 gcal workflow --js 'const hits = await gcal.search("BookingService cancel"); return gcal.select(hits);'
@@ -172,6 +173,11 @@ Behaviors worth knowing:
   type the file is named after.
 - `get` given a symbol together with a type or file too long to print whole
   also prints the members of that type that call the symbol.
+- `get --tests` on a symbol no test uses prints the test files nearest to its
+  file and the shortest of them whole (up to 80 lines), once per answer.
+- `grep` without `--limit` shows 30 matching symbols, or all of them when the
+  backend returned every match (up to 90).
+- `callers` says when the text search read fewer places than matched.
 - A lookup that finds nothing (`# not found`, `# ambiguous`, `# no text
   matches`) exits 0, so a chain written with `&&` goes on; `replace`, `check`
   and backend failures keep a failing exit status.

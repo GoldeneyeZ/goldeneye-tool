@@ -21,6 +21,8 @@ export interface ReplaceRequest {
   literal: boolean;
   /** Report what would change and write nothing. */
   dryRun: boolean;
+  /** A regular expression the path of a rewritten file must match (from `-g '*.py'`). */
+  filePattern?: string;
 }
 
 interface FileChange {
@@ -56,10 +58,16 @@ export async function replaceText(context: CodeContext, request: ReplaceRequest)
     scoped.length === given.length
       ? new RegExp(pathsPattern(context.root, scoped))
       : undefined;
+  let ofKind: RegExp | undefined;
+  try {
+    ofKind = request.filePattern === undefined ? undefined : new RegExp(request.filePattern);
+  } catch {
+    return { ok: false, text: `# not a file pattern: ${request.filePattern}` };
+  }
+  const selected = (path: string) =>
+    (inScope === undefined || inScope.test(path)) && (ofKind === undefined || ofKind.test(path));
   const everything = await context.newFiles.all();
-  const files = everything.filter(
-    (path) => !BINARY_FILE.test(path) && (inScope === undefined || inScope.test(path)),
-  );
+  const files = everything.filter((path) => !BINARY_FILE.test(path) && selected(path));
 
   const replaceAll = async (pattern: RegExp): Promise<FileChange[]> => {
     const changes: FileChange[] = [];
@@ -72,8 +80,8 @@ export async function replaceText(context: CodeContext, request: ReplaceRequest)
   // A rename given a list of files is complete only if the list was: say where
   // else the pattern still matches.
   const elsewhere = async (pattern: RegExp): Promise<string[]> => {
-    if (inScope === undefined) return [];
-    const outside = everything.filter((path) => !BINARY_FILE.test(path) && !inScope.test(path));
+    if (inScope === undefined && ofKind === undefined) return [];
+    const outside = everything.filter((path) => !BINARY_FILE.test(path) && !selected(path));
     const found: string[] = [];
     for (const filePath of outside) {
       const count = await countMatches(context.root, filePath, pattern);
@@ -82,7 +90,8 @@ export async function replaceText(context: CodeContext, request: ReplaceRequest)
     if (found.length === 0) return [];
     const shown = found.slice(0, OUTSIDE_FILES_SHOWN).join(", ");
     const more = found.length > OUTSIDE_FILES_SHOWN ? `, +${found.length - OUTSIDE_FILES_SHOWN} more files` : "";
-    return [`# the pattern also matches outside these paths, unchanged (path occurrences): ${shown}${more}`];
+    const where = ofKind === undefined ? "outside these paths" : "in files left out";
+    return [`# the pattern also matches ${where}, unchanged (path occurrences): ${shown}${more}`];
   };
 
   const changes = await replaceAll(expression);
