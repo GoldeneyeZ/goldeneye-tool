@@ -638,6 +638,45 @@ describe("exploring code", () => {
     match_lines: lines,
   });
 
+  it("lists the symbols of code before headings and keys of the same name", async () => {
+    const context = await createContext();
+    const row = (qualifiedName: string, label: string, filePath: string) => ({
+      qualifiedName,
+      label,
+      filePath,
+      line: 1,
+      signature: "",
+    });
+    const search = async () => [
+      row("messages.en.session", "Variable", "frontend/messages/en.json"),
+      row("messages.fr.session", "Variable", "frontend/messages/fr.json"),
+      row("docs.usage.Session", "Section", "docs/usage.md"),
+      row("store.SessionStore", "Class", "src/store/SessionStore.java"),
+      row("store.session", "Function", "src/store/session.ts"),
+    ];
+
+    const result = await searchCode(context, backend({ search }), { queries: ["session"], limit: 3 });
+
+    expect(result.text.split("\n").slice(0, 3).map((line) => line.split("\t").slice(0, 2).join(" "))).toEqual([
+      "store.session Function",
+      "store.SessionStore Class",
+      "en.session Variable",
+    ]);
+
+    // A full first page of keys: the code behind it is asked for once more.
+    const asked: number[] = [];
+    const crowded = async (_query: string, options: { limit: number }) => {
+      asked.push(options.limit);
+      const keys = Array.from({ length: options.limit }, (_, index) =>
+        row(`messages.l${index}.session`, "Variable", `frontend/messages/l${index}.json`),
+      );
+      return options.limit > 20 ? [...keys.slice(0, 15), row("store.session", "Function", "src/store/session.ts")] : keys;
+    };
+    const behind = await searchCode(context, backend({ search: crowded }), { queries: ["session"], limit: 3 });
+    expect(asked).toEqual([15, 200]);
+    expect(behind.text.split("\n")[0]).toContain("store.session\tFunction");
+  });
+
   it("collapses overloads into one search row and falls back to text", async () => {
     const context = await createContext({ textResults: [textHit(NODES[5], [15])] });
     const search = async (query: string) =>

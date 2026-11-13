@@ -117,7 +117,7 @@ gcal get Billing --full                     # whole source whatever the size
 gcal get src/app/Billing.java:120-180       # raw line range
 gcal outline Billing                        # force the outline
 
-gcal search BookingService cancelBooking    # symbols by name, several queries
+gcal search BookingService cancelBooking    # symbols by name, several queries; code before headings and keys
 gcal search BookingService --snippets 2     # ...with source of the top results
 gcal search "*Test" --label Class --file "src/test/.*"
 gcal symbol "cancel.*" --qn ".*BookingService.*"   # regular expression on names

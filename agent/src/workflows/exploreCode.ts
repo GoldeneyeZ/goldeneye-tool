@@ -39,6 +39,10 @@ const ARCH_MAX_ROWS = 40;
 // Files that describe the code instead of being it: a directory of these is
 // opened after the directories of source, however large it is.
 const ARCH_PROSE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
+// Files whose "symbols" are headings and keys. A search lists them after the
+// symbols of code: in a repository with message catalogs, nine of twenty rows
+// for a plain word were the same key in nine locale files.
+const SEARCH_NOT_CODE = /\.(md|mdx|markdown|txt|rst|adoc|json|jsonc|json5|ya?ml|toml|xml|lock|csv|ini|properties)$/i;
 const MAX_SEARCH_ROWS = 40;
 const SEARCH_OVERFETCH_FACTOR = 3;
 const SEARCH_BACKEND_MAX = 200;
@@ -99,13 +103,25 @@ export async function searchCode(
 
   // The limit applies to each query, so a later query is never starved.
   for (const query of request.queries) {
-    const candidates = await backend.search(query, {
-      // The backend refuses a page above 200 rows.
-      limit: Math.min(SEARCH_BACKEND_MAX, request.limit * SEARCH_OVERFETCH_FACTOR + 6),
-      label: request.label,
-      filePattern: request.filePattern,
-      qualifiedNamePattern: request.qualifiedNamePattern,
-    });
+    // The backend refuses a page above 200 rows.
+    const page = Math.min(SEARCH_BACKEND_MAX, request.limit * SEARCH_OVERFETCH_FACTOR + 6);
+    const fetch = (limit: number) =>
+      backend.search(query, {
+        limit,
+        label: request.label,
+        filePattern: request.filePattern,
+        qualifiedNamePattern: request.qualifiedNamePattern,
+      });
+    let candidates = await fetch(page);
+    // A full page that is mostly headings and keys hides the code behind it:
+    // the backend ranks short names first, and those are the keys.
+    if (
+      candidates.length >= page &&
+      page < SEARCH_BACKEND_MAX &&
+      candidates.filter((candidate) => !SEARCH_NOT_CODE.test(candidate.filePath)).length < request.limit
+    ) {
+      candidates = await fetch(SEARCH_BACKEND_MAX);
+    }
     const groups = groupOverloads(rankCandidates(query, candidates.map(candidateNode), request.label));
     if (groups.length === 0) emptyQueries.push(query);
     let taken = 0;
@@ -1274,6 +1290,7 @@ function rankCandidates(query: string, nodes: GraphNode[], requestedLabel: strin
   const wanted = query.trim().toLowerCase();
   const visible = requestedLabel === undefined ? nodes.filter((node) => !isContainerNode(node)) : nodes;
   const score = (node: GraphNode) =>
+    (SEARCH_NOT_CODE.test(node.filePath) ? 8 : 0) +
     (node.name.toLowerCase() === wanted ? 0 : 4) +
     (isTypeNode(node) ? 0 : 2) +
     (isTestPath(node.filePath) ? 1 : 0);
