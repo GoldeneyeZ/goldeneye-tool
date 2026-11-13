@@ -23,6 +23,7 @@ import { NewFiles } from "../kernel/newFiles.js";
 import { SourceReader } from "../kernel/sourceFiles.js";
 import { inboundTraceDecision } from "../kernel/tracePolicy.js";
 import type { TraceEdge } from "../domain/types.js";
+import { nullableLeaks } from "../workflows/checkNullness.js";
 import { leftBehind, unmatchedConstructors } from "../workflows/checkReferences.js";
 import { checkSyntax } from "../workflows/checkSyntax.js";
 import { checkTypes } from "../workflows/checkTypes.js";
@@ -454,8 +455,13 @@ export function createProgram(deps: ProgramDeps): Command {
       const checked = await checkSyntax(context, { paths });
       if (paths.length === 0) {
         try {
-          // Beyond parsing: what the change left behind, as far as the index knows.
-          const left = [...(await leftBehind(context, deps.client)), ...(await unmatchedConstructors(context))];
+          // Beyond parsing: what the change left behind, as far as the index knows,
+          // and what a build would refuse that the text alone shows.
+          const left = [
+            ...(await leftBehind(context, deps.client)),
+            ...(await unmatchedConstructors(context)),
+            ...(await nullableLeaks(context)),
+          ];
           if (left.length > 0) checked.text = [checked.text, ...left].join("\n");
         } catch {
           // The parse check stands on its own.

@@ -196,8 +196,13 @@ Behaviors worth knowing:
   in files that name its type or call a function returning it); a deleted file
   is named with the files that still import it; and in Java a `new Type(..)`
   on an added line is reported when `Type` declares constructors and none
-  takes that number of arguments. None of this is a compiler: it sees names
-  and counts, not types.
+  takes that number of arguments. In a Java package that is non-null by default
+  (`@NullMarked` or `@NonNullApi` in its `package-info.java`), a method the
+  change wrote is reported when its return type has no `@Nullable` and it
+  returns `null`, or a parameter or local declared `@Nullable` that it neither
+  tests nor assigns: the nullness checker of such a build rejects it. None of
+  this is a compiler: it sees names, counts and annotations, not types, and a
+  value that is nullable only through what it was assigned from is not seen.
 - `check --types` also runs the project's own type checker. TypeScript only:
   `tsc --noEmit` with the `typescript` of the project's `node_modules` and its
   `tsconfig.json`. When it reports errors, HEAD is exported to a temporary

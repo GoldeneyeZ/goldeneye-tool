@@ -50,7 +50,7 @@ const attempts = new RegExp(options.attempts);
 mkdirSync(state, { recursive: true });
 
 const REPORTED =
-  /^# (removed or renamed|.* was deleted and is still imported|calls that match no declared constructor|type check \(tsc --noEmit\): \d+ new error|HEAD could not be type-checked)/;
+  /^# (removed or renamed|.* was deleted and is still imported|calls that match no declared constructor|nullness: |type check \(tsc --noEmit\): \d+ new error|HEAD could not be type-checked)/;
 
 function git(cwd, gitArgs) {
   return spawnSync("git", ["-C", cwd, ...gitArgs], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });

@@ -80,7 +80,7 @@ With the Goldeneye backend and a selected project, commands answer from the grap
 - `callers` on a file: a header with the number of importing files and each spelling of the path, then per file the lines that name the module and a `uses` row with the lines using what it imports.
 - A lookup that finds nothing prints `# not found`, `# ambiguous` or `# no text matches` and exits 0.
 - `replace`: a count line, then each changed line by file, then where else the pattern still matches.
-- `check`: the lines that do not parse in the files that differ from HEAD; then, when the index shows them, callers of a removed or renamed symbol that still name it, imports of a deleted file, and Java constructor calls with a number of arguments no constructor takes. With `--types`, the type errors of the project that HEAD does not have (TypeScript).
+- `check`: the lines that do not parse in the files that differ from HEAD; then, when the index shows them, callers of a removed or renamed symbol that still name it, imports of a deleted file, Java constructor calls with a number of arguments no constructor takes, and, in a Java package that is non-null by default, a `return` of `null` or of a `@Nullable` parameter or local from a method the change wrote whose return type has no `@Nullable`. With `--types`, the type errors of the project that HEAD does not have (TypeScript).
 - `arch`: directory layout by file count. `status` and `index`: compact JSON.
 
 The benchmark backend keeps the earlier contracts: `get` prints source text only, `callers` and `callees` print headerless relationship rows, `arch` prints compact JSON.
