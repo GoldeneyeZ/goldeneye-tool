@@ -1,6 +1,6 @@
 # GCAL improvement goal: summary
 
-Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-8.md`.
+Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-9.md`.
 
 ## The goal
 
@@ -12,7 +12,7 @@ agent runs. At most 15M tokens of agent runs.
 
 ## Result
 
-60 agent runs with GCAL over eight rounds, 14,836k tokens. Each run is one
+61 agent runs with GCAL over nine rounds, 14,928k tokens. Each run is one
 Codex agent (`gpt-5.6-terra`, reasoning high, codex-cli 0.159.0) on one task of
 a twelve-task matrix over nine repositories, graded by a held-out grader. The
 plain-shell numbers are the 43 runs of 2026-11-11 and 2026-11-12 on the same
@@ -20,7 +20,7 @@ tasks and were not repeated.
 
 | Task | GCAL before this goal | GCAL in this goal: pass, median input, calls, wall | Plain shell: pass, median input, calls, wall | Input ratio | Wall ratio |
 |---|---|---|---|---|---|
-| StringUtils feature | 111k, 3 calls | 5/5, 92k, 2, 44 s | 8/8, 86k, 2, 40 s | 1.07 | 1.10 |
+| StringUtils feature | 111k, 3 calls | 6/6, 92k, 2, 44 s | 8/8, 86k, 2, 40 s | 1.06 | 1.10 |
 | terax fuzzy feature | 187k, 5 calls | 6/7, 93k, 2, 86 s | 3/3, 112k, 3, 98 s | 0.83 | 0.88 |
 | abyssal feature | 124k, 3 calls | 6/6, 132k, 3, 73 s | 3/3, 155k, 4, 82 s | 0.85 | 0.89 |
 | PyFinance bug | 180k, 5 calls | 5/5, 180k, 5, 93 s | 4/4, 192k, 4, 94 s | 0.94 | 0.99 |
@@ -32,28 +32,28 @@ tasks and were not repeated.
 | Spring flow question | 164k, 3.5 calls | 4/4, 169k, 4, 132 s | 3/3, 375k, 9, 172 s | 0.45 | 0.77 |
 | agentsview flow question (dirty tree) | 972k, 15 calls | 3/3, 468k, 9, 150 s | 3/3, 1,221k, 15, 201 s | 0.38 | 0.75 |
 | cbm architecture document | 828k, 12 calls | 4/4, 754k, 15, 210 s | 3/3, 1,615k, 19, 267 s | 0.47 | 0.79 |
-| **Sum of medians** | **4,826k** | **55/60, 3,336k, 68 calls, 1,471 s** | **42/43, 5,652k, 93.5 calls, 1,865 s** | **0.59** | **0.79** |
+| **Sum of medians** | **4,826k** | **56/61, 3,335k, 68 calls, 1,471 s** | **42/43, 5,652k, 93.5 calls, 1,865 s** | **0.59** | **0.79** |
 
 "Before this goal" is the latest measurement of each task before the goal:
 the hybrid lane of 2026-11-12 where it exists (GCAL v8/v9, or v6 for the Spring
 flow question and the cbm document), otherwise the `gcal`-only lane of GCAL v5.
-The middle column pools every run of this goal, made on eight successive
+The middle column pools every run of this goal, made on nine successive
 builds; it is not a measurement of the final build alone. The two full-matrix
 rounds on late builds (rounds 4 and 5, 23 runs) give 3,420k, 0.61 of plain
 shell.
 
 ### What improved, and by how much
 
-- **Input tokens: 0.59 of plain shell over the twelve tasks** (3,336k against
+- **Input tokens: 0.59 of plain shell over the twelve tasks** (3,335k against
   5,652k); before the goal the same sum was 4,826k, 0.85. The GCAL median is
   below plain shell on 11 of 12 tasks; before the goal it was on 6.
 - **Tool calls: 68 against 93.5**, lower on 9 of 12 tasks, equal on 2 (StringUtils, goldeneye rename), higher on 1 (PyFinance: 5 against 4).
 - **Wall time: 0.79 of plain shell** (1,471 s against 1,865 s), lower on 11 of
   12 tasks.
-- **Uncached input: 426k against 589k. Output: 51k against 67k.**
+- **Uncached input: 434k against 589k. Output: 51k against 67k.**
 - **The gaps the goal started from:**
   - Small edits cost one call too many: the StringUtils feature takes 2 calls
-    in 5 of 5 runs (before: 3 calls in 4 of 6), 92k against 86k for plain
+    in 6 of 6 runs (before: 3 calls in 4 of 6), 92k against 86k for plain
     shell. The terax fuzzy feature went from 187k and 5 calls to 93k and 2.
   - Wide refactors cost two to three times plain shell: the terax module move
     went from 433k to 192k (plain shell 235k), with runs at 126k and 80k; the
@@ -61,7 +61,7 @@ shell.
     passing 5 of 5 where the builds before the goal passed 3 of 6.
   - The backend query cap on large indexes: fixed in two places; the lookups
     that failed on the 195 MB LOD index answer in 133 ms.
-  - The merged `gcal` had never been measured: it has now run 60 times.
+  - The merged `gcal` had never been measured: it has now run 61 times.
   - Slow first daemon start: the 65 s and 116 s were the benchmark running
     during a full build. `gcal status` through a cold daemon takes 1.0 s on a
     192 MB index. The daemon also loads the graph right after its first
@@ -69,10 +69,10 @@ shell.
 
 ### What did not improve
 
-- **Pass rate: 55 of 60 (92%) against 42 of 43 (98%) for plain shell.** The
+- **Pass rate: 56 of 61 (92%) against 42 of 43 (98%) for plain shell.** The
   goal asked for the same or better, and this is not it. All five failures are
-  in rounds 5 and 6; the six runs made after the last fixes for them (rounds 7
-  and 8, five tasks) all passed, which is too few runs to call the gap closed.
+  in rounds 5 and 6; the seven runs made after the last fixes for them (rounds 7
+  to 9, five tasks) all passed, which is too few runs to call the gap closed.
   - Spring redaction feature, 2 of 4 (plain shell 3 of 3; GCAL v5: 1 of 2).
     Both failures are the agent's own code that does not compile under the
     project's build (a nullness check; a constructor that does not exist in a
@@ -105,12 +105,14 @@ shell.
 
 ## What was changed
 
-29 commits on `master`, `ce7d73a` to the last one.
+33 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
 | Backend, queries | A single-pattern `WHERE` is applied before the binding cap, in the evaluator and the `LIMIT` fast path | `gcal get` of a Python file failed on the LOD index in every run |
 | Backend, index | An anonymous JavaScript function takes the name it is assigned to; a callback is not a symbol | 13 symbols named `native` on terax, one real; `callers native` was "ambiguous" |
+| Backend, index | A lambda or closure in any language is not a symbol; its calls belong to the function around it (Nix functions take the name of their binding) | a Java lambda `csrf -> csrf.disable()` indexed as a function `csrf` and reported as removed by the first version of the check; 3,102 such callables in three Spring modules |
+| `arch` | Directories of source are opened before larger directories of documents | the operations benchmark on this repository indexed again: 299 notes took the rows, `ui/src` was not shown |
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
 | `grep`, `replace`, `search` | `grep` shows every fetched match; `-g` in `replace`, repeatable in both; `search` lists files by name, caps its backend page, accepts `--tests` | cut-and-repeat greps; a JSON manifest rewritten by a replace; shell file listings; two refused commands |
@@ -122,7 +124,7 @@ shell.
 
 ## Failures and incidents, in one place
 
-- 5 failed agent runs of 60 (above).
+- 5 failed agent runs of 61 (above).
 - 5 harness refusals before any model call: two overlays with CRLF line
   endings, one configuration path, one stale snapshot accepted after a failed
   preparation, one backend shutdown that timed out while a test suite was
@@ -132,10 +134,14 @@ shell.
 
 ## Not verified
 
-- The final build as such: 2 runs, both of the rename task, were made on
-  `f191eba`; 4 on `1145c8a` before it; none on the two commits after it
-  (`callers` on changed files, `check --types`), which were verified by unit
-  tests and by replaying recorded patches only.
+- The final build as such: 1 run (StringUtils, passed) was made on `06f7d2a`;
+  2, both of the rename task, on `f191eba`; 4 on `1145c8a` before it. The
+  changes after `f191eba` (`callers` on changed files, `check --types`,
+  lambdas out of the index, the layout rule) were verified by unit tests, the
+  language corpus, the operations benchmark and the replay of recorded
+  patches; the one run does not exercise them.
+- What the index change for lambdas does to `callers` answers in agent runs:
+  no recorded run read such a row.
 - That an agent fixes what the extended `gcal check` reports: in the two runs
   made with it the agent left nothing behind, so nothing was reported.
 - Whether the last change (one whole test as an example) raises the pass rate
@@ -167,9 +173,10 @@ shell.
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.
-4. **Stale call-graph rows in changed files.** In a dirty tree `callers` still
-   prints graph rows with the line numbers of the index (`141 RevalidatedPath.as_ref call`
-   with no text). Re-locate them by text, as `get` does.
+4. **Review what the index still invents.** Lambdas were the second case
+   after JavaScript callbacks of a node indexed under a name nobody wrote.
+   List, per language of the corpus, the symbols whose name is not at their
+   declaration line; each hit is either a rule to add or a symbol to drop.
 5. **The Spring redaction feature specifically.** Its four GCAL traces were
    compared with the three plain-shell traces after the last run. No single
    difference explains the failures: the plain-shell agents read 189 to 227 kB
