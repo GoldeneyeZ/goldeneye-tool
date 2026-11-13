@@ -123,7 +123,7 @@ gcal search BookingService --snippets 2     # ...with source of the top results
 gcal search "*Test" --label Class --file "src/test/.*"
 gcal symbol "cancel.*" --qn ".*BookingService.*"   # regular expression on names
 
-gcal callers Billing.charge                 # call graph plus text references
+gcal callers Billing.charge                 # declaration, call graph, text references, how files import it
 gcal callers src/lib/native.ts              # a file: every file that imports it, and the lines using what it imports
 gcal callees Billing.charge --depth 2
 gcal impls PaymentGateway                   # implementations and subclasses; for a Go interface, its methods by receiver
@@ -164,9 +164,13 @@ Behaviors worth knowing:
   to refresh search and call-graph results.
 - `get` on an ambiguous name prints up to three small candidates, otherwise a
   pick list with `path:line` for each.
-- `callers` marks each row `call` (graph edge) or `text` (reference the graph
-  did not resolve, such as a call through an interface). Use `--no-text` for
-  graph edges only.
+- `callers` marks each row `def` (the declaration), `call` (graph edge) or
+  `text` (reference the graph did not resolve: a call through an interface, a
+  call in a file created since indexing, `Owner::member` named in a doc comment
+  or a document). For a function it first says how the files import it: the
+  usual statement with its count, then every other spelling with its place.
+  It is the first call of a rename, a move or a signature change. Use
+  `--no-text` for graph edges only.
 - `callers` given a file lists its importers: imports, re-exports, dynamic
   imports and test mocks, under each spelling of the path (alias, relative,
   with or without extension), for JavaScript and TypeScript, Python, C-family

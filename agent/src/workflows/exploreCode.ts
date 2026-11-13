@@ -17,6 +17,7 @@ import {
   type TextMatch,
 } from "../kernel/codeGraph.js";
 import { displayName, isTestPath } from "../kernel/displayName.js";
+import { importStatementAt } from "../kernel/importLines.js";
 import { couldBeFileName, normalizePath, parseLocator, parseSymbolLocator } from "../kernel/locator.js";
 import { locateDeclaration } from "../kernel/relocate.js";
 import { importers } from "./importers.js";
@@ -35,6 +36,8 @@ import { resolveSymbol } from "./resolveSymbol.js";
 const SNIPPET_MAX_LINES = 60;
 const TEXT_LINE_MAX_CHARS = 160;
 const TEXT_REFERENCE_LIMIT = 80;
+/** Places read to find the statements that import a function: every use names it too. */
+const IMPORT_SEARCH_LIMIT = 200;
 const ARCH_MAX_ROWS = 40;
 // Files that describe the code instead of being it: a directory of these is
 // opened after the directories of source, however large it is.
@@ -498,18 +501,21 @@ export async function references(
       isTypeNode(resolved[0]) || isValue
         ? `\\b${escapeForRegex(name)}\\b`
         : `\\b${escapeForRegex(name)}\\s*\\(`;
+    // The bare name of a value is often an ordinary word in prose and
+    // configuration; its uses are in code of its own language.
+    const pathFilter = isValue ? sameLanguageFilter(resolved[0].filePath) : undefined;
     const { matches, total } = await textSearch(context.client, pattern, {
       regex: true,
       limit: TEXT_REFERENCE_LIMIT,
-      // The bare name of a value is often an ordinary word in prose and
-      // configuration; its uses are in code of its own language.
-      pathFilter: isValue ? sameLanguageFilter(resolved[0].filePath) : undefined,
+      pathFilter,
     });
     if (total > matches.length) {
       // Silence here would read as "these are all the uses".
       textCut = `# text references: the first ${matches.length} of ${total} places were read; gcal grep '${pattern}' lists every line`;
     }
-    for (const match of matches) {
+    // A file created since indexing is in no answer of the backend.
+    const created = await unindexedMatches(context, pattern, true, pathFilter, false);
+    for (const match of [...matches, ...created]) {
       const enclosing = match.enclosing;
       if (enclosing !== undefined && definitions.has(enclosing.qualifiedName)) continue;
 
@@ -603,13 +609,29 @@ export async function references(
     }
   }
 
+  // A rename or a move changes more than the calls: the declaration, the
+  // statements that import the symbol and the places that name it in full
+  // without calling it (a doc link, a line of documentation).
+  const declared: ReferenceRow[] = [];
+  let imported: string[] = [];
+  if (request.includeText && request.depth === 1) {
+    for (const node of resolved) {
+      const row = await declarationRow(context, node);
+      if (row !== undefined) declared.push(row);
+    }
+    if (!isTypeNode(resolved[0]) && !VALUE_LABELS.has(resolved[0].label)) {
+      textOnly += await addQualifiedMentions(context, resolved[0], rows, declared);
+      imported = await importSummary(context, resolved[0]);
+    }
+  }
+
   const ordered = [...rows.values()].sort(
     (left, right) =>
       left.hop - right.hop ||
       Number(isTestPath(left.filePath)) - Number(isTestPath(right.filePath)) ||
       left.filePath.localeCompare(right.filePath),
   );
-  const shown = ordered.slice(0, request.limit);
+  const shown = [...declared, ...ordered.slice(0, request.limit)];
   const target = displayName(resolved[0], context.project);
   // A place that uses the symbol on a few lines shows each of them: an edit is
   // written from these lines, and one line of text for three would hide two.
@@ -629,12 +651,13 @@ export async function references(
   }
   const lines = [
     `# callers of ${target}: ${ordered.length} (graph ${ordered.length - textOnly}, text-only ${textOnly})`,
+    ...imported,
     ...groupByFile(printed),
   ];
-  if (ordered.length > shown.length) {
+  if (ordered.length > request.limit) {
     const hiddenTests = ordered.slice(request.limit).filter((row) => isTestPath(row.filePath)).length;
     lines.push(
-      `# ... ${ordered.length - shown.length} more (${hiddenTests} in tests); rerun with --limit ${ordered.length}`,
+      `# ... ${ordered.length - request.limit} more (${hiddenTests} in tests); rerun with --limit ${ordered.length}`,
     );
   }
   if (textCut !== undefined) lines.push(textCut);
@@ -1259,9 +1282,146 @@ interface ReferenceRow {
   name: string;
   filePath: string;
   lines: number[];
-  kind: "call" | "text";
+  kind: "call" | "text" | "def";
   hop: number;
   callSite: string;
+}
+
+/** The line that declares a symbol, as the file has it now. */
+async function declarationRow(context: CodeContext, node: GraphNode): Promise<ReferenceRow | undefined> {
+  const fileLines = await context.reader.lines(node.filePath);
+  if (fileLines === undefined) return undefined;
+  // In a file changed since indexing the declaration has moved.
+  const range = locateDeclaration(fileLines, node.name, node.startLine);
+  const line = declarationLineNumber(fileLines, range === undefined ? node : { ...node, ...range });
+  if (line === undefined || !fileLines[line - 1].includes(node.name)) return undefined;
+  return {
+    name: displayName(node, context.project),
+    filePath: node.filePath,
+    lines: [line],
+    kind: "def",
+    hop: 0,
+    callSite: await lineText(context, node.filePath, line),
+  };
+}
+
+/** Documentation is often left out of the index; a symbol named in full there is still a reference. */
+const DOCUMENT_FILES = "\\.(md|mdx|markdown|rst|adoc|txt)$";
+
+/**
+ * Adds the lines that name a member in full (`Owner::member`, `Owner.member`,
+ * `Owner#member`) without calling it: links in doc comments, documentation.
+ * Returns how many rows it added.
+ */
+async function addQualifiedMentions(
+  context: CodeContext,
+  target: GraphNode,
+  rows: Map<string, ReferenceRow>,
+  declared: ReferenceRow[],
+): Promise<number> {
+  const owner = displayName(target, context.project).split(".").at(-2);
+  if (owner === undefined || !/^[A-Z]/.test(owner)) return 0;
+  const name = escapeForRegex(target.name);
+  const pattern = `\\b${escapeForRegex(owner)}\\s*(::|\\.|#)\\s*${name}\\b`;
+  const called = new RegExp(`(?<![\\w$])${name}\\s*\\(`);
+
+  const { matches } = await textSearch(context.client, pattern, { regex: true, limit: TEXT_REFERENCE_LIMIT });
+  const outside = [
+    ...(await unindexedMatches(context, pattern, true, undefined, false)),
+    ...(await unindexedMatches(context, pattern, true, DOCUMENT_FILES, true)),
+  ];
+  const taken = new Set<string>();
+  for (const row of [...declared, ...rows.values()]) {
+    for (const line of row.lines) taken.add(`${row.filePath}:${line}`);
+  }
+
+  let added = 0;
+  for (const match of [...matches, ...outside]) {
+    const fileLines = (await context.reader.lines(match.filePath)) ?? [];
+    for (const line of match.lines) {
+      const key = `${match.filePath}:${line}`;
+      // A call is among the rows already, or is one the call search was cut before.
+      if (taken.has(key) || called.test(fileLines[line - 1] ?? "")) continue;
+      taken.add(key);
+      rows.set(key, {
+        name: match.enclosing === undefined ? "" : displayName(match.enclosing, context.project),
+        filePath: match.filePath,
+        lines: [line],
+        kind: "text",
+        hop: 1,
+        callSite: await lineText(context, match.filePath, line),
+      });
+      added += 1;
+    }
+  }
+  return added;
+}
+
+const IMPORT_SPELLINGS_SHOWN = 12;
+const IMPORT_PLACES_SHOWN = 6;
+
+/**
+ * How the files that use a function get it: the import statement most of them
+ * write, counted, and every other spelling with its place. One replacement
+ * takes the first; the others are patched by hand.
+ */
+async function importSummary(context: CodeContext, target: GraphNode): Promise<string[]> {
+  // A member is reached through its type, which is what a file imports.
+  const owner = displayName(target, context.project).split(".").at(-2);
+  if (owner !== undefined && /^[A-Z]/.test(owner)) return [];
+
+  const pattern = `\\b${escapeForRegex(target.name)}\\b`;
+  const { matches, total } = await textSearch(context.client, pattern, {
+    regex: true,
+    limit: IMPORT_SEARCH_LIMIT,
+    pathFilter: sameLanguageFilter(target.filePath),
+  });
+  const found: Array<{ place: string; filePath: string; spelling: string; nested: boolean }> = [];
+  const seen = new Set<string>();
+  for (const match of matches) {
+    const fileLines = await context.reader.lines(match.filePath);
+    if (fileLines === undefined) continue;
+    for (const line of match.lines) {
+      const place = `${match.filePath}:${line}`;
+      const statement = importStatementAt(fileLines, line - 1, target.name);
+      if (statement === undefined || seen.has(place)) continue;
+      seen.add(place);
+      found.push({ place, filePath: match.filePath, ...statement });
+    }
+  }
+  if (found.length === 0) return [];
+
+  const counts = new Map<string, number>();
+  for (const item of found) counts.set(item.spelling, (counts.get(item.spelling) ?? 0) + 1);
+  const [usual, usualCount] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+  const files = new Set(found.map((item) => item.filePath)).size;
+  const others = found.filter((item) => item.spelling !== usual);
+
+  const lines: string[] = [];
+  if (usualCount > 1) {
+    const nested = found.filter((item) => item.spelling === usual && item.nested);
+    const inside =
+      nested.length === 0
+        ? ""
+        : ` (${nested.length} indented, inside a function: ${nested
+            .slice(0, IMPORT_PLACES_SHOWN)
+            .map((item) => item.place)
+            .join(", ")}${nested.length > IMPORT_PLACES_SHOWN ? ", ..." : ""})`;
+    lines.push(`# imported in ${files} files, ${usualCount} times as \`${usual}\`${inside}`);
+  } else {
+    lines.push(`# imported in ${files} ${files === 1 ? "file" : "files"}`);
+  }
+  const listed = usualCount > 1 ? others : found;
+  for (const item of listed.slice(0, IMPORT_SPELLINGS_SHOWN)) lines.push(`#   ${item.place}\t${item.spelling}`);
+  if (listed.length > IMPORT_SPELLINGS_SHOWN) {
+    lines.push(`#   ... ${listed.length - IMPORT_SPELLINGS_SHOWN} more: gcal grep '${pattern}'`);
+  }
+  if (total > matches.length) {
+    lines.push(
+      `# imports: the first ${matches.length} of ${total} places naming ${target.name} were read; gcal grep '${pattern}' lists every line`,
+    );
+  }
+  return lines;
 }
 
 function graphRow(context: CodeContext, edge: TraceEdge): ReferenceRow {

@@ -112,6 +112,8 @@ interface FakeGraphOptions {
   extraNodes?: GraphNode[];
   /** What the backend says matched before its limit. */
   textTotal?: number;
+  /** The text results of one pattern; `textResults` answers the patterns it leaves undefined. */
+  textFor?: (pattern: string) => Array<Record<string, unknown>> | undefined;
 }
 
 function fakeGraph(root: string, options: FakeGraphOptions = {}): ToolClient {
@@ -138,7 +140,8 @@ function fakeGraph(root: string, options: FakeGraphOptions = {}): ToolClient {
       if (toolName === "search_code") {
         options.textSearchModes?.push(args.regex === true);
         const empty = options.regexFindsNothing === true && args.regex === true;
-        return { results: empty ? [] : (options.textResults ?? []), total_results: options.textTotal ?? 0 };
+        const results = options.textFor?.(String(args.pattern)) ?? options.textResults ?? [];
+        return { results: empty ? [] : results, total_results: options.textTotal ?? 0 };
       }
       if (toolName === "search_graph") {
         const pattern = args.name_pattern === undefined ? undefined : String(args.name_pattern);
@@ -837,7 +840,113 @@ describe("exploring code", () => {
       textResults: [{ file: BILLING, label: "", node: "", qualified_name: "", start_line: 0, end_line: 0, match_lines: [7, 18] }],
     });
     const declared = await references(own, backend({}), { target: "Billing.record", depth: 1, limit: 20, includeText: true });
-    expect(declared.text.split("\n").slice(2)).toEqual([`  7\t\ttext\t${fileLines[6]}`]);
+    expect(declared.text.split("\n").slice(2)).toEqual([
+      `  18\tBilling.record\tdef\t${fileLines[17]}`,
+      `  7\t\ttext\t${fileLines[6]}`,
+    ]);
+  });
+
+  it("lists the declaration and the places that name a member in full without calling it", async () => {
+    const loose = (file: string, lines: number[]) => ({
+      file,
+      label: "",
+      node: "",
+      qualified_name: "",
+      start_line: 0,
+      end_line: 0,
+      match_lines: lines,
+    });
+    const context = await createContext({
+      // Only the search for the full name finds the document.
+      textFor: (pattern) => (pattern.includes("(::|") ? [loose("docs/billing.md", [1, 2])] : []),
+    });
+    await mkdir(join(context.root, "docs"));
+    await writeFile(
+      join(context.root, "docs/billing.md"),
+      ["Money goes back through `Billing#refund`.", "Billing.refund(5) is a call, which the call rows have."].join("\n"),
+    );
+
+    const result = await references(context, backend({}), {
+      target: "Billing.refund",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+
+    expect(result.text).toBe(
+      [
+        "# callers of Billing.refund: 1 (graph 0, text-only 1)",
+        BILLING,
+        "  14\tBilling.refund\tdef\t  public void refund(int cents) {",
+        "docs/billing.md",
+        "  1\t\ttext\tMoney goes back through `Billing#refund`.",
+      ].join("\n"),
+    );
+  });
+
+  it("says how the files that use a function import it", async () => {
+    const canonical: GraphNode = {
+      qualifiedName: `${PROJECT}.src.lib.pairs.canonical`,
+      name: "canonical",
+      label: "Function",
+      filePath: "src/lib/pairs.py",
+      startLine: 1,
+      endLine: 2,
+    };
+    const loose = (file: string, lines: number[]) => ({
+      file,
+      label: "",
+      node: "",
+      qualified_name: "",
+      start_line: 0,
+      end_line: 0,
+      match_lines: lines,
+    });
+    const context = await createContext({
+      extraNodes: [canonical],
+      textFor: (pattern) =>
+        pattern === "\\bcanonical\\b"
+          ? [
+              loose("src/lib/pairs.py", [1]),
+              loose("src/app/a.py", [1, 3]),
+              loose("src/app/b.py", [1]),
+              loose("src/app/c.py", [2, 3]),
+              loose("src/app/d.py", [3]),
+            ]
+          : [loose("src/lib/pairs.py", [1]), loose("src/app/a.py", [3]), loose("src/app/c.py", [3])],
+    });
+    const files: Record<string, string[]> = {
+      "src/lib/pairs.py": ["def canonical(value):", "    return value"],
+      "src/app/a.py": ["from lib.pairs import canonical", "", "canonical(1)"],
+      "src/app/b.py": ["from lib.pairs import canonical"],
+      "src/app/c.py": ["def run():", "    from lib.pairs import canonical", "    return canonical(2)"],
+      "src/app/d.py": ["from lib.pairs import (", "    load,", "    canonical,", ")"],
+    };
+    for (const [path, lines] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), lines.join("\n"));
+    }
+
+    const result = await references(context, backend({}), {
+      target: "canonical",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+
+    expect(result.text).toBe(
+      [
+        "# callers of canonical: 2 (graph 0, text-only 2)",
+        "# imported in 4 files, 3 times as `from lib.pairs import canonical` (1 indented, inside a function: src/app/c.py:2)",
+        "#   src/app/d.py:3\tfrom lib.pairs import ( … canonical,",
+        "src/lib/pairs.py",
+        "  1\tcanonical\tdef\tdef canonical(value):",
+        "src/app/a.py",
+        "  3\t\ttext\tcanonical(1)",
+        "src/app/c.py",
+        "  3\t\ttext\t    return canonical(2)",
+      ].join("\n"),
+    );
   });
 
   it("finds a call of the graph again when its line moved since indexing", async () => {
