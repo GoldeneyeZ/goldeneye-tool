@@ -289,6 +289,22 @@ three typedefs and three structs, 3.9 kB. One unit test; `pnpm check` passes
 three tasks, the same verdicts; harness tests pass (88). Not measured:
 whether it saves the agent a call.
 
+### Go interfaces
+
+From the traces of the agentsview task: one run asked `gcal impls Emitter;
+gcal callers Emitter.Emit`. Repeated on the re-indexed repository:
+
+| Command | Before | After (commit `43af3ea`) |
+|---|---|---|
+| `gcal impls Emitter` | "ambiguous": the interface, or a struct field of the same name | the methods named `Emit` by receiver: `Broadcaster`, `teeEmitter` and six test doubles |
+| `gcal impls serviceManager` | "none in graph", then one comment line that says "implements" | the seven methods of the interface by receiver: `launchdManager`, `systemdManager` |
+
+Only a type has subtypes, so a type is taken over a field or variable of its
+name. Go says nowhere that a type implements an interface; for a Go interface
+the methods it asks for are read from its source and listed by receiver. It is
+a text answer: a type is not checked to have all the methods. One unit test;
+`pnpm check` passes (229 tests); operations benchmark unchanged.
+
 ### What the keys and headings do to a search
 
 Every key of a JSON file and every Markdown heading is a symbol. On
