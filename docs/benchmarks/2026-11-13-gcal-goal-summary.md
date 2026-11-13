@@ -89,7 +89,10 @@ shell.
     (round 8): replayed on the recorded patches of 47 runs, it reports three of
     the five failed changes, each with the line the grader named, and none of
     the 42 that passed. The nullness error and the type error remain invisible
-    to it; a compile would see all five. The benchmark's one-shot rule forbids
+    to it; a compile would see all five. An opt-in `gcal check --types`
+    (TypeScript, `tsc --noEmit` against HEAD) reports the type error when the
+    recorded patch is replayed, and six real type errors in a run the
+    tests-only grader passed. The benchmark's one-shot rule forbids
     builds and tests in both lanes.
 - **StringUtils is still above plain shell** (92k against 86k, 44 s against
   40 s): same number of calls, a longer lane prompt, and two runs that made a
@@ -102,7 +105,7 @@ shell.
 
 ## What was changed
 
-23 commits on `master`, `ce7d73a` to the commit of this document.
+26 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -111,7 +114,7 @@ shell.
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
 | `grep`, `replace`, `search` | `grep` shows every fetched match; `-g` in `replace`, repeatable in both; `search` lists files by name, caps its backend page, accepts `--tests` | cut-and-repeat greps; a JSON manifest rewritten by a replace; shell file listings; two refused commands |
-| `check` | Reports callers that still use a symbol the change removed or renamed, imports of a deleted file, and Java constructor calls no constructor takes | the five failed runs; replay of 47 recorded patches |
+| `check` | Reports callers that still use a symbol the change removed or renamed, imports of a deleted file, and Java constructor calls no constructor takes; with `--types`, the new type errors (TypeScript) | the five failed runs; replay of 47 recorded patches |
 | Exit status | A lookup that finds nothing exits 0 | `&&` chains cancelled by "not found" |
 | Daemon | Loads the project graph after the first answer of a session | 1.2 to 3 s on the first graph query |
 | Skill and lane prompt | The new lookups; `\x22`/`\x27` for quotes in PowerShell patterns; `--tests` for one to three symbols | commands lost to quoting; `--tests` on 13 names |
@@ -129,9 +132,10 @@ shell.
 
 ## Not verified
 
-- The final build as such: 2 runs, both of the rename task, were made on the
-  last commit with code changes (`f191eba`); 4 on the one before the last two
-  (`1145c8a`).
+- The final build as such: 2 runs, both of the rename task, were made on
+  `f191eba`; 4 on `1145c8a` before it; none on the two commits after it
+  (`callers` on changed files, `check --types`), which were verified by unit
+  tests and by replaying recorded patches only.
 - That an agent fixes what the extended `gcal check` reports: in the two runs
   made with it the agent left nothing behind, so nothing was reported.
 - Whether the last change (one whole test as an example) raises the pass rate
@@ -151,10 +155,10 @@ shell.
 ## What I would do next
 
 1. **A real check before the agent stops.** All five failures would be
-   compile or type errors, and the index-based check of round 8 reaches three
-   of them. Let `gcal check` run the project's own type checker or compiler on
-   the changed files when one is cheap to run (`tsc --noEmit`, the build's
-   compile task, `cargo check`), and measure with the one-shot rule relaxed
+   compile or type errors; the index-based check of round 8 reaches three of
+   them and `gcal check --types` a fourth, for TypeScript only. Extend
+   `--types` to the other languages where a check is cheap (`cargo check`, the
+   build's compile task), and measure with the one-shot rule relaxed
    for both lanes: plain shell would then be allowed to compile too, which is
    the comparison that matters in real use.
 2. **Measure the final build properly**: three runs per task of both lanes on

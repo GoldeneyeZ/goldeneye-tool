@@ -80,6 +80,42 @@ remaining 164k are not spent.
   been reported to the agent by the `gcal check` it ran at the end of that
   very run. Whether it would then have fixed them is not known.
 
+## After the runs: two more changes, verified without a model
+
+No tokens were left to measure these with agents.
+
+**`gcal callers` on a file changed since indexing** (commit `5e7c304`). A call
+the graph knows was printed with the line of the index and no text; in the
+rename task's dirty tree that was `141 RevalidatedPath.as_ref call` followed by
+nothing, next to a separate row for the real line. The call is now found again
+in the caller as the working tree has it. On a clone of that repository with
+the overlay applied the answer has six rows, each with its line and text, the
+one in question being `153 RevalidatedPath.as_ref call self.as_path()`.
+
+**`gcal check --types`** (commit `ada6a1e`). The two failures the index cannot see
+are type errors; only a compiler sees those. With `--types` the check runs the
+project's own type checker, TypeScript only: `tsc --noEmit` from the project's
+`node_modules`. When that reports errors, HEAD is exported to a temporary
+directory and type-checked as well, and only the errors HEAD does not have are
+printed. It is off by default and the lane prompt does not mention it: it is a
+build step, which the one-shot rule forbids to both lanes.
+
+Replayed on the 12 recorded patches of the two terax tasks, with the project's
+dependencies linked in as the harness does:
+
+| Patch | Grader | `gcal check --types` |
+|---|---|---|
+| terax fuzzy, round 5 | failed | 1 new error: `fuzzy.ts:65 TS2339 Property 'length' does not exist on type '{ chars: string[]; indices: number[]; }'`, the cause of the failure |
+| terax fuzzy, round 6 run b | passed | 6 new errors in `fuzzy.ts` (`Type 'string' is not assignable to type 'FoldedCharacter'` and five comparisons without overlap). The grader of this task runs the tests, which do not type-check; the patch does not pass the project's `tsc --noEmit`. |
+| the other 10 (5 fuzzy, 5 module move) | passed | no new error |
+
+The project has 61 type errors at the task's base commit with the installed
+dependencies; the comparison with HEAD removes them from every answer. One
+check takes 25 to 30 s (two compiler runs).
+
+With it, four of the five failed changes are reported by a command the agent
+could run; the fifth needs the Spring build's nullness checker.
+
 ## Fairness
 
 `gcal check` is the one command the one-shot rule allows the GCAL lane after
@@ -91,8 +127,8 @@ the lanes has to say so.
 
 ## Checks
 
-- `pnpm check` passes (221 tests, 4 of them for this check); the harness tests
-  pass (88).
+- `pnpm check` passes (225 tests; 4 for the index-based check, 3 for the type
+  check, 1 for the re-found call); the harness tests pass (88).
 - Operations benchmark: Spring 19 of 19, 11,735 tokens; goldeneye-tool 12 of
   12, 2,906 tokens.
 
