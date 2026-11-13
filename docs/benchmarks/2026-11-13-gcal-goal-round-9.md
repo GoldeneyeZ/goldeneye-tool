@@ -225,6 +225,29 @@ No agent run was made on this binary either. The two tasks on these
 repositories are the most expensive of the matrix (468k and 754k tokens per
 run with GCAL).
 
+### What the keys and headings do to a search
+
+Every key of a JSON file and every Markdown heading is a symbol. On
+agentsview, which has message catalogs for nine locales and 89 Markdown
+files, a search for a plain word was answered with those:
+
+| `gcal search <word> --limit 20` on agentsview | Rows from JSON and Markdown, before | After |
+|---|---|---|
+| `session` | 19 of 20 (9 keys, 10 headings) | 6 of 20; first row `db.Session Struct` |
+| `resume` | 13 of 20 | 7 of 20 |
+| `sync` | 2 of 20 | 0 of 20 |
+| `usage` | 8 of 14 | 8 of 14 (the page was not full: nothing was hidden) |
+
+**Fix** (commit `5deea6d`): `search` lists the symbols of code before rows
+from prose and data files, and when the backend's first page is full and
+holds fewer code symbols than the limit it fetches the largest page once. One
+unit test for the order and the second fetch; `pnpm check` passes (227
+tests); the operations benchmark is unchanged on both corpora (19 of 19,
+11,666 tokens; 12 of 12, 2,978 tokens); the harness tests pass (88).
+
+Not measured: whether the agents of the agentsview task ran such searches.
+Their recorded traces were not read for this.
+
 ## Limits
 
 - The callable counts are totals; no list of the removed symbols was reviewed
