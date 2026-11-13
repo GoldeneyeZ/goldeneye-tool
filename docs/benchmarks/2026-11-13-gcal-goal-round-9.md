@@ -254,6 +254,33 @@ runs of three tasks: the same verdicts.
 Seen and left: Java methods of anonymous classes are labelled functions (534
 in the indexes read); a zsh variable is a symbol where it is read (27).
 
+### C structs that are only mentioned
+
+Read from the traces of the documentation task on codebase-memory-mcp: the
+agents start with `gcal search pipeline` and `gcal search index`. On the
+re-indexed repository the first answered with three rows for one type: the
+struct, its `typedef`, and a class for the `struct cbm_pipeline` inside that
+`typedef`. Asked of the index: which type symbols have no body in their span?
+
+| Finding | Count |
+|---|---|
+| C: `struct stat st;` in a function, `struct node;` and `typedef struct cbm_dir cbm_dir_t;` in a header are each a class | 194 of the 278 classes left in codebase-memory-mcp |
+
+**Fix** (commit `ebc91a9`): a C-family struct, union, class or enum specifier
+without a body is no symbol. The corpus test was seen failing without the
+rule (four classes for one struct in a twelve-line file); corpus,
+`cargo test --workspace`, clippy and fmt pass. Indexed again:
+codebase-memory-mcp has 80 classes (776 at the start of this audit), the same
+37,486 call edges, and `gcal search pipeline` answers with the struct, its
+`typedef` and three functions. Operations benchmark unchanged on both
+corpora.
+
+Seen and left, for the agent CLI rather than the index: `gcal get
+cbm_pipeline_t` prints the one-line `typedef`, not the struct it names, and
+`gcal get cbm_store_t` is "ambiguous" between the five headers that repeat
+that `typedef`. The recorded agents asked for such names in every run of the
+task.
+
 ### What the keys and headings do to a search
 
 Every key of a JSON file and every Markdown heading is a symbol. On

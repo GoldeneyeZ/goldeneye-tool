@@ -108,7 +108,7 @@ shell.
 
 ## What was changed
 
-45 commits on `master`, `ce7d73a` to the last one.
+47 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -116,7 +116,7 @@ shell.
 | Backend, index | An anonymous JavaScript function takes the name it is assigned to; a callback is not a symbol | 13 symbols named `native` on terax, one real; `callers native` was "ambiguous" |
 | Backend, index | A lambda or closure in any language is not a symbol; its calls belong to the function around it (Nix functions take the name of their binding) | a Java lambda `csrf -> csrf.disable()` indexed as a function `csrf` and reported as removed by the first version of the check; 3,102 such callables in three Spring modules |
 | Backend, index | A Java `package` line is not a class | an audit of the names in seven indexes: 2,920 classes named `org` or `fr`, one per Java file, a third of the classes of the Spring index; two of five rows of a `search --label Class` answer |
-| Backend, index | A Go type is one symbol, not a class and a struct; a C struct or union without a tag, and a JavaScript class expression without a name, are not symbols named after their first member | the same audit on agentsview and codebase-memory-mcp: 1,563 duplicate Go types, 447 C classes named after a field (`FILE`, `count`) |
+| Backend, index | A Go type is one symbol, not a class and a struct; a C struct or union without a tag, and a JavaScript class expression without a name, are not symbols named after their first member | the same audit on agentsview and codebase-memory-mcp: 1,563 duplicate Go types, 447 C classes named after a field (`FILE`, `count`), and 194 more that were uses or forward declarations of a struct: the classes of the C index went from 776 to 80 |
 | Backend, index | Go: one symbol per variable and per constant of a group. Makefile: a rule is one function, named by its target. PowerShell: a variable is a symbol where it is assigned | the same audit, for functions and variables: 188 duplicate Go variables, constants of groups that could not be looked up, 23 functions named after a variable, 878 variable reads |
 | `arch` | Directories of source are opened before larger directories of documents | the operations benchmark on this repository indexed again: 299 notes took the rows, `ui/src` was not shown |
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
@@ -141,9 +141,9 @@ shell.
 
 ## Not verified
 
-- The final build as such: no run was made on the last three binaries (Java
+- The final build as such: no run was made on the last four binaries (Java
   package lines; duplicate Go types and unnamed C structs; Go variables and
-  constants, Makefile recipes, PowerShell reads)
+  constants, Makefile recipes, PowerShell reads; C structs without a body)
   nor with the last change of `search` (code before keys and headings).
   The Go and C repositories are those of the two most expensive tasks; what
   the cleaner index does to their cost is not measured. 1 run (StringUtils, passed) was made on `06f7d2a`;
