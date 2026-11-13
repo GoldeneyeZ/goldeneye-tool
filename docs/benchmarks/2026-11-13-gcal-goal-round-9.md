@@ -275,11 +275,19 @@ codebase-memory-mcp has 80 classes (776 at the start of this audit), the same
 `typedef` and three functions. Operations benchmark unchanged on both
 corpora.
 
-Seen and left, for the agent CLI rather than the index: `gcal get
-cbm_pipeline_t` prints the one-line `typedef`, not the struct it names, and
-`gcal get cbm_store_t` is "ambiguous" between the five headers that repeat
-that `typedef`. The recorded agents asked for such names in every run of the
-task.
+**`gcal get` on a typedef** (commit `85d202e`). With the index right,
+`gcal get cbm_pipeline_t` still printed the one-line `typedef`, not the
+struct it names, and `gcal get cbm_store_t` was "ambiguous" between the five
+headers that repeat that line. The recorded agents asked for such `_t` names
+in each of the four runs of the task; in the last one the agent then asked
+for `cbm_registry cbm_gbuf` and grepped for `struct cbm_registry`. A forward
+`typedef` is now followed by the source of the struct, union or enum it
+names, and the same `typedef` in several headers is one answer.
+`gcal get cbm_pipeline_t cbm_gbuf_t cbm_registry_t` on the repository returns
+three typedefs and three structs, 3.9 kB. One unit test; `pnpm check` passes
+(228 tests); operations benchmark unchanged; replay of 22 recorded runs of
+three tasks, the same verdicts; harness tests pass (88). Not measured:
+whether it saves the agent a call.
 
 ### What the keys and headings do to a search
 

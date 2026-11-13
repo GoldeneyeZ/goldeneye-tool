@@ -108,7 +108,7 @@ shell.
 
 ## What was changed
 
-47 commits on `master`, `ce7d73a` to the last one.
+49 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -121,6 +121,7 @@ shell.
 | `arch` | Directories of source are opened before larger directories of documents | the operations benchmark on this repository indexed again: 299 notes took the rows, `ui/src` was not shown |
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
+| `get`, C | A forward `typedef struct tag name_t;` is followed by the source of the struct; the same typedef in several headers is one answer, not "ambiguous" | the four recorded runs of the documentation task on the C repository asked for `_t` names; the last asked again for the structs |
 | `grep`, `replace`, `search` | `grep` shows every fetched match; `-g` in `replace`, repeatable in both; `search` lists files by name, caps its backend page, accepts `--tests` | cut-and-repeat greps; a JSON manifest rewritten by a replace; shell file listings; two refused commands |
 | `search` | Symbols of code come before headings and keys of prose and data files; a full first page of those is fetched again, larger | on agentsview 19 of the 20 rows of `gcal search session` were JSON keys and Markdown headings |
 | `check` | Reports callers that still use a symbol the change removed or renamed, imports of a deleted file, and Java constructor calls no constructor takes; with `--types`, the new type errors (TypeScript) | the five failed runs; replay of 47 recorded patches |
@@ -143,7 +144,8 @@ shell.
 
 - The final build as such: no run was made on the last four binaries (Java
   package lines; duplicate Go types and unnamed C structs; Go variables and
-  constants, Makefile recipes, PowerShell reads; C structs without a body)
+  constants, Makefile recipes, PowerShell reads; C structs without a body),
+  nor with `get` following a C typedef
   nor with the last change of `search` (code before keys and headings).
   The Go and C repositories are those of the two most expensive tasks; what
   the cleaner index does to their cost is not measured. 1 run (StringUtils, passed) was made on `06f7d2a`;
