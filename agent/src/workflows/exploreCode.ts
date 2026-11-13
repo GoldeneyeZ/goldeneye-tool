@@ -18,6 +18,7 @@ import {
 } from "../kernel/codeGraph.js";
 import { displayName, isTestPath } from "../kernel/displayName.js";
 import { couldBeFileName, normalizePath, parseLocator, parseSymbolLocator } from "../kernel/locator.js";
+import { locateDeclaration } from "../kernel/relocate.js";
 import { importers } from "./importers.js";
 import {
   declarationLine,
@@ -39,6 +40,7 @@ const MAX_SEARCH_ROWS = 40;
 const SEARCH_OVERFETCH_FACTOR = 3;
 const SEARCH_BACKEND_MAX = 200;
 const TEXT_LINES_SHOWN = 5;
+const CALL_LINES_EACH = 4;
 // The backend ranks before it truncates; over-fetch so definitions and
 // production code can be ordered first locally.
 const TEXT_OVERFETCH_FACTOR = 3;
@@ -500,9 +502,39 @@ export async function references(
         const declared = declarationLineNumber(fileLines, enclosing);
         lines = lines.filter((line) => line !== declared);
       }
+      // The declaration of the symbol itself is not a use of it. The index may
+      // not know the lines of a changed file, so it is found in the text.
+      for (const node of resolved) {
+        if (node.filePath !== match.filePath) continue;
+        const fileLines = (await context.reader.lines(match.filePath)) ?? [];
+        const declared = declarationLineNumber(fileLines, node);
+        // In a file changed since indexing the declaration has moved.
+        const range = locateDeclaration(fileLines, node.name, node.startLine);
+        const moved = range === undefined ? undefined : declarationLineNumber(fileLines, { ...node, ...range });
+        lines = lines.filter((line) => line !== declared && line !== moved);
+      }
       if (lines.length === 0) continue;
 
-      const key = enclosing?.qualifiedName ?? `${match.filePath}:${lines[0]}`;
+      if (enclosing === undefined) {
+        // No symbol to name the place by: every line is its own row, with its
+        // own text. One row for several lines would show the first and hide the rest.
+        for (const line of lines) {
+          const key = `${match.filePath}:${line}`;
+          if (rows.has(key)) continue;
+          textOnly += 1;
+          rows.set(key, {
+            name: "",
+            filePath: match.filePath,
+            lines: [line],
+            kind: "text",
+            hop: 1,
+            callSite: await lineText(context, match.filePath, line),
+          });
+        }
+        continue;
+      }
+
+      const key = enclosing.qualifiedName;
       const callSite = await lineText(context, match.filePath, lines[0]);
       const existing = rows.get(key);
       if (existing !== undefined) {
@@ -512,7 +544,7 @@ export async function references(
       }
       textOnly += 1;
       rows.set(key, {
-        name: enclosing === undefined ? "" : displayName(enclosing, context.project),
+        name: displayName(enclosing, context.project),
         filePath: match.filePath,
         lines,
         kind: "text",
@@ -530,14 +562,25 @@ export async function references(
   );
   const shown = ordered.slice(0, request.limit);
   const target = displayName(resolved[0], context.project);
+  // A place that uses the symbol on a few lines shows each of them: an edit is
+  // written from these lines, and one line of text for three would hide two.
+  const printed: FileRow[] = [];
+  for (const row of shown) {
+    const kind = row.hop > 1 ? `hop ${row.hop}` : row.kind;
+    if (row.lines.length < 2 || row.lines.length > CALL_LINES_EACH) {
+      printed.push({ filePath: row.filePath, fields: [lineList(row.lines), row.name, kind, row.callSite] });
+      continue;
+    }
+    for (const [index, line] of row.lines.entries()) {
+      printed.push({
+        filePath: row.filePath,
+        fields: [String(line), row.name, index === 0 ? kind : "", await lineText(context, row.filePath, line)],
+      });
+    }
+  }
   const lines = [
     `# callers of ${target}: ${ordered.length} (graph ${ordered.length - textOnly}, text-only ${textOnly})`,
-    ...groupByFile(
-      shown.map((row) => ({
-        filePath: row.filePath,
-        fields: [lineList(row.lines), row.name, row.hop > 1 ? `hop ${row.hop}` : row.kind, row.callSite],
-      })),
-    ),
+    ...groupByFile(printed),
   ];
   if (ordered.length > shown.length) {
     const hiddenTests = ordered.slice(request.limit).filter((row) => isTestPath(row.filePath)).length;
@@ -850,16 +893,21 @@ async function testsOfFile(context: CodeContext, written: string): Promise<strin
   const listed = await importers(context, filePath, { limit: 20, exists: true, testsOnly: true });
   if (listed !== undefined) {
     if (!listed.text.endsWith(": none found")) {
-      // One test file imports it: that is where its tests are changed or added.
+      // One test file of a readable size imports it: that is where its tests
+      // are changed or added. Larger ones are suites that merely use it.
       const importing = listed.text.split("\n").filter((line) => /^[^#\s]/.test(line));
-      if (importing.length !== 1) return listed.text;
-      const lines = await context.reader.lines(importing[0]);
-      if (lines === undefined || lines.length > TEST_FILE_WHOLE_MAX_LINES) return listed.text;
+      const readable: Array<{ filePath: string; lines: string[] }> = [];
+      for (const filePath of importing) {
+        const lines = await context.reader.lines(filePath);
+        if (lines !== undefined && lines.length <= TEST_FILE_WHOLE_MAX_LINES) readable.push({ filePath, lines });
+      }
+      if (readable.length !== 1) return listed.text;
+      const [{ filePath: testFile, lines }] = readable;
       const printed = headsPrinted.get(context) ?? new Set<string>();
       headsPrinted.set(context, printed);
-      if (printed.has(importing[0])) return listed.text;
-      printed.add(importing[0]);
-      return [listed.text, "", `# ${importing[0]}:1-${lines.length}`, ...lines].join("\n");
+      if (printed.has(testFile)) return listed.text;
+      printed.add(testFile);
+      return [listed.text, "", `# ${testFile}:1-${lines.length}`, ...lines].join("\n");
     }
     const nearest = await nearestTests(context, { filePath } as GraphNode);
     return [listed.text, ...nearest].join("\n");

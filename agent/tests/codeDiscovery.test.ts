@@ -723,6 +723,34 @@ describe("exploring code", () => {
     );
   });
 
+  it("gives every use its own row when no symbol names the place, and leaves the declaration out", async () => {
+    // A file changed after indexing: the search reports lines without a symbol.
+    const context = await createContext({
+      textResults: [{ file: BILLING, label: "", node: "", qualified_name: "", start_line: 0, end_line: 0, match_lines: [6, 7, 15] }],
+    });
+    const charge = NODES.find((item) => item.qualifiedName.endsWith("Billing.charge"))!;
+    const fileLines = BILLING_SOURCE.split("\n");
+    const result = await references(context, backend({}), {
+      target: "Ledger.record",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+    const rows = result.text.split("\n");
+    expect(rows[0]).toBe("# callers of Ledger.record: 3 (graph 0, text-only 3)");
+    // One row per line, each with its own text.
+    expect(rows.slice(2)).toEqual([6, 7, 15].map((line) => `  ${line}\t\ttext\t${fileLines[line - 1]}`));
+    expect(charge).toBeDefined();
+
+    // The line that declares the symbol is not one of its uses.
+    const own = await createContext({
+      extraNodes: [node(BILLING, "Method", ["Billing", "record"], 18, 18)],
+      textResults: [{ file: BILLING, label: "", node: "", qualified_name: "", start_line: 0, end_line: 0, match_lines: [7, 18] }],
+    });
+    const declared = await references(own, backend({}), { target: "Billing.record", depth: 1, limit: 20, includeText: true });
+    expect(declared.text.split("\n").slice(2)).toEqual([`  7\t\ttext\t${fileLines[6]}`]);
+  });
+
   it("lists subtypes from the graph", async () => {
     const ledger = NODES.find((item) => item.label === "Interface")!;
     const context = await createContext({ subtypes: { [ledger.qualifiedName]: [NODES[1]] } });
