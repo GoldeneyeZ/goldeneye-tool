@@ -490,9 +490,9 @@ export function tomlInlineTable(object) {
 // an unstable nested host in mid-2026 Codex builds, but from Codex 0.159 the
 // host is the agent's only way to execute commands: disabling it leaves the
 // model with no tools ("Code Mode is unavailable because code-mode host is
-// disabled"). The Codex default is therefore left alone unless a config asks.
+// disabled"). The flag is therefore passed as true, which is also the default of
+// Codex 0.159, unless a configuration turns it off.
 export function codexSandboxArgs({ fullAccess, worktree, codeModeHost }) {
-  // The Codex tool host is on unless a configuration turns it off.
   const hostArgs = ["-c", `features.code_mode_host=${codeModeHost === false ? "false" : "true"}`];
   if (fullAccess) {
     return ["-s", "danger-full-access", "-c", 'approval_policy="never"', ...hostArgs];
