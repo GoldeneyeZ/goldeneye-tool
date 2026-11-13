@@ -326,3 +326,6 @@ fn unsupported(message: &str) -> QueryError {
 fn row_key(row: &[QueryValue]) -> String {
     serde_json::to_string(row).unwrap_or_else(|_| format!("{row:?}"))
 }
+
+#[cfg(test)]
+mod large_graph_tests;

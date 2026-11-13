@@ -4,38 +4,66 @@ use goldeneye_domain::{GraphEdge, GraphNode, NodeId};
 
 use super::super::{
     MAX_INTERMEDIATE_BINDINGS,
-    ast::{EdgeDirection, EdgeMatch, EdgePattern, MatchPattern, NodePattern},
+    ast::{EdgeDirection, EdgeMatch, EdgePattern, Expression, MatchPattern, NodePattern},
     unsupported,
 };
-use super::{binding::Binding, compare::values_equal, reference::node_property};
+use super::{
+    binding::Binding, compare::values_equal, predicate::evaluate_expression,
+    reference::node_property,
+};
 use crate::types::QueryError;
 
+/// Bindings of one pattern, at most `MAX_INTERMEDIATE_BINDINGS` of them.
+///
+/// `filter` is the clause's WHERE when it can be decided on this pattern
+/// alone. It is then applied while the candidates are produced, so the cap
+/// counts what the query keeps: `MATCH (n) WHERE n.file_path = 'x'` selects a
+/// handful of nodes however many the project has. Without it the cap counted
+/// every node of the pattern's label, and such a query failed on any project
+/// above the cap.
 pub(super) fn build_bindings_bounded<'a>(
     pattern: &MatchPattern,
+    filter: Option<&Expression>,
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<Binding<'a>>, QueryError> {
     let mut bindings = match pattern {
-        MatchPattern::Node(pattern) => nodes
-            .iter()
-            .filter(|node| node_matches(node, pattern, degrees))
-            .map(|node| Binding {
-                nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
-                edges: BTreeMap::new(),
-                values: BTreeMap::new(),
-                all_nodes: Some(nodes),
-                all_edges: Some(edges),
-            })
-            .collect(),
+        MatchPattern::Node(pattern) => {
+            let mut bindings = Vec::new();
+            for node in nodes
+                .iter()
+                .filter(|node| node_matches(node, pattern, degrees))
+            {
+                let binding = Binding {
+                    nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
+                    edges: BTreeMap::new(),
+                    values: BTreeMap::new(),
+                    all_nodes: Some(nodes),
+                    all_edges: Some(edges),
+                };
+                if let Some(filter) = filter
+                    && !evaluate_expression(filter, &binding, degrees)?
+                {
+                    continue;
+                }
+                bindings.push(binding);
+                if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
+                    return Err(unsupported("query exceeds intermediate binding safety cap"));
+                }
+            }
+            bindings
+        }
         MatchPattern::Edge(pattern) => {
             let EdgeMatch { left, edge, right } = pattern.as_ref();
             if edge.min_hops != 1 || edge.max_hops != 1 {
-                return build_variable_bindings(pattern, nodes, edges, degrees);
+                let bindings = build_variable_bindings(pattern, nodes, edges, degrees)?;
+                return retain_filtered(bindings, filter, degrees);
             }
             let nodes_by_id: BTreeMap<&NodeId, &GraphNode> =
                 nodes.iter().map(|node| (&node.id, node)).collect();
             let mut bindings = Vec::new();
+            let mut kept = 0;
             for graph_edge in edges.iter().filter(|graph_edge| {
                 edge.kinds.is_empty()
                     || edge
@@ -95,18 +123,48 @@ pub(super) fn build_bindings_bounded<'a>(
                         }
                     }
                 }
+                // Decide each new binding at once, so that the edges a filter
+                // rejects never count toward the cap.
+                while kept < bindings.len() {
+                    bindings[kept].all_nodes = Some(nodes);
+                    bindings[kept].all_edges = Some(edges);
+                    if let Some(filter) = filter
+                        && !evaluate_expression(filter, &bindings[kept], degrees)?
+                    {
+                        bindings.swap_remove(kept);
+                        continue;
+                    }
+                    kept += 1;
+                }
+                if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
+                    return Err(unsupported("query exceeds intermediate binding safety cap"));
+                }
             }
             bindings
         }
     };
-    if bindings.len() > MAX_INTERMEDIATE_BINDINGS {
-        return Err(unsupported("query exceeds intermediate binding safety cap"));
-    }
     for binding in &mut bindings {
         binding.all_nodes = Some(nodes);
         binding.all_edges = Some(edges);
     }
     Ok(bindings)
+}
+
+fn retain_filtered<'a>(
+    bindings: Vec<Binding<'a>>,
+    filter: Option<&Expression>,
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> Result<Vec<Binding<'a>>, QueryError> {
+    let Some(filter) = filter else {
+        return Ok(bindings);
+    };
+    let mut retained = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        if evaluate_expression(filter, &binding, degrees)? {
+            retained.push(binding);
+        }
+    }
+    Ok(retained)
 }
 
 fn push_edge_binding<'a>(

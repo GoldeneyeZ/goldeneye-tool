@@ -44,7 +44,7 @@ fn evaluate_exists(
     };
     let mut partial = vec![binding.clone()];
     for pattern in patterns {
-        let candidates = build_bindings_bounded(pattern, nodes, edges, degrees)?;
+        let candidates = build_bindings_bounded(pattern, None, nodes, edges, degrees)?;
         let mut next = Vec::new();
         for binding in &partial {
             for candidate in &candidates {

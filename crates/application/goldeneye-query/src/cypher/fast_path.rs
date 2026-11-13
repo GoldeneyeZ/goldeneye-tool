@@ -27,7 +27,7 @@ pub(super) fn execute_simple_node_limit(
     row_cap: usize,
 ) -> Option<Result<QueryGraphResult, QueryError>> {
     let (query_limit, clause, pattern) = eligibility(query)?;
-    let mut candidates = match matching_candidates(nodes, pattern, degrees) {
+    let mut candidates = match matching_candidates(nodes, edges, clause, pattern, degrees) {
         Ok(candidates) => candidates,
         Err(error) => return Some(Err(error)),
     };
@@ -85,13 +85,17 @@ fn eligibility(query: &ParsedQuery) -> Option<(usize, &MatchClause, &NodePattern
 
 fn matching_candidates<'a>(
     nodes: &'a [GraphNode],
+    edges: &[GraphEdge],
+    clause: &MatchClause,
     pattern: &NodePattern,
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<&'a GraphNode>, QueryError> {
     // Buffer only references so binding-cap errors retain priority over expression errors.
-    let mut candidates = Vec::with_capacity(nodes.len().min(MAX_INTERMEDIATE_BINDINGS));
+    let mut candidates = Vec::new();
     for node in nodes {
-        if node_matches(node, pattern, degrees) {
+        if node_matches(node, pattern, degrees)
+            && !filtered_out(clause, pattern, node, nodes, edges, degrees)
+        {
             if candidates.len() == MAX_INTERMEDIATE_BINDINGS {
                 return Err(unsupported("query exceeds intermediate binding safety cap"));
             }
@@ -99,6 +103,30 @@ fn matching_candidates<'a>(
         }
     }
     Ok(candidates)
+}
+
+/// Whether the clause's WHERE rejects the node. The cap counts what the query
+/// keeps, so a filter that selects a few nodes out of a large graph is answered.
+/// A node whose filter fails to evaluate stays: projecting it reports the error.
+fn filtered_out(
+    clause: &MatchClause,
+    pattern: &NodePattern,
+    node: &GraphNode,
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    degrees: &BTreeMap<NodeId, (usize, usize)>,
+) -> bool {
+    let Some(filter) = &clause.filter else {
+        return false;
+    };
+    let binding = Binding {
+        nodes: BTreeMap::from([(pattern.alias.clone(), node)]),
+        edges: BTreeMap::new(),
+        values: BTreeMap::new(),
+        all_nodes: Some(nodes),
+        all_edges: Some(edges),
+    };
+    matches!(evaluate_expression(filter, &binding, degrees), Ok(false))
 }
 
 fn is_qualified_name_projection(

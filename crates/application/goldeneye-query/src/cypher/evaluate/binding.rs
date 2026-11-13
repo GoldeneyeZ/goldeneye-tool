@@ -63,10 +63,24 @@ pub(in crate::cypher) fn execute_match_clauses<'a>(
     degrees: &BTreeMap<NodeId, (usize, usize)>,
 ) -> Result<Vec<Binding<'a>>, QueryError> {
     for clause in clauses {
+        // A WHERE over a single pattern that starts from nothing can be decided
+        // candidate by candidate; see `build_bindings_bounded`.
+        if let (false, [pattern], Some(filter), [seed]) = (
+            clause.optional,
+            clause.patterns.as_slice(),
+            clause.filter.as_ref(),
+            bindings.as_slice(),
+        ) && seed.nodes.is_empty()
+            && seed.edges.is_empty()
+            && seed.values.is_empty()
+        {
+            bindings = build_bindings_bounded(pattern, Some(filter), nodes, edges, degrees)?;
+            continue;
+        }
         let candidate_sets = clause
             .patterns
             .iter()
-            .map(|pattern| build_bindings_bounded(pattern, nodes, edges, degrees))
+            .map(|pattern| build_bindings_bounded(pattern, None, nodes, edges, degrees))
             .collect::<Result<Vec<_>, _>>()?;
         let mut joined = Vec::new();
         for binding in &bindings {
