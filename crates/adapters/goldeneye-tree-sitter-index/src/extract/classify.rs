@@ -29,7 +29,9 @@ mod audited;
 mod generic;
 mod tree;
 
-use audited::{classify_audited, import_name_after_keyword};
+use audited::{
+    classify_audited, declares_javascript_function, import_name_after_keyword, is_javascript_family,
+};
 use generic::{classify_generic, classify_known};
 use tree::ancestor_kind;
 pub(super) use tree::{
@@ -44,6 +46,10 @@ pub(super) fn classify(
     source: &[u8],
 ) -> Option<Definition> {
     if language == "graphql" && node.kind() == "type_definition" {
+        return None;
+    }
+    if is_javascript_family(language) && declares_javascript_function(node) {
+        // The function is the symbol; it takes the declared name.
         return None;
     }
     if let Some(definition) = classify_known(language, node, scope, source) {

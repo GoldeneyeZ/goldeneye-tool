@@ -260,6 +260,12 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
     {
         return None;
     }
+    if is_javascript_family(language)
+        && is_javascript_function_value(node)
+        && node.child_by_field_name("name").is_none()
+    {
+        return javascript_assigned_name_node(node);
+    }
     if matches!(language, "cpp" | "cuda") && matches!(label, "Function" | "Method") {
         return cpp_callable_name_node(node);
     }
@@ -402,6 +408,66 @@ fn audited_name_node<'tree>(language: &str, node: Node<'tree>, label: &str) -> O
         .find_map(|field| node.child_by_field_name(field))
         .and_then(|candidate| first_name_like(candidate).or(Some(candidate)))
         .or_else(|| first_name_like(node))
+}
+
+pub(super) fn is_javascript_family(language: &str) -> bool {
+    matches!(language, "javascript" | "typescript" | "tsx")
+}
+
+pub(super) fn is_javascript_function_value(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    )
+}
+
+/// Whether the node declares a name whose value is a function written in
+/// place: `const run = () => ..`, a class field `run = () => ..`. The function
+/// carries the name, so the declaration is not a second symbol.
+pub(super) fn declares_javascript_function(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "variable_declarator" | "public_field_definition" | "field_definition"
+    ) && node
+        .child_by_field_name("value")
+        .is_some_and(is_javascript_function_value)
+}
+
+/// The name a function without one is known by: the variable, the class field
+/// or the object property it is the value of, or the target it is assigned to.
+/// A function passed as an argument has none and is not a symbol: without this
+/// rule it took the first identifier of its own text (a parameter, or whatever
+/// its body mentions first) as its name.
+fn javascript_assigned_name_node(node: Node<'_>) -> Option<Node<'_>> {
+    let holder = node.parent()?;
+    let is_value = |field: &str| {
+        holder
+            .child_by_field_name(field)
+            .is_some_and(|value| value.id() == node.id())
+    };
+    match holder.kind() {
+        "variable_declarator" if is_value("value") => holder
+            .child_by_field_name("name")
+            .filter(|name| name.kind() == "identifier"),
+        "public_field_definition" | "field_definition" if is_value("value") => holder
+            .child_by_field_name("name")
+            .or_else(|| holder.child_by_field_name("property")),
+        "pair" if is_value("value") => holder.child_by_field_name("key").filter(|key| {
+            matches!(
+                key.kind(),
+                "property_identifier" | "string" | "private_property_identifier"
+            )
+        }),
+        "assignment_expression" if is_value("right") => {
+            let left = holder.child_by_field_name("left")?;
+            match left.kind() {
+                "identifier" => Some(left),
+                "member_expression" => left.child_by_field_name("property"),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn cpp_callable_name_node(node: Node<'_>) -> Option<Node<'_>> {

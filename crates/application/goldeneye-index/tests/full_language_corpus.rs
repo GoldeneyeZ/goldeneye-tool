@@ -363,6 +363,73 @@ fn cpp_anonymous_namespace_does_not_steal_a_descendant_name() {
 }
 
 #[test]
+fn javascript_function_values_take_the_name_they_are_assigned_to() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("panel.ts"),
+        concat!(
+            "export const add = (a: number, b: number) => a + b;\n",
+            "export function useThing() {\n",
+            "  useEffect(() => {\n",
+            "    native.start();\n",
+            "  }, []);\n",
+            "  const stop = () => native.stop();\n",
+            "  return { run: async () => native.run(), stop };\n",
+            "}\n",
+            "class Box {\n",
+            "  open = () => native.open();\n",
+            "}\n",
+            "target.handler = function () { return native.handle(); };\n",
+        ),
+    )
+    .expect("write TypeScript source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service
+        .index_repository(temp.path())
+        .expect("index TypeScript function values");
+
+    let symbols = |name: &str| -> Vec<(String, String)> {
+        service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name)
+            .map(|hit| {
+                (
+                    hit.node.label.as_str().to_owned(),
+                    hit.node.qualified_name.as_str().to_owned(),
+                )
+            })
+            .collect()
+    };
+
+    // A callback is not a symbol, and nothing is named after what a body mentions first.
+    for stolen in ["native", "a"] {
+        assert_eq!(symbols(stolen), Vec::new(), "{stolen}");
+    }
+    // One symbol per declared function, carrying the declared name.
+    for (name, label, owner) in [
+        ("add", "Function", ".panel.add"),
+        ("stop", "Function", ".useThing.stop"),
+        ("run", "Function", ".useThing.run"),
+        ("open", "Method", ".Box.open"),
+        ("handler", "Function", ".panel.handler"),
+    ] {
+        let found = symbols(name);
+        assert_eq!(found.len(), 1, "{name}: {found:?}");
+        assert_eq!(found[0].0, label, "{name}");
+        assert!(found[0].1.ends_with(owner), "{name}: {}", found[0].1);
+    }
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(
