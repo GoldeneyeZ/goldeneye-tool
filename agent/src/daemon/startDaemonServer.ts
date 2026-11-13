@@ -15,8 +15,22 @@ const MAX_REQUEST_BYTES = 1024 * 1024;
 interface BackendSession {
   client: GcalBackendClient;
   active: number;
+  /** Whether the graph warm-up has been scheduled. */
+  warming: boolean;
   lastUsed: number;
   tail: Promise<void>;
+}
+
+/** The cheapest query that makes the backend load the project graph; it reads no source file. */
+async function warmGraph(client: GcalBackendClient): Promise<void> {
+  try {
+    await client.tool?.("query_graph", {
+      query: "MATCH (f:File) RETURN f.file_path LIMIT 1",
+      max_rows: 1,
+    });
+  } catch {
+    // Only a head start: the next real request reports any real problem.
+  }
 }
 
 export interface StartDaemonServerOptions {
@@ -70,6 +84,7 @@ export async function startDaemonServer(options: StartDaemonServerOptions): Prom
       session = {
         client: options.createClient(request.command, request.project),
         active: 0,
+        warming: false,
         lastUsed: Date.now(),
         tail: Promise.resolve(),
       };
@@ -84,6 +99,13 @@ export async function startDaemonServer(options: StartDaemonServerOptions): Prom
       () => undefined,
       () => undefined,
     );
+    if (!session.warming) {
+      session.warming = true;
+      // The backend loads the project graph on its first query (about a second
+      // on a large index). Doing that right after the first answer, while the
+      // caller reads it, takes the wait off the next request.
+      session.tail = session.tail.then(() => warmGraph(session!.client));
+    }
     void result.then(
       () => {
         session!.active -= 1;

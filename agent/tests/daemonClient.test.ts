@@ -70,6 +70,39 @@ describe("GCAL daemon client", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("loads the project graph once, after the first answer of a session", async () => {
+    const gcalHome = await temporaryDirectory();
+    const endpoint = daemonEndpoint(gcalHome);
+    const order: string[] = [];
+    const status = vi.fn(async () => {
+      order.push("status");
+      return {};
+    });
+    // A failing warm-up must not surface anywhere.
+    const tool = vi.fn(async (name: string) => {
+      order.push(`tool:${name}`);
+      throw new Error("warm-up failed");
+    });
+    const daemon = await startDaemonServer({
+      endpoint,
+      lockPath: daemonLockPath(gcalHome),
+      idleTimeoutMs: 1_000,
+      createClient: () => fakeBackend({ status, tool }),
+    });
+    const client = remoteClient(gcalHome, endpoint);
+
+    await client.status();
+    await client.status();
+    await client.status();
+
+    // Requests of one session run in order, so the warm-up sits between the
+    // first answer and the second request.
+    expect(order).toEqual(["status", "tool:query_graph", "status", "status"]);
+    expect(tool).toHaveBeenCalledWith("query_graph", expect.objectContaining({ max_rows: 1 }));
+
+    await daemon.close();
+  });
+
   it("preserves typed backend errors across IPC", async () => {
     const gcalHome = await temporaryDirectory();
     const endpoint = daemonEndpoint(gcalHome);
