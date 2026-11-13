@@ -265,8 +265,11 @@ shell.
    small API mistakes with nothing compiled before grading. A third and fourth
    repetition per lane with the build allowed would say whether that rate
    differs between the lanes at all.
-7. **Move the benchmark's worktrees and caches to the NVMe disk**, for both
-   lanes on the same day. Preparation of a Spring run is 45 to 57 s of
-   `git worktree add` on a hard disk, and the GCAL pre-warm after it 8 to 12 s.
-   For GCAL itself: open the index without creating `-wal` and `-shm` files
-   when the process only reads.
+7. **Renames and moves of a symbol**, the two tasks where GCAL takes more
+   steps and more input than plain shell. The cause and a first change are in
+   `2026-11-13-gcal-rename-and-move-steps.md`; it is not measured with an
+   agent yet.
+
+Not planned: moving the benchmark's worktrees and caches to the NVMe disk.
+Wall time is an indicator here, not what is optimised (decided 2026-11-13);
+the measures are the agent's steps and its input and output tokens.
