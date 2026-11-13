@@ -856,6 +856,28 @@ describe("exploring code", () => {
     );
   });
 
+  it("asks a Go interface's methods of their receivers, and takes the type when a field has its name", async () => {
+    const engine = "internal/sync/engine.go";
+    const emitter = node(engine, "Interface", ["Emitter"], 3, 6);
+    const field = node(engine, "Field", ["EngineConfig", "Emitter"], 9, 9);
+    const emit = node("internal/server/broadcaster.go", "Method", ["Emit"], 67, 69);
+    const context = await createContext({ extraNodes: [emitter, field], textResults: [textHit(emit, [67])] });
+    await mkdir(join(workspace!, "internal/sync"), { recursive: true });
+    await writeFile(
+      join(workspace!, engine),
+      "package sync\n\ntype Emitter interface {\n\tEmit(scope string)\n\tClose() error\n}\n\ntype EngineConfig struct {\n\tEmitter Emitter\n}\n",
+    );
+
+    const result = await implementations(context, "Emitter", 1);
+
+    expect(result.ok).toBe(true);
+    expect(result.text).not.toContain("# ambiguous");
+    expect(result.text.split("\n")[0]).toBe(
+      "# subtypes of go.Emitter: none in graph; a Go type satisfies it by having Emit, Close; methods of that name by receiver:",
+    );
+    expect(result.text).toContain("internal/server/broadcaster.go");
+  });
+
   it("reports when text search finds nothing", async () => {
     const context = await createContext();
     expect((await grepCode(context, { pattern: "zzz", regex: false, limit: 10 })).text).toBe(

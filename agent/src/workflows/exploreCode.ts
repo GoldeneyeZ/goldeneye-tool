@@ -1072,7 +1072,8 @@ export async function implementations(
   target: string,
   depth: number,
 ): Promise<ReadResult> {
-  const resolved = await resolveTarget(context, target);
+  // Only a type has subtypes: a field or a variable of the same name is not meant.
+  const resolved = await resolveTarget(context, target, isTypeNode);
   if (!Array.isArray(resolved)) return resolved;
 
   const rows: string[] = [];
@@ -1101,12 +1102,39 @@ export async function implementations(
     return { text: [`# subtypes of ${name}: ${rows.length}`, ...rows].join("\n"), ok: true };
   }
 
+  // Go has no `implements`: a type satisfies an interface by having its methods.
+  const methods = await goInterfaceMethods(context, resolved[0]);
+  if (methods.length > 0) {
+    const receivers = await grepCode(context, {
+      pattern: `func \\([^)]*\\) (${methods.map(escapeForRegex).join("|")})\\(`,
+      regex: true,
+      limit: 30,
+    });
+    return {
+      text: `# subtypes of ${name}: none in graph; a Go type satisfies it by having ${methods.join(", ")}; methods of that name by receiver:\n${receivers.text}`,
+      ok: true,
+    };
+  }
+
   const text = await grepCode(context, {
     pattern: subtypeTextPattern(resolved[0].name),
     regex: true,
     limit: 30,
   });
   return { text: `# subtypes of ${name}: none in graph; text matches:\n${text.text}`, ok: true };
+}
+
+const GO_INTERFACE_METHODS_MAX = 8;
+
+/** The method names a Go interface asks for, read from its source. */
+async function goInterfaceMethods(context: CodeContext, node: GraphNode): Promise<string[]> {
+  if (node.label !== "Interface" || !node.filePath.endsWith(".go")) return [];
+  const lines = (await context.reader.lines(node.filePath)) ?? [];
+  const names = lines
+    .slice(node.startLine - 1, node.endLine)
+    .map((line) => /^\s+([A-Za-z_]\w*)\s*\(/.exec(line)?.[1])
+    .filter((name): name is string => name !== undefined);
+  return [...new Set(names)].slice(0, GO_INTERFACE_METHODS_MAX);
 }
 
 /** Declarations that name a supertype: Java/TS keywords, Rust `impl .. for`, Python bases. */
@@ -1247,7 +1275,11 @@ function graphRow(context: CodeContext, edge: TraceEdge): ReferenceRow {
   };
 }
 
-async function resolveTarget(context: CodeContext, target: string): Promise<GraphNode[] | ReadResult> {
+async function resolveTarget(
+  context: CodeContext,
+  target: string,
+  meant?: (node: GraphNode) => boolean,
+): Promise<GraphNode[] | ReadResult> {
   // `File.ext:42` is the symbol that contains that line.
   const place = parseLocator(target);
   if (place.kind === "file" && place.startLine !== undefined && place.endLine === undefined) {
@@ -1266,6 +1298,8 @@ async function resolveTarget(context: CodeContext, target: string): Promise<Grap
   if (resolution.kind === "resolved") return resolution.nodes;
 
   if (resolution.kind === "ambiguous") {
+    const only = meant === undefined ? [] : resolution.nodes.filter(meant);
+    if (only.length === 1) return only;
     return {
       ok: false,
       text: [

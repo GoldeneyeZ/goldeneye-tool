@@ -126,7 +126,7 @@ gcal symbol "cancel.*" --qn ".*BookingService.*"   # regular expression on names
 gcal callers Billing.charge                 # call graph plus text references
 gcal callers src/lib/native.ts              # a file: every file that imports it, and the lines using what it imports
 gcal callees Billing.charge --depth 2
-gcal impls PaymentGateway                   # implementations and subclasses
+gcal impls PaymentGateway                   # implementations and subclasses; for a Go interface, its methods by receiver
 
 gcal grep "retry.max" --file "\.ya?ml$"     # text, grouped by file and symbol
 gcal grep "TODO\(.*\)|FIXME"                # a regex, as in rg; literal text when it is not one (-F: literal only)
