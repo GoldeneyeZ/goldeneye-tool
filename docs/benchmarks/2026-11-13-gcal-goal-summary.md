@@ -1,6 +1,6 @@
 # GCAL improvement goal: summary
 
-Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-7.md`.
+Date: 2026-11-13. Rounds: `2026-11-13-gcal-goal-round-1.md` to `-round-8.md`.
 
 ## The goal
 
@@ -12,7 +12,7 @@ agent runs. At most 15M tokens of agent runs.
 
 ## Result
 
-58 agent runs with GCAL over seven rounds, 14,624k tokens. Each run is one
+60 agent runs with GCAL over eight rounds, 14,836k tokens. Each run is one
 Codex agent (`gpt-5.6-terra`, reasoning high, codex-cli 0.159.0) on one task of
 a twelve-task matrix over nine repositories, graded by a held-out grader. The
 plain-shell numbers are the 43 runs of 2026-11-11 and 2026-11-12 on the same
@@ -25,19 +25,19 @@ tasks and were not repeated.
 | abyssal feature | 124k, 3 calls | 6/6, 132k, 3, 73 s | 3/3, 155k, 4, 82 s | 0.85 | 0.89 |
 | PyFinance bug | 180k, 5 calls | 5/5, 180k, 5, 93 s | 4/4, 192k, 4, 94 s | 0.94 | 0.99 |
 | ViV-Wallet feature (dirty tree) | 239k, 6 calls | 3/3, 187k, 4, 114 s | 4/4, 241k, 5.5, 140 s | 0.77 | 0.81 |
-| goldeneye rename (dirty tree) | 124k, 4 calls | 5/7, 112k, 3, 66 s | 3/3, 116k, 3, 69 s | 0.97 | 0.95 |
+| goldeneye rename (dirty tree) | 124k, 4 calls | 7/9, 112k, 3, 66 s | 3/3, 116k, 3, 69 s | 0.97 | 0.95 |
 | terax module move | 433k, 11 calls | 5/5, 192k, 4, 103 s | 2/3, 235k, 6, 138 s | 0.82 | 0.74 |
 | LOD signature refactor | 650k, 12 calls | 5/5, 450k, 8, 147 s | 3/3, 495k, 10, 286 s | 0.91 | 0.51 |
 | Spring redaction feature | 814k, 12 calls, 1 of 2 passed | 2/4, 507k, 9, 254 s | 3/3, 809k, 13, 277 s | 0.63 | 0.92 |
 | Spring flow question | 164k, 3.5 calls | 4/4, 169k, 4, 132 s | 3/3, 375k, 9, 172 s | 0.45 | 0.77 |
 | agentsview flow question (dirty tree) | 972k, 15 calls | 3/3, 468k, 9, 150 s | 3/3, 1,221k, 15, 201 s | 0.38 | 0.75 |
 | cbm architecture document | 828k, 12 calls | 4/4, 754k, 15, 210 s | 3/3, 1,615k, 19, 267 s | 0.47 | 0.79 |
-| **Sum of medians** | **4,826k** | **53/58, 3,336k, 68 calls, 1,471 s** | **42/43, 5,652k, 93.5 calls, 1,865 s** | **0.59** | **0.79** |
+| **Sum of medians** | **4,826k** | **55/60, 3,336k, 68 calls, 1,471 s** | **42/43, 5,652k, 93.5 calls, 1,865 s** | **0.59** | **0.79** |
 
 "Before this goal" is the latest measurement of each task before the goal:
 the hybrid lane of 2026-11-12 where it exists (GCAL v8/v9, or v6 for the Spring
 flow question and the cbm document), otherwise the `gcal`-only lane of GCAL v5.
-The middle column pools every run of this goal, made on seven successive
+The middle column pools every run of this goal, made on eight successive
 builds; it is not a measurement of the final build alone. The two full-matrix
 rounds on late builds (rounds 4 and 5, 23 runs) give 3,420k, 0.61 of plain
 shell.
@@ -50,7 +50,7 @@ shell.
 - **Tool calls: 68 against 93.5**, lower on 9 of 12 tasks, equal on 2 (StringUtils, goldeneye rename), higher on 1 (PyFinance: 5 against 4).
 - **Wall time: 0.79 of plain shell** (1,471 s against 1,865 s), lower on 11 of
   12 tasks.
-- **Uncached input: 427k against 589k. Output: 51k against 67k.**
+- **Uncached input: 426k against 589k. Output: 51k against 67k.**
 - **The gaps the goal started from:**
   - Small edits cost one call too many: the StringUtils feature takes 2 calls
     in 5 of 5 runs (before: 3 calls in 4 of 6), 92k against 86k for plain
@@ -61,7 +61,7 @@ shell.
     passing 5 of 5 where the builds before the goal passed 3 of 6.
   - The backend query cap on large indexes: fixed in two places; the lookups
     that failed on the 195 MB LOD index answer in 133 ms.
-  - The merged `gcal` had never been measured: it has now run 58 times.
+  - The merged `gcal` had never been measured: it has now run 60 times.
   - Slow first daemon start: the 65 s and 116 s were the benchmark running
     during a full build. `gcal status` through a cold daemon takes 1.0 s on a
     192 MB index. The daemon also loads the graph right after its first
@@ -69,22 +69,28 @@ shell.
 
 ### What did not improve
 
-- **Pass rate: 53 of 58 (91%) against 42 of 43 (98%) for plain shell.** The
-  goal asked for the same or better. All five failures are in rounds 5 and 6.
+- **Pass rate: 55 of 60 (92%) against 42 of 43 (98%) for plain shell.** The
+  goal asked for the same or better, and this is not it. All five failures are
+  in rounds 5 and 6; the six runs made after the last fixes for them (rounds 7
+  and 8, five tasks) all passed, which is too few runs to call the gap closed.
   - Spring redaction feature, 2 of 4 (plain shell 3 of 3; GCAL v5: 1 of 2).
     Both failures are the agent's own code that does not compile under the
     project's build (a nullness check; a constructor that does not exist in a
     test it wrote). This is the one task where GCAL is clearly cheaper and
     clearly less reliable.
-  - goldeneye rename, 5 of 7 (plain shell 3 of 3). One failure was a GCAL
+  - goldeneye rename, 7 of 9 (plain shell 3 of 3). One failure was a GCAL
     defect, since fixed: `gcal callers` hid a use behind the text of the
     declaration in a file changed since indexing. The other was the agent
     leaving two uses that `gcal grep` had printed.
   - terax fuzzy feature, 6 of 7 (plain shell 3 of 3): a type error in the
     agent's own change.
-  - A parse check (`gcal check`) cannot see any of these five errors; a
-    compile or type check would see them all. The benchmark's one-shot rule
-    forbids builds and tests in both lanes.
+  - The parse check the agents ran at the end of these runs could see none of
+    the five errors. `gcal check` was then extended with what the index knows
+    (round 8): replayed on the recorded patches of 47 runs, it reports three of
+    the five failed changes, each with the line the grader named, and none of
+    the 42 that passed. The nullness error and the type error remain invisible
+    to it; a compile would see all five. The benchmark's one-shot rule forbids
+    builds and tests in both lanes.
 - **StringUtils is still above plain shell** (92k against 86k, 44 s against
   40 s): same number of calls, a longer lane prompt, and two runs that made a
   fifth model request for no visible reason.
@@ -96,7 +102,7 @@ shell.
 
 ## What was changed
 
-21 commits on `master`, `ce7d73a` to the commit of this document.
+23 commits on `master`, `ce7d73a` to the commit of this document.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -105,6 +111,7 @@ shell.
 | `callers` | A file as target lists its importers (all spellings of the path, test mocks, the lines using what is imported); 60 rows by default; one row per line when no symbol names the place; a note when text references were cut | 6 to 8 calls spent finding importers; a rename that left a use behind |
 | `get` | With a symbol and a large type: the members of the type that call the symbol. With `--tests`: small files whole, the test file whole when it holds all the tests, the head of a test file, nearest tests and an example when there are none, test files importing a file, bounded output for types and large batches with one whole example | a second call to read tests, a third to read the file again, a fourth for imports; 98 kB answers |
 | `grep`, `replace`, `search` | `grep` shows every fetched match; `-g` in `replace`, repeatable in both; `search` lists files by name, caps its backend page, accepts `--tests` | cut-and-repeat greps; a JSON manifest rewritten by a replace; shell file listings; two refused commands |
+| `check` | Reports callers that still use a symbol the change removed or renamed, imports of a deleted file, and Java constructor calls no constructor takes | the five failed runs; replay of 47 recorded patches |
 | Exit status | A lookup that finds nothing exits 0 | `&&` chains cancelled by "not found" |
 | Daemon | Loads the project graph after the first answer of a session | 1.2 to 3 s on the first graph query |
 | Skill and lane prompt | The new lookups; `\x22`/`\x27` for quotes in PowerShell patterns; `--tests` for one to three symbols | commands lost to quoting; `--tests` on 13 names |
@@ -112,7 +119,7 @@ shell.
 
 ## Failures and incidents, in one place
 
-- 5 failed agent runs of 58 (above).
+- 5 failed agent runs of 60 (above).
 - 5 harness refusals before any model call: two overlays with CRLF line
   endings, one configuration path, one stale snapshot accepted after a failed
   preparation, one backend shutdown that timed out while a test suite was
@@ -122,8 +129,11 @@ shell.
 
 ## Not verified
 
-- The final build as such: only 4 runs were made on the last measured commit
-  (`1145c8a`), and none on the commit that adds `search --tests`.
+- The final build as such: 2 runs, both of the rename task, were made on the
+  last commit with code changes (`f191eba`); 4 on the one before the last two
+  (`1145c8a`).
+- That an agent fixes what the extended `gcal check` reports: in the two runs
+  made with it the agent left nothing behind, so nothing was reported.
 - Whether the last change (one whole test as an example) raises the pass rate
   of the Spring redaction feature: one run, which passed.
 - The plain-shell lane on today's date: its runs are one to two days older.
@@ -134,20 +144,22 @@ shell.
 - Why the harness's pre-prompt `gcal status` takes 7 to 10 s on large indexes
   when the same command takes 1.0 s outside it.
 - Fairness note that applies to every number above: the GCAL lane may run
-  `gcal check`, a parse check of changed files; plain shell has no equivalent
-  under the one-shot rule.
+  `gcal check` after editing; plain shell has no equivalent under the one-shot
+  rule. Until round 8 it was a parse check of changed files; since then it
+  also compares the change with the call graph.
 
 ## What I would do next
 
 1. **A real check before the agent stops.** All five failures would be
-   compile or type errors. Let `gcal check` run the project's own type checker
-   or compiler on the changed files when one is cheap to run (`tsc --noEmit`,
-   the build's compile task, `cargo check`), and measure with the one-shot rule relaxed
+   compile or type errors, and the index-based check of round 8 reaches three
+   of them. Let `gcal check` run the project's own type checker or compiler on
+   the changed files when one is cheap to run (`tsc --noEmit`, the build's
+   compile task, `cargo check`), and measure with the one-shot rule relaxed
    for both lanes: plain shell would then be allowed to compile too, which is
    the comparison that matters in real use.
 2. **Measure the final build properly**: three runs per task of both lanes on
    the same day (about 27M tokens for GCAL and plain shell together at
-   today's costs). The pooled table above mixes seven builds.
+   today's costs). The pooled table above mixes eight builds.
 3. **Trim the lane prompt.** It has grown to 5.2 kB and the agent now adds
    `--tests` to commands of tasks that change nothing. Say less; move the rest
    to the answers themselves, where it is only read when relevant.
