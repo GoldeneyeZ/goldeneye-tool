@@ -561,6 +561,100 @@ fn a_java_package_line_is_not_a_class() {
 }
 
 #[test]
+fn a_type_is_one_symbol_and_an_unnamed_one_is_none() {
+    let temp = TempDir::new().expect("temp repository");
+    fs::write(
+        temp.path().join("store.go"),
+        concat!(
+            "package store\n",
+            "\n",
+            "type Ledger struct {\n",
+            "\tTotal int\n",
+            "}\n",
+            "\n",
+            "type (\n",
+            "\tReader interface {\n",
+            "\t\tRead() int\n",
+            "\t}\n",
+            "\tCents int\n",
+            ")\n",
+            "\n",
+            "func (ledger *Ledger) Read() int { return ledger.Total }\n",
+        ),
+    )
+    .expect("write Go source");
+    fs::write(
+        temp.path().join("page.c"),
+        concat!(
+            "typedef struct {\n",
+            "    int capacity;\n",
+            "    int used;\n",
+            "} PageBuilder;\n",
+            "\n",
+            "struct Tagged {\n",
+            "    int value;\n",
+            "};\n",
+            "\n",
+            "typedef enum { RISK_LOW, RISK_HIGH } risk_level_t;\n",
+            "\n",
+            "int page_used(PageBuilder *page) { return page->used; }\n",
+        ),
+    )
+    .expect("write C source");
+    fs::write(
+        temp.path().join("mock.ts"),
+        concat!(
+            "export const mocks = {\n",
+            "  Observer: class {\n",
+            "    observe(): void {}\n",
+            "  },\n",
+            "};\n",
+            "export class Named {\n",
+            "  run(): void {}\n",
+            "}\n",
+        ),
+    )
+    .expect("write TypeScript source");
+
+    let mut service = IndexService::new(
+        Store::open_in_memory().expect("memory store"),
+        TreeSitterIndexExtractor::new(FullGrammarProvider),
+        full_options(),
+        FileSystemDiscovery,
+    );
+    let result = service.index_repository(temp.path()).expect("index types");
+
+    let labels = |name: &str| -> Vec<String> {
+        let mut found: Vec<String> = service
+            .repository()
+            .search_nodes(&result.project.id, name, 20)
+            .expect("search nodes")
+            .into_iter()
+            .filter(|hit| hit.node.name == name)
+            .map(|hit| hit.node.label.as_str().to_owned())
+            .filter(|label| !matches!(label.as_str(), "File" | "Module"))
+            .collect();
+        found.sort();
+        found
+    };
+
+    // Go: one symbol per type, also in a grouped declaration.
+    assert_eq!(labels("Ledger"), vec!["Struct".to_owned()]);
+    assert_eq!(labels("Reader"), vec!["Interface".to_owned()]);
+    assert_eq!(labels("Cents"), vec!["Type".to_owned()]);
+    // C: an untagged struct is not named after its first field; an untagged
+    // enum is still found by its first enumerator.
+    assert_eq!(labels("capacity"), vec!["Field".to_owned()]);
+    assert_eq!(labels("RISK_LOW"), vec!["Enum".to_owned()]);
+    assert_eq!(labels("PageBuilder"), vec!["Type".to_owned()]);
+    assert_eq!(labels("risk_level_t"), vec!["Type".to_owned()]);
+    assert_eq!(labels("Tagged"), vec!["Class".to_owned()]);
+    // TypeScript: a class expression without a name is not called after its first method.
+    assert_eq!(labels("observe"), vec!["Method".to_owned()]);
+    assert_eq!(labels("Named"), vec!["Class".to_owned()]);
+}
+
+#[test]
 fn elixir_definition_calls_use_audited_language_rules() {
     let temp = TempDir::new().expect("temp repository");
     fs::write(

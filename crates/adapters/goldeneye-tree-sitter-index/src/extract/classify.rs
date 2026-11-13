@@ -38,6 +38,35 @@ pub(super) use tree::{
     find_descendant_kind, first_identifier, first_name_like, gomod_requirement_name,
 };
 
+/// Type-shaped nodes that would otherwise become a second symbol, or a symbol
+/// named after whatever identifier comes first inside them.
+fn declares_no_type_of_its_own(language: &str, node: Node<'_>) -> bool {
+    let kind = node.kind();
+    // Go: `type X struct { .. }` is a declaration around a specification. The
+    // specification is the symbol (struct, interface or type); the declaration
+    // was a class of the same name on the same line, and in a grouped
+    // `type ( .. )` a class named after the first of the group.
+    if language == "go" && kind == "type_declaration" {
+        return true;
+    }
+    let unnamed = node.child_by_field_name("name").is_none();
+    // C family: a struct or union without a tag was named after its first
+    // field, or after that field's type. `typedef struct { .. } name_t;` is
+    // the symbol `name_t` through its type definition. An enum without a tag
+    // keeps the name of its first enumerator: `enum { LIMIT = 8 };` is how C
+    // code writes a constant, and that name is how it is looked up.
+    if unnamed
+        && matches!(
+            kind,
+            "struct_specifier" | "union_specifier" | "class_specifier"
+        )
+    {
+        return true;
+    }
+    // JavaScript: a class expression without a name was named after its first member.
+    unnamed && is_javascript_family(language) && kind == "class"
+}
+
 pub(super) fn classify(
     mode: IndexMode,
     language: &str,
@@ -50,6 +79,9 @@ pub(super) fn classify(
     }
     if is_javascript_family(language) && declares_javascript_function(node) {
         // The function is the symbol; it takes the declared name.
+        return None;
+    }
+    if declares_no_type_of_its_own(language, node) {
         return None;
     }
     if let Some(definition) = classify_known(language, node, scope, source) {
