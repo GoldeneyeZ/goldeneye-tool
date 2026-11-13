@@ -36,6 +36,9 @@ const SNIPPET_MAX_LINES = 60;
 const TEXT_LINE_MAX_CHARS = 160;
 const TEXT_REFERENCE_LIMIT = 80;
 const ARCH_MAX_ROWS = 40;
+// Files that describe the code instead of being it: a directory of these is
+// opened after the directories of source, however large it is.
+const ARCH_PROSE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
 const MAX_SEARCH_ROWS = 40;
 const SEARCH_OVERFETCH_FACTOR = 3;
 const SEARCH_BACKEND_MAX = 200;
@@ -1113,9 +1116,10 @@ export function summarizeLayout(paths: string[], maxRows = ARCH_MAX_ROWS): strin
     path: string;
     direct: number;
     total: number;
+    source: number;
     children: Map<string, Dir>;
   }
-  const root: Dir = { path: "", direct: 0, total: 0, children: new Map() };
+  const root: Dir = { path: "", direct: 0, total: 0, source: 0, children: new Map() };
   const extensions = new Map<string, number>();
 
   for (const filePath of paths) {
@@ -1123,15 +1127,17 @@ export function summarizeLayout(paths: string[], maxRows = ARCH_MAX_ROWS): strin
     const fileName = parts.pop() ?? "";
     const extension = /\.([A-Za-z0-9]+)$/.exec(fileName)?.[1] ?? "(none)";
     extensions.set(extension, (extensions.get(extension) ?? 0) + 1);
+    const source = ARCH_PROSE.test(fileName) ? 0 : 1;
     let dir = root;
     dir.total += 1;
     for (const part of parts) {
       let child = dir.children.get(part);
       if (child === undefined) {
-        child = { path: dir.path.length === 0 ? part : `${dir.path}/${part}`, direct: 0, total: 0, children: new Map() };
+        child = { path: dir.path.length === 0 ? part : `${dir.path}/${part}`, direct: 0, total: 0, source: 0, children: new Map() };
         dir.children.set(part, child);
       }
       child.total += 1;
+      child.source += source;
       dir = child;
     }
     dir.direct += 1;
@@ -1146,8 +1152,9 @@ export function summarizeLayout(paths: string[], maxRows = ARCH_MAX_ROWS): strin
     return current;
   };
 
-  // Expand the largest production directories first; a directory whose
-  // children do not fit keeps its biggest ones and folds the rest into one row.
+  // Expand the production directories with the most source files first; a
+  // directory whose children do not fit keeps its biggest ones and folds the
+  // rest into one row.
   const minExpandable = Math.max(3, Math.floor(paths.length * 0.02));
   let rows: Dir[] = [...root.children.values()].map(collapse);
   const leaves = new Set<Dir>();
@@ -1157,13 +1164,14 @@ export function summarizeLayout(paths: string[], maxRows = ARCH_MAX_ROWS): strin
       .sort(
         (left, right) =>
           Number(isTestPath(`${left.path}/`)) - Number(isTestPath(`${right.path}/`)) ||
+          right.source - left.source ||
           right.total - left.total,
       )[0];
     if (expandable === undefined) break;
 
     const own: Dir[] =
       expandable.direct > 0
-        ? [{ path: `${expandable.path}/*`, direct: expandable.direct, total: expandable.direct, children: new Map() }]
+        ? [{ path: `${expandable.path}/*`, direct: expandable.direct, total: expandable.direct, source: 0, children: new Map() }]
         : [];
     const slots = maxRows - (rows.length - 1) - own.length;
     if (slots < 2) {
@@ -1180,6 +1188,7 @@ export function summarizeLayout(paths: string[], maxRows = ARCH_MAX_ROWS): strin
         path: `${expandable.path}/(${folded.length} more dirs)`,
         direct: 0,
         total: folded.reduce((sum, dir) => sum + dir.total, 0),
+        source: 0,
         children: new Map(),
       });
     }

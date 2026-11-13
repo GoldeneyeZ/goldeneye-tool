@@ -1468,4 +1468,16 @@ describe("exploring code", () => {
       ].join("\n"),
     );
   });
+
+  it("opens the directories of source before a larger directory of documents", () => {
+    const paths = [
+      ...Array.from({ length: 40 }, (_, index) => `docs/plans/p${index % 4}/note${index}.md`),
+      ...Array.from({ length: 12 }, (_, index) => `ui/src/view${index}.tsx`),
+      ...Array.from({ length: 6 }, (_, index) => `ui/e2e/flow${index}.ts`),
+    ];
+
+    expect(summarizeLayout(paths, 3)).toBe(
+      ["# layout: 58 indexed files (md 40, tsx 12, ts 6)", "40\tdocs/plans/", "6\tui/e2e/", "12\tui/src/"].join("\n"),
+    );
+  });
 });
