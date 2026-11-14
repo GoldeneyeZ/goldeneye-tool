@@ -7,7 +7,7 @@ import type { NewFiles } from "../src/kernel/newFiles.js";
 import { SourceReader } from "../src/kernel/sourceFiles.js";
 import { globPattern } from "../src/workflows/exploreCode.js";
 import type { CodeContext } from "../src/workflows/readCode.js";
-import { REPLACE_MAX_LINES_SHOWN, replaceText } from "../src/workflows/replaceText.js";
+import { REPLACE_MAX_LINES_SHOWN, replaceText, withLineBreaks } from "../src/workflows/replaceText.js";
 
 let workspace: string | undefined;
 
@@ -99,6 +99,32 @@ describe("replacing text", () => {
 
     await replaceText(context, { pattern: "$1", replacement: "$&", paths: ["b"], literal: true, dryRun: false });
     expect(await read("b/c.py")).toBe("price = cost * $&\n");
+  });
+
+  it("writes a line break for \\n in a regex replacement, and keeps it as typed inside quotes or with -F", async () => {
+    const context = await createContext({
+      "a.py": "from lod.pairs import canonical, load_pairs\r\nlog(done)\r\n",
+      "b.py": "from lod.pairs import canonical, load_pairs\n",
+      "c.py": "from lod.pairs import canonical, load_pairs\n",
+    });
+
+    await replaceText(context, {
+      ...request,
+      pattern: "from lod\\.pairs import canonical, (.+)",
+      replacement: "from lod.pairs import $1\\nfrom lod.evaluation import\\tcanonical_json",
+      paths: ["a.py", "b.py"],
+    });
+    expect(await read("a.py")).toBe(
+      "from lod.pairs import load_pairs\r\nfrom lod.evaluation import\tcanonical_json\r\nlog(done)\r\n",
+    );
+    expect(await read("b.py")).toBe("from lod.pairs import load_pairs\nfrom lod.evaluation import\tcanonical_json\n");
+
+    await replaceText(context, { ...request, pattern: "log\\(done\\)", replacement: 'log("done\\n") # a\\\\nb', paths: ["a.py"] });
+    expect(await read("a.py")).toContain('log("done\\n") # a\\\\nb\r\n');
+
+    await replaceText(context, { pattern: "canonical, ", replacement: "a\\nb, ", paths: ["c.py"], literal: true, dryRun: false });
+    expect(await read("c.py")).toBe("from lod.pairs import a\\nb, load_pairs\n");
+    expect(withLineBreaks("a\\nb 'c\\nd' e\\tf \\", "\n")).toBe("a\nb 'c\\nd' e\tf \\");
   });
 
   it("rewrites only the files a glob selects and names the others that match", async () => {

@@ -194,6 +194,11 @@ Behaviors worth knowing:
   whole with the head of its file, once per answer, as an example of how the
   project writes its tests.
 - `search` also lists the files whose name holds a search word.
+- `check` names what a file still uses after the change removed its import
+  (`import json` gone, `json.loads(..)` still there), from the text of HEAD and
+  of the working tree: Python, JavaScript and TypeScript, Java and Kotlin, Rust.
+- `replace` reads `\n` in a regex replacement as a line break and `\t` as a
+  tab, except inside a quoted span of the replacement and with `-F`.
 - `check` without paths goes beyond parsing, from what the index knows: a
   function, method or type that HEAD declares and the working tree no longer
   does is named with the lines of its callers that still use it (a method only

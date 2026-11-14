@@ -23,6 +23,7 @@ import { NewFiles } from "../kernel/newFiles.js";
 import { SourceReader } from "../kernel/sourceFiles.js";
 import { inboundTraceDecision } from "../kernel/tracePolicy.js";
 import type { TraceEdge } from "../domain/types.js";
+import { removedImportsStillUsed } from "../workflows/checkImports.js";
 import { nullableLeaks } from "../workflows/checkNullness.js";
 import { leftBehind, unmatchedConstructors } from "../workflows/checkReferences.js";
 import { checkSyntax } from "../workflows/checkSyntax.js";
@@ -461,6 +462,7 @@ export function createProgram(deps: ProgramDeps): Command {
             ...(await leftBehind(context, deps.client)),
             ...(await unmatchedConstructors(context)),
             ...(await nullableLeaks(context)),
+            ...(await removedImportsStillUsed(context)),
           ];
           if (left.length > 0) checked.text = [checked.text, ...left].join("\n");
         } catch {

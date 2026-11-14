@@ -49,8 +49,8 @@ identifier.
 | Implementations and subclasses     | `gcal impls Type`                                                    |
 | A literal, config key, or phrase   | `gcal grep "cancel.*Booking"` (regex as in rg; `-F` literal only)    |
 | Matching lines with context        | `gcal grep text File.ext some/dir -C 8` (like `rg -C`)               |
-| The same edit in many files        | `gcal replace 'old\(' 'renamed(' src tests` (prints changed lines)   |
-| What an edit broke or left behind  | `gcal check`: lines that no longer parse, callers that still use a renamed or removed symbol, imports of a deleted file, `new Type(..)` calls no constructor takes (Java) |
+| The same edit in many files        | `gcal replace 'old\(' 'renamed(' src tests` (prints changed lines; `\n` in the replacement is a line break) |
+| What an edit broke or left behind  | `gcal check`: lines that no longer parse, callers that still use a renamed or removed symbol, imports of a deleted file, a name a file still uses after its import was removed, `new Type(..)` calls no constructor takes (Java) |
 | Project layout                     | `gcal arch`                                                          |
 | Later hops depend on earlier ones  | `gcal workflow --file <path>` or `gcal workflow --js <code>` (below)  |
 

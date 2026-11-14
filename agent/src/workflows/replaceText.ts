@@ -136,6 +136,34 @@ function compile(pattern: string, literal: boolean): RegExp | undefined {
   }
 }
 
+/**
+ * A regex replacement as sed and Python read it: `\n` is a line break (the
+ * file's own) and `\t` a tab. Inside a quoted span of the replacement they
+ * stay as typed: there they spell an escape of the code being written
+ * (`log("done\n")`). `\\n` stays as typed everywhere.
+ */
+export function withLineBreaks(replacement: string, lineBreak: string): string {
+  let text = "";
+  let quote: string | undefined;
+  for (let index = 0; index < replacement.length; index += 1) {
+    const character = replacement[index];
+    if (character === "\\" && index + 1 < replacement.length) {
+      const next = replacement[index + 1];
+      index += 1;
+      if (quote === undefined && next === "n") text += lineBreak;
+      else if (quote === undefined && next === "t") text += "\t";
+      else text += character + next;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      if (quote === undefined) quote = character;
+      else if (quote === character) quote = undefined;
+    }
+    text += character;
+  }
+  return text;
+}
+
 /** The text of a plain, text file small enough to rewrite; undefined for anything else. */
 async function readPlainText(absolute: string): Promise<string | undefined> {
   try {
@@ -168,7 +196,7 @@ async function replaceInFile(
   if (count === 0) return undefined;
   const after = request.literal
     ? before.replace(expression, () => request.replacement)
-    : before.replace(expression, request.replacement);
+    : before.replace(expression, withLineBreaks(request.replacement, before.includes("\r\n") ? "\r\n" : "\n"));
   if (after === before) return undefined;
   if (!request.dryRun) await writeFile(absolute, after);
 
