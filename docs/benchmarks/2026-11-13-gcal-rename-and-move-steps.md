@@ -125,6 +125,75 @@ replacement pattern also changes prose.
   are not imports; the two new parts of the `callers` answer). `npm test` in
   `tools/agent-bench`: 88 tests, none failed.
 
+## One agent run of the three tasks (2026-11-14)
+
+Build `1f4592b`, GCAL lane only, one run per task (attempt `m-callers-c1`),
+462k tokens in total. One run is not a median; the earlier runs of both lanes
+are beside it for comparison and were made the day before.
+
+| Task | Passed | Calls | Input | Input not cached | Output |
+|---|---|---|---|---|---|
+| goldeneye rename, this run | yes | 2 | 66k | 25k | 2.2k |
+| earlier GCAL runs | 3 of 3 | 3, 3, 4 | 112k, 112k, 140k | 9k, 25k, 30k | 1.7k, 1.5k, 2.1k |
+| earlier shell runs | 3 of 3 | 2, 2, 3 | 90k, 84k, 135k | 28k, 23k, 27k | 1.9k, 1.6k, 2.9k |
+| LOD signature refactor, this run | **no** | 5 | 232k | 38k | 4.2k |
+| earlier GCAL runs | 3 of 3 | 5, 8, 7 | 242k, 348k, 342k | 29k, 47k, 40k | 3.5k, 4.0k, 4.4k |
+| earlier shell runs | 2 of 3 | 11, 3, 5 | 563k, 164k, 337k | 51k, 20k, 43k | 11.2k, 6.6k, 10.3k |
+| terax module move, this run | yes | 4 | 151k | 23k | 6.4k |
+| earlier GCAL runs | 3 of 3 | 3, 4, 4 | 128k, 149k, 148k | 31k, 23k, 33k | 3.3k, 4.3k, 3.8k |
+| earlier shell runs | 2 of 3 | 10, 8, 7 | 592k, 265k, 314k | 50k, 27k, 42k | 8.6k, 7.7k, 7.0k |
+
+What the traces show:
+
+- **All three runs start with `gcal callers`**, none with `get --tests` alone,
+  and none asks `grep` for the uses afterwards.
+- **goldeneye rename**: `callers RevalidatedPath.as_path` (1,796 bytes), then
+  one shell call with the replacements. Two calls, the floor of the
+  plain-shell lane, with less input than any of the six earlier runs.
+- **LOD**: `callers` (11,033 bytes), `get` of the two modules with `--tests`
+  (12,501), a replacement of the bare word `\bcanonical\b` (122 occurrences
+  in 43 files, prose included) that the next call undoes before replacing by
+  pattern, then `check`. Five calls, and the run **failed the grader**: the
+  hand patch that moved the function out of `pairs.py` also removed
+  `import json`, which two other lines of the file use
+  (`NameError: name 'json' is not defined`). `gcal check` had run and had
+  reported another fault of the same run (a replacement written with `\n`,
+  which put the two characters in the file instead of a line break), but not
+  this one. The three earlier GCAL runs of this task passed; with one run it
+  cannot be said whether the new first call changes the pass rate.
+- **terax module move**: four calls like before; input the same, output higher
+  (6.4k against 3.3k to 4.3k). The third call replaces the bare word `native`
+  in a list of files.
+
+### What the run led to
+
+- **`gcal check` names what a file still uses after the change removed its
+  import**, from the text of HEAD and of the working tree (Python, JavaScript
+  and TypeScript, Java and Kotlin, Rust). With the failed patch applied to a
+  clone of LOD:
+
+  ```
+  # syntax check: 41 changed files parse
+  # an import the change removed, and a name the file still uses:
+  src/lod/training/pairs.py: `import json` is gone, `json` is still used
+    12	        json.loads(line)
+    75	                    json.loads(item["arguments_raw"], parse_constant=reject_constant)
+  ```
+
+  Run over every recorded patch of the eleven tasks that have a clone (245
+  patches, 2,411 edited files): two findings, this one and the same line in an
+  earlier failed LOD run (`m-hybrid-b2`); none on a run that passed.
+- **`gcal replace` writes a line break for `\n` in a regex replacement** (and
+  a tab for `\t`), with the line ending of the file; inside a quoted span of
+  the replacement, and with `-F`, the two characters stay as typed. Of the
+  recorded replacements, the two that contain `\n` both meant a line break.
+- **The benchmark prompt** now says, like the skill, that a bare word as
+  pattern also rewrites comments and strings. Of the four recorded LOD runs of this
+  lane on the final build and after, two (f2 and this one) began with the bare
+  word.
+- `pnpm check`: 26 files, 254 tests, none failed (8 added). `npm test` in
+  `tools/agent-bench`: 88 tests, none failed.
+
 ## Found and not changed
 
 - **The call graph has edges that are not calls of the symbol.**
@@ -141,11 +210,15 @@ replacement pattern also changes prose.
 
 ## Not verified
 
-- No agent run was made with this build. Whether the agent starts a rename
-  with `callers`, and whether it stops asking `grep` after it, is not
-  measured. The tasks to run are the two above and the terax module move
-  (which must not get worse): about 0.6M tokens for one repetition of the
-  GCAL lane, about 1.3M with the plain-shell lane beside it. About 0.6M
-  tokens are left of the budget granted for the final measurement.
+- One agent run per task was made with the `callers` change, none with what
+  followed it (the import check, `\n` in a replacement, the prompt's sentence
+  on bare words). Whether LOD passes with them, and in how many calls, is not
+  measured; neither is a median of the three tasks. The plain-shell lane was
+  not run again. About 0.15M tokens are left of the budget granted for the
+  final measurement (26,850k of 27M used), less than one LOD run.
+- The import check reads statements by their text. It was run on the recorded
+  patches (Python, TypeScript, Java, Rust files among them) and found no
+  wrong report there; a name bound in a way it does not read (a parameter of
+  an arrow function over several lines, a `global`) can still give one.
 - The Rust and Java import statements are covered by unit tests on their
   text only; the import summary was run on one Python repository.

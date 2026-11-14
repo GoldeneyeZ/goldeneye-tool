@@ -150,7 +150,7 @@ shell.
 
 ## What was changed
 
-65 commits on `master`, `ce7d73a` to the last one.
+67 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -267,8 +267,10 @@ shell.
    differs between the lanes at all.
 7. **Renames and moves of a symbol**, the two tasks where GCAL takes more
    steps and more input than plain shell. The cause and a first change are in
-   `2026-11-13-gcal-rename-and-move-steps.md`; it is not measured with an
-   agent yet.
+   `2026-11-13-gcal-rename-and-move-steps.md`, with one agent run of each
+   task (2026-11-14): the goldeneye rename in 2 calls instead of 3, LOD in 5
+   but failed on an import the patch removed, the terax move unchanged. The
+   check for that fault came after the run and is not measured with an agent.
 
 Not planned: moving the benchmark's worktrees and caches to the NVMe disk.
 Wall time is an indicator here, not what is optimised (decided 2026-11-13);
