@@ -194,8 +194,53 @@ What the traces show:
 - `pnpm check`: 26 files, 254 tests, none failed (8 added). `npm test` in
   `tools/agent-bench`: 88 tests, none failed.
 
+## Three agent runs of LOD on the build with those changes (2026-11-14)
+
+Build `a09cd89`, GCAL lane only (attempts `m-check-k1` to `k3`), 890k tokens
+in total. The plain-shell lane was not run again; its figures are those of
+2026-11-13.
+
+| Runs | Passed | Calls | Input | Input not cached | Output |
+|---|---|---|---|---|---|
+| these three | 3 of 3 | 10, 6, 6 | 384k, 265k, 230k | 44k, 40k, 39k | 4.6k, 3.1k, 3.9k |
+| GCAL, final build (2026-11-13) | 3 of 3 | 5, 8, 7 | 242k, 348k, 342k | 29k, 47k, 40k | 3.5k, 4.0k, 4.4k |
+| plain shell (2026-11-13) | 2 of 3 | 11, 3, 5 | 563k, 164k, 337k | 51k, 20k, 43k | 11.2k, 6.6k, 10.3k |
+
+Median of the three: 6 calls (7 on the final build, 5 with plain shell) and
+265k input tokens (342k, 337k). Against plain shell the calls go from 1.40 to
+1.20 and the input from 1.01 to 0.79. Three runs per side, made on different
+days: the difference in calls is one call, within what the runs of one build
+differ by (5 to 8, 6 to 10).
+
+What the traces show:
+
+- **All three start with `gcal callers`** (11,033 bytes), then read the two
+  modules with one `get`.
+- **No run removed an import that was still used**, so the new line of
+  `gcal check` was not printed in any of them: it is exercised by the replay
+  of the failed patch only, not by an agent. That the three runs passed says
+  nothing about it.
+- **The import summary did not stop the search for import lines.** Two of the
+  three runs (k1, k2) still ran `gcal grep 'from lod\.training\.pairs import
+  canonical'` after `callers` had given the statement, its count and the
+  three indented places; in k2 it is a call of its own (3,522 bytes).
+- **The bare word was replaced again** in k3 (`\bcanonical\b`, 8,252 bytes
+  of changed lines), with the warning in the prompt; the run then patched the
+  prose of four files by hand in one edit. It cost no extra call there.
+- **k1 took 10 calls**: it sent the output of its two replacements to
+  `Out-Null`, then read `pilot.py`, the diff statistics and one file in three
+  ranges of 18 to 30 lines, and ran `gcal check` twice.
+- Two runs (k1, k2) rewrote by hand the one call written through another
+  module (`decode_probe.canonical(...)`), after reading its file; k3 left the
+  replaced `decode_probe.canonical_json(...)`, which also passes.
+
 ## Found and not changed
 
+- **A warning in the prompt does not keep the agent from replacing a bare
+  word**: three of the seven LOD runs of this lane on the final build and
+  after began with it (f2, c1, k3), k3 with the warning in its prompt.
+  `gcal replace` itself would have to leave comments and strings alone, or
+  say how many of the lines it changed are prose.
 - **The call graph has edges that are not calls of the symbol.**
   `callers RevalidatedPath.as_path` lists four lines of `xtask` that call
   `as_path` of a standard-library path (6 graph rows, 3 of them
@@ -210,12 +255,13 @@ What the traces show:
 
 ## Not verified
 
-- One agent run per task was made with the `callers` change, none with what
-  followed it (the import check, `\n` in a replacement, the prompt's sentence
-  on bare words). Whether LOD passes with them, and in how many calls, is not
-  measured; neither is a median of the three tasks. The plain-shell lane was
-  not run again. About 0.15M tokens are left of the budget granted for the
-  final measurement (26,850k of 27M used), less than one LOD run.
+- The goldeneye rename and the terax module move have one agent run each
+  with the `callers` change and none with what followed it; LOD has three.
+  The import check was never printed to an agent, and no recorded run wrote
+  `\n` in a replacement after the change. The plain-shell lane was not run
+  again, so every comparison with it is across two days.
+- Tokens of agent runs: 27,740k used of the 27M granted for the final
+  measurement plus the 0.8M granted for these three runs (they took 0.89M).
 - The import check reads statements by their text. It was run on the recorded
   patches (Python, TypeScript, Java, Rust files among them) and found no
   wrong report there; a name bound in a way it does not read (a parameter of

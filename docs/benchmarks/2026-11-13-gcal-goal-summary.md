@@ -150,7 +150,7 @@ shell.
 
 ## What was changed
 
-67 commits on `master`, `ce7d73a` to the last one.
+68 commits on `master`, `ce7d73a` to the last one.
 
 | Area | Change | Trace or measurement that led to it |
 |---|---|---|
@@ -269,8 +269,10 @@ shell.
    steps and more input than plain shell. The cause and a first change are in
    `2026-11-13-gcal-rename-and-move-steps.md`, with one agent run of each
    task (2026-11-14): the goldeneye rename in 2 calls instead of 3, LOD in 5
-   but failed on an import the patch removed, the terax move unchanged. The
-   check for that fault came after the run and is not measured with an agent.
+   but failed on an import the patch removed, the terax move unchanged. Three
+   more runs of LOD on the build that checks for that fault: 3 of 3 passed,
+   median 6 calls and 265k input (7 and 342k before; plain shell 5 and 337k).
+   No run made the fault again, so the check itself was not seen by an agent.
 
 Not planned: moving the benchmark's worktrees and caches to the NVMe disk.
 Wall time is an indicator here, not what is optimised (decided 2026-11-13);
