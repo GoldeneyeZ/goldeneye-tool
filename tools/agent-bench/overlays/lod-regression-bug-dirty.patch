@@ -1,0 +1,306 @@
+diff --git a/src/lod/datasets/expansion/build.py b/src/lod/datasets/expansion/build.py
+index 273716d..41f0ea4 100644
+--- a/src/lod/datasets/expansion/build.py
++++ b/src/lod/datasets/expansion/build.py
+@@ -9,6 +9,7 @@ from collections import Counter
+ from pathlib import Path
+ 
+ from lod.datasets.expansion import opaque, varied
++from lod.datasets.expansion.naming import DEFAULT_SEED
+ from lod.datasets.traces import serialize
+ 
+ DEFAULT_COUNTS = {
+@@ -105,6 +106,13 @@ def _argument_lines(target):
+                 for item in target["items"] if item["type"] == "tool_call"), default=0)
+ 
+ 
++def _character_bucket(characters):
++    """Manifest size bucket of one serialized target."""
++    if characters < 2000:
++        return "lt_2000"
++    return "2000_to_9999" if characters < 10000 else "ge_10000"
++
++
+ def _file_sha(path):
+     digest = hashlib.sha256()
+     with path.open("rb") as stream:
+@@ -113,7 +121,7 @@ def _file_sha(path):
+     return digest.hexdigest()
+ 
+ 
+-def build_dataset(output, counts=None, seed=20260910, shard_rows=1000, compressed=True):
++def build_dataset(output, counts=None, seed=DEFAULT_SEED, shard_rows=1000, compressed=True):
+     """Write deterministic shards and an audited manifest; refuse existing output.
+ 
+     A disk-backed unique index checks all target digests and IDs across splits.
+@@ -162,6 +170,7 @@ def build_dataset(output, counts=None, seed=20260910, shard_rows=1000, compresse
+                     for row in GENERATORS[generator](count, split, seed):
+                         target_raw = validate_row(row, split)
+                         target_sha = hashlib.sha256(target_raw.encode("utf-8")).hexdigest()
++                        # One table spans all splits: a repeated target or row ID aborts the build.
+                         try:
+                             audit.execute("INSERT INTO targets VALUES (?, ?, ?)", (target_sha, row["id"], split))
+                         except sqlite3.IntegrityError as error:
+@@ -176,18 +185,18 @@ def build_dataset(output, counts=None, seed=20260910, shard_rows=1000, compresse
+                             shard_index += 1
+                         stream.write((serialize(row) + "\n").encode("utf-8"))
+                         shard_count += 1
+-                        chars = len(target_raw)
++                        characters = len(target_raw)
+                         lines = _argument_lines(row["target"])
+                         stats["rows"] += 1
+                         stats["generators"][generator] += 1
+                         stats["families"][row["family"]] += 1
+                         family_splits.setdefault(row["family"], set()).add(split)
+-                        stats["character_buckets"]["lt_2000" if chars < 2000 else "2000_to_9999" if chars < 10000 else "ge_10000"] += 1
++                        stats["character_buckets"][_character_bucket(characters)] += 1
+                         stats["argument_400_line_rows"] += lines >= 400
+                         stats["required_label_rows"] += bool(row["required_labels"])
+                         stats["required_label_occurrences"] += len(row["required_labels"])
+-                        stats["target_characters"] += chars
+-                        stats["max_target_characters"] = max(stats["max_target_characters"], chars)
++                        stats["target_characters"] += characters
++                        stats["max_target_characters"] = max(stats["max_target_characters"], characters)
+                         stats["max_argument_lines"] = max(stats["max_argument_lines"], lines)
+             finally:
+                 close_shard()
+@@ -207,7 +216,7 @@ def build_dataset(output, counts=None, seed=20260910, shard_rows=1000, compresse
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--output", type=Path, default=Path("training/datasets/expanded-synthetic-v1"))
+-    parser.add_argument("--seed", type=int, default=20260910)
++    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+     parser.add_argument("--shard-rows", type=int, default=1000)
+     parser.add_argument("--plain-jsonl", action="store_true")
+     for split, counts in DEFAULT_COUNTS.items():
+diff --git a/src/lod/datasets/expansion/combine.py b/src/lod/datasets/expansion/combine.py
+index 8911980..bdac823 100644
+--- a/src/lod/datasets/expansion/combine.py
++++ b/src/lod/datasets/expansion/combine.py
+@@ -36,11 +36,12 @@ def combine_manifests(manifests, destination):
+             digest = hashlib.sha256(copied.read_bytes()).hexdigest()
+             if digest != shard["sha256"]:
+                 raise ValueError("Source shard checksum mismatch")
+-            count = 0
++            copied_rows = 0
+             with gzip.open(copied, "rt", encoding="utf-8") as stream:
+                 for line in stream:
+                     row = json.loads(line)
+                     fingerprint = hashlib.sha256(canonical(row["target"]).encode()).hexdigest()
++                    # IDs and fingerprints are tracked over all sources, not per source.
+                     if row["id"] in seen_ids or fingerprint in seen_targets:
+                         raise ValueError("Duplicate ID or target across combined datasets")
+                     if row["split"] != shard["split"]:
+@@ -48,8 +49,8 @@ def combine_manifests(manifests, destination):
+                     seen_ids.add(row["id"])
+                     seen_targets.add(fingerprint)
+                     counts[row["split"]] += 1
+-                    count += 1
+-            if count != shard["rows"]:
++                    copied_rows += 1
++            if copied_rows != shard["rows"]:
+                 raise ValueError("Source shard row count mismatch")
+             shards.append({**shard, "path": copied.relative_to(destination).as_posix(),
+                            "sha256": digest, "bytes": copied.stat().st_size})
+diff --git a/src/lod/datasets/expansion/dense_labels.py b/src/lod/datasets/expansion/dense_labels.py
+index 6a7413f..1107c93 100644
+--- a/src/lod/datasets/expansion/dense_labels.py
++++ b/src/lod/datasets/expansion/dense_labels.py
+@@ -8,6 +8,7 @@ import uuid
+ from pathlib import Path
+ 
+ from lod.datasets.expansion.build import validate_row
++from lod.datasets.expansion.naming import DEFAULT_SEED, scoped, uuid7_like
+ from lod.datasets.traces import serialize
+ 
+ VERSION = "expanded-synthetic-dense-v1"
+@@ -35,13 +36,11 @@ def _label(namespace, index):
+     if kind == 19:
+         return "aB" + "".join(c.upper() if i % 2 else c for i, c in enumerate(digest[2:]))
+     if index % 2:
+-        digits = list(digest[:32])
+-        digits[12], digits[16] = "7", "a"
+-        return str(uuid.UUID("".join(digits)))
++        return uuid7_like(digest)
+     return str(uuid.UUID(digest[:32], version=4))
+ 
+ 
+-def generate_rows(count, split="train", seed=20260910, *, tier="stress"):
++def generate_rows(count, split="train", seed=DEFAULT_SEED, *, tier="stress"):
+     """Yield complete multiline fixtures: stress 80/400 entries or fitlong 200.
+ 
+     All high-entropy payload labels are enumerated in required_labels. Each
+@@ -58,7 +57,7 @@ def generate_rows(count, split="train", seed=20260910, *, tier="stress"):
+         raise ValueError("tier must be stress or fitlong")
+     version = FIT_VERSION if tier == "fitlong" else VERSION
+     for index in range(count):
+-        namespace = f"{version}:{seed}:{split}:{index}"
++        namespace = scoped(version, split, index, seed)
+         amount = 200 if tier == "fitlong" else (80 if index % 2 == 0 else 400)
+         labels = [_label(namespace, entry) for entry in range(amount)]
+         operation = FAMILIES[(index // 2) % len(FAMILIES)]
+@@ -131,7 +130,7 @@ def generate_rows(count, split="train", seed=20260910, *, tier="stress"):
+         }
+ 
+ 
+-def materialize(output, counts=None, seed=20260910, audit_max_tokens=12500, *, tier="stress"):
++def materialize(output, counts=None, seed=DEFAULT_SEED, audit_max_tokens=12500, *, tier="stress"):
+     """Write a small standalone manifest compatible with load_expanded.
+ 
+     cl100k_base counts are a CPU-only size audit, not model-tokenizer admission.
+@@ -175,14 +174,15 @@ def materialize(output, counts=None, seed=20260910, audit_max_tokens=12500, *, t
+         with path.open("wb") as raw_stream:
+             with gzip.GzipFile(filename="", mode="wb", fileobj=raw_stream, mtime=0) as stream:
+                 for row in generate_rows(count, split, seed, tier=tier):
+-                    target = validate_row(row, split)
+-                    digest = hashlib.sha256(target.encode()).hexdigest()
++                    # validate_row returns the serialized target, not the event.
++                    target_raw = validate_row(row, split)
++                    digest = hashlib.sha256(target_raw.encode()).hexdigest()
+                     if row["id"] in seen_ids or digest in seen_targets:
+                         raise ValueError("Duplicate dense row")
+                     seen_ids.add(row["id"])
+                     seen_targets.add(digest)
+                     split_labels.update(row["required_labels"])
+-                    tokens = len(encoding.encode(target, disallowed_special=()))
++                    tokens = len(encoding.encode(target_raw, disallowed_special=()))
+                     token_counts.append(tokens)
+                     line_counts.append(row["provenance"]["argument_lines"])
+                     row["size_audit"] = {
+@@ -222,7 +222,7 @@ def materialize(output, counts=None, seed=20260910, audit_max_tokens=12500, *, t
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--output", type=Path, required=True)
+-    parser.add_argument("--seed", type=int, default=20260910)
++    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+     parser.add_argument("--audit-max-tokens", type=int, default=12500)
+     parser.add_argument("--tier", choices=("stress", "fitlong"), default="stress")
+     args = parser.parse_args()
+diff --git a/src/lod/datasets/expansion/naming.py b/src/lod/datasets/expansion/naming.py
+new file mode 100644
+index 0000000..e1fcde6
+--- /dev/null
++++ b/src/lod/datasets/expansion/naming.py
+@@ -0,0 +1,25 @@
++"""Naming shared by the synthetic expansion generators.
++
++Each generated fixture hashes its labels and identifiers under one namespace,
++so a generator version, seed, split and position always reproduce the same row.
++"""
++
++import uuid
++
++DEFAULT_SEED = 20260910
++SPLITS = ("train", "validation", "test")
++
++
++def scoped(version, split, index, seed=DEFAULT_SEED):
++    """Return the ``version:seed:split:index`` namespace of one fixture."""
++    return f"{version}:{seed}:{split}:{index}"
++
++
++def uuid7_like(hex_digits):
++    """Format 32 hex digits as a UUID carrying version 7 and RFC 4122 variant bits.
++
++    The result is syntactically valid only; its timestamp field is not a time.
++    """
++    digits = list(hex_digits[:32])
++    digits[12], digits[16] = "7", "a"
++    return str(uuid.UUID("".join(digits)))
+diff --git a/src/lod/datasets/expansion/opaque.py b/src/lod/datasets/expansion/opaque.py
+index a66dba0..5d9b31f 100644
+--- a/src/lod/datasets/expansion/opaque.py
++++ b/src/lod/datasets/expansion/opaque.py
+@@ -9,6 +9,8 @@ import hashlib
+ import json
+ import uuid
+ 
++from lod.datasets.expansion.naming import DEFAULT_SEED, SPLITS, scoped, uuid7_like
++
+ VERSION = "opaque-expansion-v1"
+ FAMILIES = (
+     "artifact_integrity",
+@@ -29,9 +31,7 @@ def _digest(namespace, name, algorithm="sha256"):
+ 
+ def _labels(namespace, contrast):
+     uuid4 = str(uuid.UUID(_digest(namespace, "uuid4")[:32], version=4))
+-    digits = list(_digest(namespace, "uuid7")[:32])
+-    digits[12], digits[16] = "7", "a"
+-    uuid7 = str(uuid.UUID("".join(digits)))
++    uuid7 = uuid7_like(_digest(namespace, "uuid7"))
+     mixed = "aB" + _digest(namespace, "mixed")[2:]
+     mixed = "".join(c.upper() if i % 3 == 1 else c for i, c in enumerate(mixed))
+     opaque = "fixture_" + _digest(namespace, "opaque")[:26] + "_Qx9"
+@@ -136,7 +136,7 @@ def _arguments(family, labels, size):
+     return task
+ 
+ 
+-def generate_rows(count, split="train", seed=20260910):
++def generate_rows(count, split="train", seed=DEFAULT_SEED):
+     """Yield ``count`` deterministic, prefix-stable rows with O(1) stream memory.
+ 
+     Labels are derived from a split-specific SHA namespace, including UUID
+@@ -145,13 +145,14 @@ def generate_rows(count, split="train", seed=20260910):
+     """
+     if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+         raise ValueError("count must be a nonnegative integer")
+-    if split not in {"train", "validation", "test"}:
++    if split not in SPLITS:
+         raise ValueError("split must be train, validation, or test")
+     for index in range(count):
+         pair, contrast = divmod(index, 2)
+         family = FAMILIES[pair % len(FAMILIES)]
+         size = SIZES[(pair // len(FAMILIES)) % len(SIZES)]
+-        namespace = f"{VERSION}:{seed}:{split}:{pair}"
++        # Both rows of a contrast pair hash their labels under the pair namespace.
++        namespace = scoped(VERSION, split, pair)
+         labels = _labels(namespace, contrast)
+         arguments = _arguments(family, labels, size)
+         raw = json.dumps(
+@@ -186,7 +187,7 @@ def generate_rows(count, split="train", seed=20260910):
+                     else json.dumps({"expected": list(labels.values()), "case_sensitive": True}),
+                 }
+             )
+-        episode_id = f"{VERSION}:{seed}:{split}:{index}"
++        episode_id = scoped(VERSION, split, index, seed)
+         yield {
+             "id": f"{episode_id}:0",
+             "episode_id": episode_id,
+diff --git a/src/lod/datasets/expansion/varied.py b/src/lod/datasets/expansion/varied.py
+index bfa9dc8..cc4cd67 100644
+--- a/src/lod/datasets/expansion/varied.py
++++ b/src/lod/datasets/expansion/varied.py
+@@ -9,6 +9,8 @@ import json
+ import random
+ import uuid
+ 
++from lod.datasets.expansion.naming import DEFAULT_SEED
++
+ TASKS = {
+     "train": ("python_validators", "typescript_routes", "operator_runbook",
+               "yaml_services", "sql_report", "http_batch", "workspace_inventory",
+@@ -146,7 +148,13 @@ def _calls(kind, name, n, rng):
+     return calls, labels
+ 
+ 
+-def generate_rows(count, split="train", seed=20260910):
++def _payload_seed(seed, split, index):
++    """Seed of one row's private RNG; recorded in provenance so a row can be replayed."""
++    digest = hashlib.sha256(f"varied-v1:{seed}:{split}:{index}".encode()).digest()
++    return int.from_bytes(digest, "big")
++
++
++def generate_rows(count, split="train", seed=DEFAULT_SEED):
+     """Yield ``count`` complete events in O(one event) memory, with stable prefixes.
+ 
+     Requested size tiers cycle 50/35/15 percent; small multi-tool inventory tasks
+@@ -160,8 +168,7 @@ def generate_rows(count, split="train", seed=20260910):
+     families = TASKS[split]
+     for index in range(count):
+         kind = families[index % len(families)]
+-        digest = hashlib.sha256(f"varied-v1:{seed}:{split}:{index}".encode()).digest()
+-        payload_seed = int.from_bytes(digest, "big")
++        payload_seed = _payload_seed(seed, split, index)
+         rng = random.Random(payload_seed)
+         size = SIZE_CYCLE[(index // len(families)) % len(SIZE_CYCLE)]
+         n = {"short": 1, "medium": 12, "long": 84}[size] + rng.randrange(3)

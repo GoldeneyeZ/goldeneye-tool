@@ -1,0 +1,126 @@
+diff --git a/src/pyfinance/backtest/engine.py b/src/pyfinance/backtest/engine.py
+index ebfabb4..49a9c8d 100644
+--- a/src/pyfinance/backtest/engine.py
++++ b/src/pyfinance/backtest/engine.py
+@@ -50,9 +50,8 @@ def run_weight_backtest(
+     validated_weights = validate_weights(
+         weights,
+         symbols=symbols,
+-        max_leverage=execution.max_leverage,
++        execution=execution,
+         trading_dates=price_table.index,
+-        missing_weight_policy=execution.missing_weight_policy,
+     )
+ 
+     asset_returns = price_table.pct_change(fill_method=None)
+diff --git a/src/pyfinance/plugins/validation.py b/src/pyfinance/plugins/validation.py
+index b190923..c9e6ac6 100644
+--- a/src/pyfinance/plugins/validation.py
++++ b/src/pyfinance/plugins/validation.py
+@@ -5,14 +5,19 @@ from collections.abc import Sequence
+ import numpy as np
+ import pandas as pd
+ 
++from pyfinance.config import ExecutionConfig
++
+ 
+ def validate_weights(
+     weights: pd.DataFrame,
+     symbols: Sequence[str],
+-    max_leverage: float,
++    execution: ExecutionConfig,
++    *,
+     trading_dates: pd.DatetimeIndex | None = None,
+-    missing_weight_policy: str = "zero",
+ ) -> pd.DataFrame:
++    max_leverage = execution.max_leverage
++    missing_weight_policy = execution.missing_weight_policy
++
+     if not isinstance(weights.index, pd.DatetimeIndex):
+         raise ValueError("weights must use a DatetimeIndex")
+ 
+diff --git a/tests/test_plugins.py b/tests/test_plugins.py
+index fb3aa35..363b375 100644
+--- a/tests/test_plugins.py
++++ b/tests/test_plugins.py
+@@ -381,7 +381,9 @@ def test_validate_weights_rejects_unknown_symbols() -> None:
+     )
+ 
+     with pytest.raises(ValueError, match="unknown symbols"):
+-        validate_weights(weights, symbols=["AAPL", "MSFT"], max_leverage=1.0)
++        validate_weights(
++            weights, symbols=["AAPL", "MSFT"], execution=ExecutionConfig()
++        )
+ 
+ 
+ def test_validate_weights_rejects_submitted_nan_weight() -> None:
+@@ -391,7 +393,7 @@ def test_validate_weights_rejects_submitted_nan_weight() -> None:
+     )
+ 
+     with pytest.raises(ValueError, match="finite numeric"):
+-        validate_weights(weights, symbols=["AAPL"], max_leverage=1.0)
++        validate_weights(weights, symbols=["AAPL"], execution=ExecutionConfig())
+ 
+ 
+ def test_validate_weights_rejects_submitted_inf_weight() -> None:
+@@ -401,7 +403,7 @@ def test_validate_weights_rejects_submitted_inf_weight() -> None:
+     )
+ 
+     with pytest.raises(ValueError, match="finite numeric"):
+-        validate_weights(weights, symbols=["AAPL"], max_leverage=1.0)
++        validate_weights(weights, symbols=["AAPL"], execution=ExecutionConfig())
+ 
+ 
+ def test_validate_weights_rejects_dates_outside_trading_calendar() -> None:
+@@ -417,7 +419,7 @@ def test_validate_weights_rejects_dates_outside_trading_calendar() -> None:
+         validate_weights(
+             weights,
+             symbols=["AAPL"],
+-            max_leverage=1.0,
++            execution=ExecutionConfig(),
+             trading_dates=trading_dates,
+         )
+ 
+@@ -434,9 +436,8 @@ def test_validate_weights_fills_missing_trading_dates_with_zero_policy() -> None
+     validated = validate_weights(
+         weights,
+         symbols=["AAPL", "MSFT"],
+-        max_leverage=1.0,
++        execution=ExecutionConfig(max_leverage=1.0, missing_weight_policy="zero"),
+         trading_dates=trading_dates,
+-        missing_weight_policy="zero",
+     )
+ 
+     pd.testing.assert_frame_equal(
+@@ -454,7 +455,9 @@ def test_validate_weights_allows_tiny_floating_point_leverage_overshoot() -> Non
+         index=pd.DatetimeIndex([pd.Timestamp("2024-01-02")]),
+     )
+ 
+-    validated = validate_weights(weights, symbols=["AAPL"], max_leverage=1.0)
++    validated = validate_weights(
++        weights, symbols=["AAPL"], execution=ExecutionConfig()
++    )
+ 
+     pd.testing.assert_frame_equal(validated, weights)
+ 
+@@ -466,4 +469,6 @@ def test_validate_weights_rejects_material_leverage_overshoot() -> None:
+     )
+ 
+     with pytest.raises(ValueError, match="weights exceed max_leverage 1.0"):
+-        validate_weights(weights, symbols=["AAPL", "MSFT"], max_leverage=1.0)
++        validate_weights(
++            weights, symbols=["AAPL", "MSFT"], execution=ExecutionConfig()
++        )
+diff --git a/tests/test_strategy_plugins.py b/tests/test_strategy_plugins.py
+index e2a36c3..7a4cb14 100644
+--- a/tests/test_strategy_plugins.py
++++ b/tests/test_strategy_plugins.py
+@@ -115,7 +115,7 @@ def test_inverse_volatility_caps_tiny_floating_point_leverage_overshoot() -> Non
+     capped = plugin._cap_long_only_leverage(weights)
+ 
+     assert capped.abs().sum(axis=1).iloc[0] <= 1.0
+-    validate_weights(capped, symbols=["AAPL", "MSFT"], max_leverage=1.0)
++    validate_weights(capped, symbols=["AAPL", "MSFT"], execution=ExecutionConfig())
+ 
+ 
+ def test_inverse_volatility_rejects_invalid_lookback() -> None:

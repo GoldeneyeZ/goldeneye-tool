@@ -1,0 +1,75 @@
+{
+  "name": "lod-regression-bug-dirty",
+  "output": "../../../target/agent-bench/lod-regression-bug-dirty/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\LOD-claude",
+  "base_ref": "1c6a727d20aeccabe1da2dbb6d4a5b16a4afe6a4",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/lod-regression-bug-dirty",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\hlo-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\hlo-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "lod-regression-bug-dirty",
+      "prompt_file": "../tasks/lod-regression-bug-dirty.md",
+      "source_language": "Python",
+      "source_extensions": [
+        ".py"
+      ],
+      "overlay": {
+        "patch_file": "../overlays/lod-regression-bug-dirty.patch"
+      },
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/lod-regression-bug-dirty.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "src/lod/datasets/",
+      "tests/datasets/"
+    ],
+    "min_paths": 0,
+    "max_paths": 3
+  },
+  "engines": [
+    {
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

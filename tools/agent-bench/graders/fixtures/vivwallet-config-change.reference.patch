@@ -1,0 +1,216 @@
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/config/LynxConfiguration.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/config/LynxConfiguration.java
+new file mode 100644
+index 0000000..2e4c9d7
+--- /dev/null
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/application/config/LynxConfiguration.java
+@@ -0,0 +1,26 @@
++package com.invivoo.vivwallet.api.application.config;
++
++import lombok.AllArgsConstructor;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.stereotype.Component;
++import org.springframework.validation.annotation.Validated;
++
++import javax.validation.constraints.NotBlank;
++
++@Component
++@ConfigurationProperties(value = "lynx")
++@Validated
++@Getter
++@Setter
++@NoArgsConstructor
++@AllArgsConstructor
++public class LynxConfiguration {
++
++    @NotBlank
++    private String heldStatus;
++    @NotBlank
++    private String okValidity;
++}
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnector.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnector.java
+index 7f07327..fd7acd4 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnector.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnector.java
+@@ -1,5 +1,6 @@
+ package com.invivoo.vivwallet.api.infrastructure.lynx;
+ 
++import com.invivoo.vivwallet.api.application.config.LynxConfiguration;
+ import com.invivoo.vivwallet.api.domain.action.Action;
+ import com.invivoo.vivwallet.api.domain.user.User;
+ import com.invivoo.vivwallet.api.infrastructure.lynx.mapper.ActivityToActionMapper;
+@@ -30,22 +31,23 @@ import static com.invivoo.vivwallet.api.infrastructure.lynx.LynxConnectorConfigu
+ @Service
+ public class LynxConnector {
+ 
+-    public static final String ACTIVITY_HELD_STATUS = "Held";
+-    public static final String ACTIVITY_IS_OK = "OK";
+     private final RestTemplate restTemplate;
+     private final ActivityToActionMapper activityToActionMapper;
+     private final LynxUserToUserMapper lynxUserToUserMapper;
+     private final String vivApiUrl;
+     private final String userApiUrl;
++    private final LynxConfiguration lynxConfiguration;
+ 
+     public LynxConnector(@Qualifier(LYNX_CONNECTOR_REST_TEMPLATE) RestTemplate restTemplate,
+                          @Value("${lynx.vivApiUrl}") String vivApiUrl,
+                          @Value("${lynx.userApiUrl}") String userApiUrl,
++                         LynxConfiguration lynxConfiguration,
+                          ActivityToActionMapper activityToActionMapper,
+                          LynxUserToUserMapper lynxUserToUserMapper) {
+         this.restTemplate = restTemplate;
+         this.vivApiUrl = vivApiUrl;
+         this.userApiUrl = userApiUrl;
++        this.lynxConfiguration = lynxConfiguration;
+         this.activityToActionMapper = activityToActionMapper;
+         this.lynxUserToUserMapper = lynxUserToUserMapper;
+     }
+@@ -78,8 +80,8 @@ public class LynxConnector {
+     }
+ 
+     private boolean isStatusHeldAndValidityOk(Activity activity) {
+-        return ACTIVITY_HELD_STATUS.equals(activity.getStatus())
+-               && ACTIVITY_IS_OK.equals(activity.getValidity());
++        return lynxConfiguration.getHeldStatus().equals(activity.getStatus())
++               && lynxConfiguration.getOkValidity().equals(activity.getValidity());
+     }
+ 
+     private boolean isValueDateAfterNow(Activity activity) {
+diff --git a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/mapper/ActivityToActionMapper.java b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/mapper/ActivityToActionMapper.java
+index 24d66bb..78258cd 100644
+--- a/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/mapper/ActivityToActionMapper.java
++++ b/ViV-Wallet-api/src/main/java/com/invivoo/vivwallet/api/infrastructure/lynx/mapper/ActivityToActionMapper.java
+@@ -1,5 +1,6 @@
+ package com.invivoo.vivwallet.api.infrastructure.lynx.mapper;
+ 
++import com.invivoo.vivwallet.api.application.config.LynxConfiguration;
+ import com.invivoo.vivwallet.api.domain.action.Action;
+ import com.invivoo.vivwallet.api.domain.action.ActionStatus;
+ import com.invivoo.vivwallet.api.domain.action.ActionType;
+@@ -17,9 +18,11 @@ import java.util.Optional;
+ public class ActivityToActionMapper {
+ 
+     private final UserRepository userRepository;
++    private final LynxConfiguration lynxConfiguration;
+ 
+-    public ActivityToActionMapper(UserRepository userRepository) {
++    public ActivityToActionMapper(UserRepository userRepository, LynxConfiguration lynxConfiguration) {
+         this.userRepository = userRepository;
++        this.lynxConfiguration = lynxConfiguration;
+     }
+ 
+     public Optional<Action> convert(Activity activity) {
+@@ -82,7 +85,7 @@ public class ActivityToActionMapper {
+                 builder.context(String.format("Évaluation de %s : candidat non retenu", activity.getRelatedTo()));
+                 break;
+             case COOPTATION:
+-                if ("OK".equalsIgnoreCase(activity.getValidity())) {
++                if (lynxConfiguration.getOkValidity().equalsIgnoreCase(activity.getValidity())) {
+                     builder.type(ActionType.COOPTATION);
+                 } else {
+                     builder.type(ActionType.COOPTATION_NOK);
+diff --git a/ViV-Wallet-api/src/main/resources/application.yml b/ViV-Wallet-api/src/main/resources/application.yml
+index 35cd18e..1110af8 100644
+--- a/ViV-Wallet-api/src/main/resources/application.yml
++++ b/ViV-Wallet-api/src/main/resources/application.yml
+@@ -18,3 +18,5 @@ x4b:
+ lynx:
+   vivApiUrl: TO_BE_DEFINED
+   userApiUrl: TO_BE_DEFINED
++  heldStatus: Held
++  okValidity: OK
+diff --git a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnectorTest.java b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnectorTest.java
+index d5ea542..f0a470e 100644
+--- a/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnectorTest.java
++++ b/ViV-Wallet-api/src/test/java/com/invivoo/vivwallet/api/infrastructure/lynx/LynxConnectorTest.java
+@@ -1,6 +1,7 @@
+ package com.invivoo.vivwallet.api.infrastructure.lynx;
+ 
+ 
++import com.invivoo.vivwallet.api.application.config.LynxConfiguration;
+ import com.invivoo.vivwallet.api.domain.action.Action;
+ import com.invivoo.vivwallet.api.domain.user.User;
+ import com.invivoo.vivwallet.api.domain.user.UserRepository;
+@@ -56,6 +57,8 @@ public class LynxConnectorTest {
+     @Mock
+     private UserRepository userRepository;
+ 
++    private final LynxConfiguration lynxConfiguration = new LynxConfiguration("Held", "OK");
++
+     private MockRestServiceServer mockServer;
+ 
+     @Before
+@@ -66,7 +69,7 @@ public class LynxConnectorTest {
+     @Test
+     public void should_return_activities_when_get_from_lynx() throws IOException, URISyntaxException {
+         // given
+-        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", null, null);
++        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", lynxConfiguration, null, null);
+ 
+         Path lynxResponse = Paths.get(Objects.requireNonNull(getClass().getClassLoader().getResource("lynx-response.json")).toURI());
+         String expectedLynxResponse = Files.lines(lynxResponse).collect(Collectors.joining());
+@@ -105,7 +108,7 @@ public class LynxConnectorTest {
+         // Given
+         when(userRepository.findByFullNameTrimIgnoreCase("Collaborateur1")).thenReturn(
+                 Optional.of(new User(1L, "Collaborateur1", "Collaborateur1", emptySet(), emptySet())));
+-        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", new ActivityToActionMapper(userRepository), new LynxUserToUserMapper());
++        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", lynxConfiguration, new ActivityToActionMapper(userRepository, lynxConfiguration), new LynxUserToUserMapper());
+ 
+         Path lynxResponse = Paths.get(Objects.requireNonNull(getClass().getClassLoader().getResource("lynx-response-winning-coaching-1-collaborator.json")).toURI());
+         String expectedLynxResponse = Files.lines(lynxResponse).collect(Collectors.joining());
+@@ -125,7 +128,7 @@ public class LynxConnectorTest {
+         when(userRepository.findByFullNameTrimIgnoreCase(collaborator1.getFullName())).thenReturn(Optional.of(collaborator1));
+         User collaborator2 = new User(2L, "Collaborateur2", "Collaborateur2", emptySet(), emptySet());
+         when(userRepository.findByFullNameTrimIgnoreCase(collaborator2.getFullName())).thenReturn(Optional.of(collaborator2));
+-        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", new ActivityToActionMapper(userRepository), new LynxUserToUserMapper());
++        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", lynxConfiguration, new ActivityToActionMapper(userRepository, lynxConfiguration), new LynxUserToUserMapper());
+ 
+         Path lynxResponse = Paths.get(Objects.requireNonNull(getClass().getClassLoader().getResource("lynx-response-winning-coaching-2-collaborators.json")).toURI());
+         String expectedLynxResponse = Files.lines(lynxResponse).collect(Collectors.joining());
+@@ -144,7 +147,7 @@ public class LynxConnectorTest {
+     @Test
+     public void should_get_all_lynx_users() throws URISyntaxException, IOException {
+         // GIVEN
+-        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", new ActivityToActionMapper(userRepository), new LynxUserToUserMapper());
++        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", lynxConfiguration, new ActivityToActionMapper(userRepository, lynxConfiguration), new LynxUserToUserMapper());
+ 
+         Path lynxResponse = Paths.get(Objects.requireNonNull(getClass().getClassLoader().getResource("lynx-user-response.json")).toURI());
+         String expectedLynxResponse = Files.lines(lynxResponse).collect(Collectors.joining());
+@@ -157,4 +160,35 @@ public class LynxConnectorTest {
+         Predicate<? super List<? extends  User>> isNotEmpty = u -> !u.isEmpty();
+         assertThat(users).isNot(new Condition<>(isNotEmpty, "is not empty"));
+     }
++
++    @Test
++    public void should_only_get_actions_for_activities_with_the_configured_status_and_validity() {
++        // Given
++        User collaborator1 = new User(1L, "Collaborateur1", "Collaborateur1", emptySet(), emptySet());
++        when(userRepository.findByFullNameTrimIgnoreCase(collaborator1.getFullName())).thenReturn(Optional.of(collaborator1));
++        LynxConfiguration customLabels = new LynxConfiguration("Tenu", "Valide");
++        LynxConnector lynxConnector = new LynxConnector(restTemplate, "http://vivApiUrl", "http://userApiUrl", customLabels, new ActivityToActionMapper(userRepository, customLabels), new LynxUserToUserMapper());
++        Activity activityWithConfiguredLabels = coachingActivity(1L, "Tenu", "Valide");
++        Activity activityWithDefaultLabels = coachingActivity(2L, "Held", "OK");
++
++        // When
++        List<Action> actions = lynxConnector.getActionsFromActivities(List.of(activityWithConfiguredLabels, activityWithDefaultLabels));
++
++        // Then
++        assertThat(actions).extracting(Action::getLynxActivityId).containsExactly(1L);
++    }
++
++    private Activity coachingActivity(Long id, String status, String validity) {
++        return Activity.builder()
++                       .id(id)
++                       .type(ActivityType.COACHING_HORS_OPPORTUNITE)
++                       .date(LocalDateTime.of(2020, 9, 15, 11, 0))
++                       .endDate(LocalDateTime.of(2020, 9, 15, 11, 15))
++                       .valueDate(LocalDateTime.of(2020, 9, 15, 0, 0))
++                       .status(status)
++                       .validity(validity)
++                       .relatedTo("Consultant")
++                       .owner("Collaborateur1")
++                       .build();
++    }
+ }

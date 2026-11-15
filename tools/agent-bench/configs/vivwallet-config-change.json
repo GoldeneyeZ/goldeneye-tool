@@ -1,0 +1,71 @@
+{
+  "name": "vivwallet-config-change",
+  "output": "../../../target/agent-bench/vivwallet-config-change/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\ViV-Wallet",
+  "base_ref": "c9e6018efb0c071f6b88833bef9e6ff75532866f",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/vivwallet-config-change",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\hvv-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\hvv-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "vivwallet-config-change",
+      "prompt_file": "../tasks/vivwallet-config-change.md",
+      "source_language": "Java",
+      "source_extensions": [
+        ".java"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/vivwallet-config-change.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "ViV-Wallet-api/src/"
+    ],
+    "min_paths": 4,
+    "max_paths": 10
+  },
+  "engines": [
+    {
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

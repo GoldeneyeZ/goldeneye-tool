@@ -1,0 +1,146 @@
+{
+  "source": "final-message",
+  "min_facts": 11,
+  "facts": [
+    {
+      "id": "abstract-context-hands-call-to-its-resolver",
+      "any": [
+        "AbstractApplicationContext.{0,500}(getResourcePatternResolver\\s*\\(|new\\s+PathMatchingResourcePatternResolver|this\\.resourcePatternResolver|resourcePatternResolver[`*]*\\s+field|field\\s+[`*]*resourcePatternResolver|constructor)",
+        "getResourcePatternResolver\\s*\\(\\s*\\).{0,200}AbstractApplicationContext"
+      ]
+    },
+    {
+      "id": "generic-context-override-calls-super",
+      "any": [
+        "GenericApplicationContext.{0,500}\\bsuper\\b",
+        "\\bsuper\\b.{0,150}GenericApplicationContext"
+      ]
+    },
+    {
+      "id": "generic-context-prefers-its-own-resource-loader",
+      "all": [
+        "GenericApplicationContext.{0,500}(setResourceLoader|(?<![A-Za-z])resource\\s?loader(?!Aware))"
+      ]
+    },
+    {
+      "id": "caller-bean-definition-reader",
+      "all": [
+        "AbstractBeanDefinitionReader",
+        "loadBeanDefinitions"
+      ]
+    },
+    {
+      "id": "caller-classpath-scanning",
+      "all": [
+        "ClassPathScanningCandidateComponentProvider",
+        "scanCandidateComponents"
+      ]
+    },
+    {
+      "id": "caller-property-source-processor",
+      "all": [
+        "PropertySourceProcessor",
+        "processPropertySource"
+      ]
+    },
+    {
+      "id": "caller-resource-array-editor-both-paths",
+      "all": [
+        "ResourceArrayPropertyEditor",
+        "setValue"
+      ],
+      "any": [
+        "setAsText",
+        "ResourceArrayPropertyEditor[`*]*[.#]getResources",
+        "private\\s+[`*]*(static\\s+)?(helper|method|getResources)",
+        "\\bhelper\\b"
+      ]
+    },
+    {
+      "id": "self-call-in-find-path-matching-resources",
+      "all": [
+        "PathMatchingResourcePatternResolver(?!Tests)",
+        "findPathMatchingResources"
+      ]
+    },
+    {
+      "id": "reader-and-scanner-translate-to-bean-definition-store-exception",
+      "all": [
+        "(AbstractBeanDefinitionReader|loadBeanDefinitions).{0,800}BeanDefinitionStoreException|Could not resolve bean definition resource pattern",
+        "(ClassPathScanningCandidateComponentProvider|scanCandidateComponents).{0,800}BeanDefinitionStoreException|I/O failure during classpath scanning"
+      ]
+    },
+    {
+      "id": "property-source-processor-ignore-resource-not-found",
+      "any": [
+        "ignoreResourceNotFound",
+        "isIgnorableException"
+      ]
+    },
+    {
+      "id": "editor-text-path-throws-illegal-argument",
+      "all": [
+        "ResourceArrayPropertyEditor"
+      ],
+      "any": [
+        "IllegalArgumentException",
+        "Could not resolve resource location pattern"
+      ]
+    },
+    {
+      "id": "editor-value-path-swallows",
+      "any": [
+        "setValue.{0,250}(swallow|\\bignor(e|es|ed|ing)\\b|suppress|\\bdebug\\b|silent|\\bdropp?(s|ed)\\b|discard|not\\s+(re-?)?thrown|without\\s+(re-?)?throwing|never\\s+(re-?)?thrown)",
+        "(swallow|\\bignored\\b|suppress|silently).{0,120}setValue"
+      ]
+    },
+    {
+      "id": "direct-test-class",
+      "all": [
+        "PathMatchingResourcePatternResolverTests"
+      ]
+    },
+    {
+      "id": "test-asserts-file-not-found-exception",
+      "any": [
+        "PathMatchingResourcePatternResolverTests.{0,800}FileNotFoundException",
+        "FileNotFoundException.{0,150}PathMatchingResourcePatternResolverTests",
+        "invalidPrefixWithPatternElementInItThrowsException"
+      ]
+    }
+  ],
+  "forbidden": [
+    {
+      "id": "lists-classloader-getresources-user-as-caller",
+      "note": "These classes call java.lang.ClassLoader.getResources. Naming one is a wrong claim unless an exclusion cue (not a caller, excluded, ClassLoader, same name, ...) stands within 600 characters before or 300 after the name.",
+      "any": [
+        "(?<!(\\bnot\\s+(an?\\s+|the\\s+|be\\s+|been\\s+|to\\s+be\\s+)?(direct\\s+|real\\s+|actual\\s+|production\\s+)?(callers?|call(s|ed|ing)?|part|affected|count(s|ed)?|relevant|related|included|listed|implementations?|tests?|us(e|es|ed|ing)|invok(e|es|ed|ing)|touch(ed)?|this|that|the\\s+same|go(es)?\\s+through|involved?|concern(ed)?|impacted|matter|on\\s+the|for\\s+this|of\\s+this)|n[’']t\\s+(count|call|use|invoke|matter|touch|go\\s+through|involve|concern|affected|part|related|relevant)|exclud|unrelated|different\\s+(method|api|type|class|interface|signature)|(an)?other\\s+methods?|same[- ]nam|share[sd]?\\s+(the|its|that)\\s+name|namesake|homonym|look-?alike|false\\s+(positive|friend|match|hit)|red\\s+herring|unaffected|irrelevant|out\\s+of\\s+scope|coincid|confus|\\bskip|\\bignor(e|ed|ing)\\b|\\bomit|left\\s+out|leav(e|ing)\\s+out|disregard|class\\s?loader|\\bJDK\\b|java\\.lang|Enumeration<URL>).{0,600})\\b(SpringFactoriesLoader|PropertiesLoaderUtils|CandidateComponentsIndexLoader)\\b(?!.{0,300}(\\bnot\\s+(an?\\s+|the\\s+|be\\s+|been\\s+|to\\s+be\\s+)?(direct\\s+|real\\s+|actual\\s+|production\\s+)?(callers?|call(s|ed|ing)?|part|affected|count(s|ed)?|relevant|related|included|listed|implementations?|tests?|us(e|es|ed|ing)|invok(e|es|ed|ing)|touch(ed)?|this|that|the\\s+same|go(es)?\\s+through|involved?|concern(ed)?|impacted|matter|on\\s+the|for\\s+this|of\\s+this)|n[’']t\\s+(count|call|use|invoke|matter|touch|go\\s+through|involve|concern|affected|part|related|relevant)|exclud|unrelated|different\\s+(method|api|type|class|interface|signature)|(an)?other\\s+methods?|same[- ]nam|share[sd]?\\s+(the|its|that)\\s+name|namesake|homonym|look-?alike|false\\s+(positive|friend|match|hit)|red\\s+herring|unaffected|irrelevant|out\\s+of\\s+scope|coincid|confus|\\bskip|\\bignor(e|ed|ing)\\b|\\bomit|left\\s+out|leav(e|ing)\\s+out|disregard|class\\s?loader|\\bJDK\\b|java\\.lang|Enumeration<URL>))"
+      ]
+    },
+    {
+      "id": "lists-classloader-test-as-test-of-this-method",
+      "note": "These test classes override or call ClassLoader.getResources. Same rule and same exclusion cues as the entry above.",
+      "any": [
+        "(?<!(\\bnot\\s+(an?\\s+|the\\s+|be\\s+|been\\s+|to\\s+be\\s+)?(direct\\s+|real\\s+|actual\\s+|production\\s+)?(callers?|call(s|ed|ing)?|part|affected|count(s|ed)?|relevant|related|included|listed|implementations?|tests?|us(e|es|ed|ing)|invok(e|es|ed|ing)|touch(ed)?|this|that|the\\s+same|go(es)?\\s+through|involved?|concern(ed)?|impacted|matter|on\\s+the|for\\s+this|of\\s+this)|n[’']t\\s+(count|call|use|invoke|matter|touch|go\\s+through|involve|concern|affected|part|related|relevant)|exclud|unrelated|different\\s+(method|api|type|class|interface|signature)|(an)?other\\s+methods?|same[- ]nam|share[sd]?\\s+(the|its|that)\\s+name|namesake|homonym|look-?alike|false\\s+(positive|friend|match|hit)|red\\s+herring|unaffected|irrelevant|out\\s+of\\s+scope|coincid|confus|\\bskip|\\bignor(e|ed|ing)\\b|\\bomit|left\\s+out|leav(e|ing)\\s+out|disregard|class\\s?loader|\\bJDK\\b|java\\.lang|Enumeration<URL>).{0,600})\\b(ResourceOverridingShadowingClassLoaderTests|AotServicesTests|RuntimeHintsBeanFactoryInitializationAotProcessorTests)\\b(?!.{0,300}(\\bnot\\s+(an?\\s+|the\\s+|be\\s+|been\\s+|to\\s+be\\s+)?(direct\\s+|real\\s+|actual\\s+|production\\s+)?(callers?|call(s|ed|ing)?|part|affected|count(s|ed)?|relevant|related|included|listed|implementations?|tests?|us(e|es|ed|ing)|invok(e|es|ed|ing)|touch(ed)?|this|that|the\\s+same|go(es)?\\s+through|involved?|concern(ed)?|impacted|matter|on\\s+the|for\\s+this|of\\s+this)|n[’']t\\s+(count|call|use|invoke|matter|touch|go\\s+through|involve|concern|affected|part|related|relevant)|exclud|unrelated|different\\s+(method|api|type|class|interface|signature)|(an)?other\\s+methods?|same[- ]nam|share[sd]?\\s+(the|its|that)\\s+name|namesake|homonym|look-?alike|false\\s+(positive|friend|match|hit)|red\\s+herring|unaffected|irrelevant|out\\s+of\\s+scope|coincid|confus|\\bskip|\\bignor(e|ed|ing)\\b|\\bomit|left\\s+out|leav(e|ing)\\s+out|disregard|class\\s?loader|\\bJDK\\b|java\\.lang|Enumeration<URL>))"
+      ]
+    },
+    {
+      "id": "claims-default-resource-loader-declares-getresources",
+      "any": [
+        "DefaultResourceLoader[.#]getResources\\b"
+      ]
+    },
+    {
+      "id": "claims-generic-context-does-not-override",
+      "any": [
+        "(?<!\\b(of|extends|extending|from|under|than|and|or)\\s{1,3}[`*]*|,\\s{0,3}[`*]*)GenericApplicationContext[`*]*\\s+(itself\\s+)?(does\\s+not|doesn[’']t|never)\\s+(override|declare|redefine|implement)\\w*\\s+[^.\\n]{0,40}getResources\\b"
+      ]
+    },
+    {
+      "id": "claims-abstract-context-calls-super",
+      "any": [
+        "AbstractApplicationContext(\\.getResources(\\([^)]*\\))?)?[`*\\s]+(itself\\s+|simply\\s+|just\\s+)?(calls|invokes)\\s+[`*]*super\\b"
+      ]
+    }
+  ]
+}

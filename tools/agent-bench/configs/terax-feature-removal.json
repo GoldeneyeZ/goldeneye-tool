@@ -1,0 +1,79 @@
+{
+  "name": "terax-feature-removal",
+  "output": "../../../target/agent-bench/terax-feature-removal/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\terax-ai",
+  "base_ref": "e7300fb8aff1726f5de77e4f5f84d09613bc89f5",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/terax-feature-removal",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\htx-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\htx-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "terax-feature-removal",
+      "prompt_file": "../tasks/terax-feature-removal.md",
+      "source_language": "TypeScript or TSX",
+      "source_extensions": [
+        ".ts",
+        ".tsx"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/terax-feature-removal.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "src/"
+    ],
+    "exact": [
+      "package.json",
+      "README.md",
+      "TERAX.md",
+      "vite.config.ts"
+    ],
+    "min_paths": 10,
+    "max_paths": 16
+  },
+  "engines": [
+    {
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full",
+        "GOLDENEYE_INCLUDE_PATHS": "src;src-tauri/src"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

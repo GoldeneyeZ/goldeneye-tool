@@ -1,0 +1,13 @@
+diff --git a/src/lod/datasets/expansion/opaque.py b/src/lod/datasets/expansion/opaque.py
+index 5d9b31f..aa15047 100644
+--- a/src/lod/datasets/expansion/opaque.py
++++ b/src/lod/datasets/expansion/opaque.py
+@@ -152,7 +152,7 @@ def generate_rows(count, split="train", seed=DEFAULT_SEED):
+         family = FAMILIES[pair % len(FAMILIES)]
+         size = SIZES[(pair // len(FAMILIES)) % len(SIZES)]
+         # Both rows of a contrast pair hash their labels under the pair namespace.
+-        namespace = scoped(VERSION, split, pair)
++        namespace = scoped(VERSION, split, pair, seed)
+         labels = _labels(namespace, contrast)
+         arguments = _arguments(family, labels, size)
+         raw = json.dumps(

@@ -1,0 +1,72 @@
+{
+  "name": "pyfinance-api-change",
+  "output": "../../../target/agent-bench/pyfinance-api-change/report.json",
+  "repo": "D:\\Dev\\IdeaProjects\\PyFinance",
+  "base_ref": "24aae900a8a2bcb9e0f788a3db1b3226ae58011c",
+  "model": "gpt-5.6-terra",
+  "reasoning": "high",
+  "codex_full_access": true,
+  "repetitions": 3,
+  "timeout_ms": 3600000,
+  "cache_modes": [
+    "warm"
+  ],
+  "ready_snapshot": {
+    "root": "../../../target/agent-bench/snapshots/pyfinance-api-change",
+    "worktree": "D:\\Dev\\IdeaProjects\\.gab\\hpf-wt",
+    "live_cache": "D:\\Dev\\IdeaProjects\\.gab-cache\\hpf-live",
+    "allowed_worktree_root": "D:\\Dev\\IdeaProjects\\.gab",
+    "allowed_cache_root": "D:\\Dev\\IdeaProjects\\.gab-cache",
+    "allowed_snapshot_root": "../../../target/agent-bench/snapshots"
+  },
+  "tasks": [
+    {
+      "id": "pyfinance-api-change",
+      "prompt_file": "../tasks/pyfinance-api-change.md",
+      "source_language": "Python",
+      "source_extensions": [
+        ".py"
+      ],
+      "grader": {
+        "command": "node",
+        "args": [
+          "../graders/pyfinance-api-change.mjs",
+          "{worktree}",
+          "{repo}"
+        ]
+      }
+    }
+  ],
+  "allowed_dirty_policy": {
+    "prefixes": [
+      "src/",
+      "tests/"
+    ],
+    "min_paths": 4,
+    "max_paths": 6
+  },
+  "engines": [
+    {
+      "id": "goldeneye-code-agent-layer",
+      "kind": "gcal",
+      "command": "C:\\nvm4w\\nodejs\\node.exe",
+      "args": [
+        "D:\\Dev\\IdeaProjects\\goldeneye-tool\\agent\\dist\\main.js"
+      ],
+      "backend_command": "../../../target/release/goldeneye.exe",
+      "env": {
+        "GOLDENEYE_GRAMMAR_PACK": "full"
+      },
+      "cache_modes": [
+        "warm"
+      ]
+    },
+    {
+      "id": "vanilla",
+      "kind": "vanilla",
+      "cache_modes": [
+        "none"
+      ]
+    }
+  ]
+}

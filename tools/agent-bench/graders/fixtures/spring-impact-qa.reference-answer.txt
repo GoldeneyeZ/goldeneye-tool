@@ -1,0 +1,39 @@
+Impact of dropping the checked IOException from ResourcePatternResolver.getResources(String), limited to spring-core, spring-beans and spring-context (main and test sources).
+
+1. Implementations
+
+There are exactly three declarations of getResources(String) for this interface.
+
+- PathMatchingResourcePatternResolver.getResources (spring-core) does the resolution itself. A "classpath*:" location goes to findAllModulePathResources plus either findPathMatchingResources (pattern) or findAllClassPathResources (plain name). Any other location goes to findPathMatchingResources when the part after the prefix is a pattern, otherwise the method returns a one-element array holding getResource(locationPattern). The method and these helpers all declare "throws IOException".
+- AbstractApplicationContext.getResources (spring-context) resolves nothing. It hands the call to its private final field resourcePatternResolver. The constructor fills that field from the protected factory method getResourcePatternResolver(), which by default returns new PathMatchingResourcePatternResolver(this). There is no super call: the superclass DefaultResourceLoader has no such method.
+- GenericApplicationContext.getResources (spring-context) overrides the AbstractApplicationContext method. If a ResourceLoader was set through setResourceLoader and that loader is itself a ResourcePatternResolver, the call is delegated to that loader. In every other case it calls super.getResources(locationPattern), which is the AbstractApplicationContext method above.
+
+Every other context class in spring-context inherits one of these two: AbstractRefreshableApplicationContext, AbstractRefreshableConfigApplicationContext, AbstractXmlApplicationContext, ClassPathXmlApplicationContext and FileSystemXmlApplicationContext inherit from AbstractApplicationContext; AnnotationConfigApplicationContext, GenericXmlApplicationContext, GenericGroovyApplicationContext and StaticApplicationContext inherit the GenericApplicationContext override.
+
+2. Direct production callers
+
+- AbstractBeanDefinitionReader.loadBeanDefinitions(String, Set<Resource>) in spring-beans, when the reader's ResourceLoader is a ResourcePatternResolver. XmlBeanDefinitionReader, GroovyBeanDefinitionReader and PropertiesBeanDefinitionReader inherit it.
+- ClassPathScanningCandidateComponentProvider.scanCandidateComponents in spring-context, on the resolver returned by its private getResourcePatternResolver().
+- PropertySourceProcessor.processPropertySource in spring-core, once per @PropertySource location.
+- ResourceArrayPropertyEditor in spring-core, at two places: its private helper getResources(String), which setAsText uses for each location pattern, and setValue, which calls the resolver for every String element of a collection or array.
+- PathMatchingResourcePatternResolver.findPathMatchingResources in spring-core calls getResources on itself twice to resolve the root directory of a pattern: getResources(commonPrefix) and getResources(rootDirPath).
+- The two context implementations are callers too: AbstractApplicationContext.getResources calls it on the resourcePatternResolver field, GenericApplicationContext.getResources calls it on the custom loader or through super.
+
+Same name, different method, so not affected: SpringFactoriesLoader.loadFactoriesResource, PropertiesLoaderUtils.loadAllProperties, CandidateComponentsIndexLoader.doLoadIndex and PathMatchingResourcePatternResolver.doFindAllClassPathResources call java.lang.ClassLoader.getResources. ShadowingClassLoader and ResourceOverridingShadowingClassLoader override that ClassLoader method. PathMatchingResourcePatternResolver also has an internal visitor with a no-argument getResources().
+
+3. Dependence on the checked exception
+
+- AbstractBeanDefinitionReader.loadBeanDefinitions: the call sits in a try block with "catch (IOException ex)", which throws BeanDefinitionStoreException("Could not resolve bean definition resource pattern [location]", ex). The call is the only statement in that try block that can throw IOException, so the catch clause stops compiling once the exception is unchecked, and an UncheckedIOException would then escape untranslated.
+- ClassPathScanningCandidateComponentProvider.scanCandidateComponents: the outer "catch (IOException ex)" throws BeanDefinitionStoreException("I/O failure during classpath scanning", ex). The per-resource inner try already catches Throwable, so the getResources call is again the only source of a checked IOException for the outer catch.
+- PropertySourceProcessor.processPropertySource: "catch (RuntimeException | IOException ex)". When the descriptor has ignoreResourceNotFound set and the exception, or its cause, is ignorable (isIgnorableException: FileNotFoundException, UnknownHostException, SocketException) or is a PlaceholderResolutionException, the location is logged at info level and skipped. Otherwise the exception is rethrown unchanged; the method itself declares "throws IOException". Because the cause is inspected too, an UncheckedIOException wrapping a FileNotFoundException would still be ignored.
+- ResourceArrayPropertyEditor has two different paths. On the setAsText path the private helper catches IOException and throws IllegalArgumentException("Could not resolve resource location pattern [...]"). On the setValue path the IOException is caught, logged at debug level and ignored, so that element simply contributes no resources.
+- PathMatchingResourcePatternResolver.findPathMatchingResources does not catch anything: it declares "throws IOException" and the exception propagates out of the outer getResources call.
+- AbstractApplicationContext.getResources and GenericApplicationContext.getResources do not catch either; both declare "throws IOException" and let it propagate to their callers.
+
+4. Tests
+
+- Direct calls: PathMatchingResourcePatternResolverTests in spring-core (resolver.getResources(...) in several tests and helpers), and ClassPathManifestEntriesTestApplication, the small main class in the same test package that those tests launch from a generated jar.
+- Assertion on the exception type: PathMatchingResourcePatternResolverTests.InvalidPatterns.invalidPrefixWithPatternElementInItThrowsException expects FileNotFoundException from resolver.getResources("xx**:**/*.xy"). It fails if the implementation wraps the exception in UncheckedIOException.
+- No test calls getResources on an application context, so the AbstractApplicationContext and GenericApplicationContext implementations are covered only indirectly, for example by ClassPathXmlApplicationContextTests loading a wildcard config location through AbstractBeanDefinitionReader.
+- Indirect coverage of the callers: ResourceArrayPropertyEditorTests (setAsText path only), ClassPathScanningCandidateComponentProviderTests, PropertySourceProcessorTests and PropertySourceAnnotationTests.
+- Same name but a different method: ResourceOverridingShadowingClassLoaderTests, AotServicesTests and RuntimeHintsBeanFactoryInitializationAotProcessorTests deal with ClassLoader.getResources, and the getResources() used in ClassPathXmlApplicationContextTests is a bean getter on the test class Service.
