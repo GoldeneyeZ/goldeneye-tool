@@ -336,7 +336,22 @@ async function main() {
   if (section) {
     const before = baseScan(SETTINGS_SECTION);
     lost("exports", SETTINGS_SECTION, before.exports, section.exports);
-    lost("settings rows or labels", SETTINGS_SECTION, textSet(before), textSet(section), (text) => /\bvim\b/i.test(text));
+    // A label of another setting names a Vim command beside the shortcut
+    // ("Cmd+S / :w"). Dropping that command from the label is part of the
+    // removal, and leaving it is tolerated: compare the labels without it.
+    const withoutVimCommands = (texts) =>
+      new Set(
+        [...texts].map((text) =>
+          text.replace(/\s*\/\s*:(?:wq|w|q|x)\b/g, "").replace(/:(?:wq|w|q|x)\b\s*\/\s*/g, ""),
+        ),
+      );
+    lost(
+      "settings rows or labels",
+      SETTINGS_SECTION,
+      withoutVimCommands(textSet(before)),
+      withoutVimCommands(textSet(section)),
+      (text) => /\bvim\b/i.test(text),
+    );
   }
 
   // Same-named neighbours that are not part of the feature.
