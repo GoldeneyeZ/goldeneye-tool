@@ -652,27 +652,31 @@ export function createProgram(deps: ProgramDeps): Command {
     .command("callers")
     .alias("refs")
     .description("call sites of a symbol: graph edges plus text references")
-    .argument("<symbol>")
+    .argument("<symbols...>")
     .option("--depth <n>", "trace depth", numberOption, 1)
     .option("--limit <n>", "maximum rows (default: 60 from the graph, 20 otherwise)", numberOption)
     .option("--no-text", "graph edges only")
-    .action(async (qualifiedName: string, options: TraceCommandOptions) => {
+    .action(async (qualifiedNames: string[], options: TraceCommandOptions) => {
       const context = await codeContext(deps);
-      if (context !== undefined) {
-        answer(
-          deps,
-          await references(context, deps.client, {
-            target: qualifiedName,
-            depth: options.depth,
-            limit: options.limit ?? GRAPH_TRACE_ROWS,
-            includeText: options.text,
-          }),
-        );
-        return;
-      }
+      // Several names are several questions in one call; a second name used
+      // to be dropped without a word.
+      for (const qualifiedName of qualifiedNames) {
+        if (context !== undefined) {
+          answer(
+            deps,
+            await references(context, deps.client, {
+              target: qualifiedName,
+              depth: options.depth,
+              limit: options.limit ?? GRAPH_TRACE_ROWS,
+              includeText: options.text,
+            }),
+          );
+          continue;
+        }
 
-      const trace = await deps.client.callers(qualifiedName, { depth: options.depth });
-      writeBoundedTrace(deps, "callers", trace, options.limit ?? RAW_TRACE_ROWS);
+        const trace = await deps.client.callers(qualifiedName, { depth: options.depth });
+        writeBoundedTrace(deps, "callers", trace, options.limit ?? RAW_TRACE_ROWS);
+      }
     });
 
   program

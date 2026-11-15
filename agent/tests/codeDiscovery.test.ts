@@ -1195,6 +1195,53 @@ describe("exploring code", () => {
     );
   });
 
+  it("lists the text uses of a name no symbol has, and prints two same-named symbols that fit", async () => {
+    const component = (filePath: string, startLine: number, endLine: number): GraphNode => ({
+      qualifiedName: [PROJECT, ...filePath.replace(/\.tsx$/, "").split("/"), "EditorStack"].join("."),
+      name: "EditorStack",
+      label: "Function",
+      filePath,
+      startLine,
+      endLine,
+    });
+    const stack = component("src/editor/EditorStack.tsx", 1, 60);
+    const lazy = component("src/editor/EditorStackLazy.tsx", 1, 3);
+    const context = await createContext({ extraNodes: [stack, lazy], textResults: [textHit(NODES[3], [7])] });
+    const body = Array.from({ length: 58 }, (_, index) => `  step${index}();`);
+    const files: Record<string, string> = {
+      [stack.filePath]: ["export function EditorStack(props: Props) {", ...body, "}", ""].join("\n"),
+      [lazy.filePath]: "export function EditorStack(props: Props) {\n  return <Inner {...props} />;\n}\n",
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), text);
+    }
+
+    // A ref, a local: not a symbol of the index, and still a name with uses.
+    const uses = await references(context, backend({}), {
+      target: "onCloseRef",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+    expect(uses.text.startsWith('# no symbol named "onCloseRef"; text matches:\n')).toBe(true);
+    expect(uses.text).toContain(BILLING);
+    // Graph edges only were asked for: the answer stays "not found".
+    const graphOnly = await references(context, backend({}), {
+      target: "onCloseRef",
+      depth: 1,
+      limit: 20,
+      includeText: false,
+    });
+    expect(graphOnly.text).toBe("# not found: onCloseRef");
+
+    // 60 lines and 3: neither is asked for again.
+    const both = await readLocators(context, ["EditorStack"]);
+    expect(both.text).toContain(`# EditorStack Function ${stack.filePath}:1-60`);
+    expect(both.text).toContain(`# EditorStack Function ${lazy.filePath}:1-3`);
+    expect(both.text).not.toContain("# ambiguous");
+  });
+
   it("ends a call site where the call closes, and leaves a callback body out", () => {
     const lines = [
       "validate_weights(",

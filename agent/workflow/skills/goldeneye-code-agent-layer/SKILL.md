@@ -27,7 +27,7 @@ identifier.
 | --- | --- |
 | Source of symbols, types, files | `gcal get A.method B Type File.ext` (every overload; a member outline above 500 lines) |
 | A symbol you will change, with its tests | `gcal get A.method --tests` |
-| Who calls it; before a rename, move, removal or signature change | `gcal callers Type.member` (call graph plus text references: the declaration, the imports, every call to its end) |
+| Who calls it; before a rename, move, removal or signature change | `gcal callers Type.member other` (call graph plus text references: the declaration, the imports, every call to its end) |
 | Who imports a file | `gcal callers src/lib/module.ts` |
 | What it calls; implementations | `gcal callees Type.member`, `gcal impls Type` |
 | Text, with context | `gcal grep "cancel.*Booking" src -C 8` (regex as in rg; `-F` literal) |

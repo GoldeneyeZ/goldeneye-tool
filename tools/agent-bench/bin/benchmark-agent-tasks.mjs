@@ -1301,7 +1301,7 @@ function composePrompt(task, cacheMode, engine, { skipAgentVerification = false 
             "- This workflow is the entire GCAL discovery phase. After it returns, do not invoke any GCAL command, including help, status, get, search, or a second workflow. Implement directly from the dossier.",
           ].join("\n")
         : engine.shellDiscovery
-          ? "- Every tool call costs a full turn: one call per need, several names per gcal get, several commands per shell call, and a file whole when you will edit several places of it. Do not run gcal status or gcal --help."
+          ? "- Every tool call costs a full turn: one call per need, several names per gcal get or gcal callers, several commands per shell call, and a file whole when you will edit several places of it. Name targets directly instead of searching for them, edit from what an answer printed without reading it again, and stop discovery once there is enough evidence. Do not run gcal status or gcal --help."
           : "- Answer each discovery need with one GCAL call: name targets directly instead of searching for identifiers, batch names, and chain several gcal commands in one shell call. Stop discovery once enough evidence exists; do not run gcal status or gcal --help."
       : "- Do not invoke the gcal CLI; it is not part of this benchmark lane.";
   const prompt = `${task.common_prompt ?? ""}

@@ -163,3 +163,6 @@ being in the plain-shell lane.
 3. **`gcal check` as an obligation.** On a task solved by one command it is
    half of the calls. The prompt could ask for it only after edits in more
    than one file.
+
+What was done about the three, and one more run of these tasks:
+`2026-11-15-gcal-short-prompt-holdout-rerun.md`.

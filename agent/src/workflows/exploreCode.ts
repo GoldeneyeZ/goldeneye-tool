@@ -476,7 +476,21 @@ export async function references(
     // `native.ts` reads as a member access first, and as a file when no symbol answers.
     if (!Array.isArray(resolved)) resolved = (await moduleUsers(context, request, true)) ?? resolved;
   }
-  if (!Array.isArray(resolved)) return resolved;
+  if (!Array.isArray(resolved)) {
+    // No symbol of that name (a local variable, a ref, a key): its uses are
+    // text, and the next call would be the grep for them.
+    if (
+      request.includeText &&
+      /^[A-Za-z_$][\w$]*$/.test(request.target) &&
+      resolved.text === `# not found: ${request.target}`
+    ) {
+      const text = await grepCode(context, { pattern: `\\b${request.target}\\b`, regex: true, limit: request.limit });
+      if (text.ok && !text.text.startsWith("# no ")) {
+        return { ok: true, text: `# no symbol named ${JSON.stringify(request.target)}; text matches:\n${text.text}` };
+      }
+    }
+    return resolved;
+  }
 
   const definitions = new Set(resolved.map((node) => node.qualifiedName));
   const rows = new Map<string, ReferenceRow>();

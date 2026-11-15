@@ -39,6 +39,7 @@ const LINE_WINDOW = 15;
 const LEADING_DOC_MAX_LINES = 80;
 const AMBIGUOUS_INLINE_MAX = 3;
 const AMBIGUOUS_INLINE_MAX_LINES = 40;
+const AMBIGUOUS_INLINE_TOTAL_LINES = 240;
 const AMBIGUOUS_FILE = "# ambiguous file:";
 const DIRECTORY_MAX_FILES = 120;
 const ALSO_DECLARED_MAX = 3;
@@ -967,9 +968,12 @@ async function renderAmbiguous(
   locator: SymbolLocator,
   nodes: GraphNode[],
 ): Promise<ReadResult> {
-  const small = nodes.every(
-    (node) => node.endLine - node.startLine + 1 <= AMBIGUOUS_INLINE_MAX_LINES,
-  );
+  // Asking which one costs a whole call: two or three symbols that fit are
+  // printed, each under its own header (a component and its lazy wrapper).
+  const total = nodes.reduce((sum, node) => sum + node.endLine - node.startLine + 1, 0);
+  const small =
+    nodes.every((node) => node.endLine - node.startLine + 1 <= AMBIGUOUS_INLINE_MAX_LINES) ||
+    total <= AMBIGUOUS_INLINE_TOTAL_LINES;
   if (nodes.length <= AMBIGUOUS_INLINE_MAX && small) {
     const blocks = [];
     for (const node of nodes) blocks.push(await renderSymbol(context, node));
