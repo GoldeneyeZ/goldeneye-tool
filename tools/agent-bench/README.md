@@ -44,6 +44,23 @@ node tools/agent-bench/bin/benchmark-agent-tasks.mjs `
 
 One-shot attempts are standalone and unqualified. They skip agent-side build, compile, test, lint, and check commands; discovery follows the selected lane strategy and budget. A missing or stale warm GCAL snapshot is refreshed locally without a smoke/model run. By default, output is isolated at `target/agent-bench/<task-id>/one-shot/<attempt-id>/report.json`; use `--attempt-id <id>` for a stable name or `--out <path>` for an explicit report. Canonical scored reports are never read or merged.
 
+### A second agent: Claude Code
+
+`--agent claude` gives the same prompt to Claude Code in print mode instead of Codex, in the `vanilla` and
+`goldeneye-code-agent-layer` lanes. The model defaults to `claude-opus-5-5` (`--model`), the effort to the config's
+`reasoning` (`--reasoning`). It needs a `claude` CLI that is logged in (`claude auth login`) or an
+`ANTHROPIC_API_KEY`.
+
+- The run loads no user or project customization (`--safe-mode`, no MCP server, no skills, no sub-agents), like the
+  Codex run with `--ignore-user-config --ignore-rules`. Tools: `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, each
+  allowed without a prompt; nothing else is.
+- The events of Claude Code are kept in `claude.jsonl` and translated to the events of Codex in `codex.jsonl`, so the
+  report has the same fields: one `command_execution` per `Bash`, `Read`, `Grep` or `Glob` call (a tool call), one
+  `file_change` per `Edit` or `Write` (a patch, not counted as a tool call, as with Codex), and the usage of the whole
+  run. `input_tokens` is everything sent, cached or not (`input + cache_creation + cache_read`), and
+  `cached_input_tokens` what was read from the cache, as Codex reports them.
+- Use a different `--attempt-id` for each agent; the report's `settings.agent` says which one ran.
+
 ### Operation-level run (no model)
 
 `benchmark:ops` compares GCAL with plain shell discovery one information need at a time, without invoking a model. Each scenario in `ops/<corpus>.json` names a need, the evidence that proves it was met, and one scripted command chain per lane; a lane stops at the first step whose cumulative output holds all evidence. It runs in seconds and costs nothing, so use it to find and verify surface-level regressions before spending model tokens on an agent run.

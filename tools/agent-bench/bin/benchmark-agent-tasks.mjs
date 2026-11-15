@@ -40,6 +40,12 @@ import {
   accumulateCodexLine,
 } from "../core.mjs";
 import {
+  CLAUDE_DEFAULT_MODEL,
+  claudeArgs,
+  claudeEnvironment,
+  createClaudeTranslator,
+} from "../claude-agent.mjs";
+import {
   compileDirtyPathPolicy,
   evaluateDirtyPaths,
 } from "../path-policy.mjs";
@@ -93,8 +99,9 @@ if (flags.has("--help")) {
 Options:
   --repo <path>             override repository
   --base-ref <git-ref>      override pinned base ref
-  --model <model>           Codex model for both lanes
-  --reasoning <level>       Codex reasoning effort for both lanes
+  --agent <codex|claude>    the agent that does the task (default codex; claude = Claude Code, print mode)
+  --model <model>           model for both lanes (claude: default ${CLAUDE_DEFAULT_MODEL})
+  --reasoning <level>       reasoning effort for both lanes
   --repetitions <n>         default from config, or 1
   --cache-modes <list>      cold,warm
   --task <id>               select one task
@@ -128,8 +135,13 @@ const { config, path: configPath } = loadConfig(configFlag);
 const benchmarkEngines = [...config.engines];
 config.repo = resolve(flags.get("--repo") ?? config.repo);
 config.base_ref = flags.get("--base-ref") ?? config.base_ref ?? "HEAD";
-config.model = flags.get("--model") ?? config.model;
-config.reasoning = flags.get("--reasoning") ?? config.reasoning;
+config.agent = flags.get("--agent") ?? config.agent ?? "codex";
+if (!["codex", "claude"].includes(config.agent)) fail("--agent accepts only codex,claude");
+// The configs name a Codex model; the Claude agent has its own default.
+config.model =
+  flags.get("--model") ?? (config.agent === "claude" ? config.claude_model ?? CLAUDE_DEFAULT_MODEL : config.model);
+config.reasoning =
+  flags.get("--reasoning") ?? (config.agent === "claude" ? config.claude_effort ?? config.reasoning : config.reasoning);
 config.repetitions = positiveInteger(flags.get("--repetitions") ?? config.repetitions ?? 1, "repetitions");
 config.seed = integer(flags.get("--seed") ?? config.seed ?? 20260718, "seed");
 config.timeout_ms = positiveInteger(flags.get("--timeout-ms") ?? config.timeout_ms ?? 1_800_000, "timeout-ms");
@@ -422,6 +434,7 @@ if (oneShot.enabled) {
     agent_verification_policy: "skip",
     agent_verification_policy_text: agentVerificationPolicy(),
     settings: {
+      agent: config.agent,
       model: config.model ?? null,
       reasoning: config.reasoning ?? null,
       repetitions: 1,
@@ -469,6 +482,7 @@ const report = existingReport ?? {
   worktree_root: worktreeRoot,
   cache_root: cacheRoot,
   settings: {
+    agent: config.agent,
     model: config.model ?? null,
     reasoning: config.reasoning ?? null,
     repetitions: config.repetitions,
@@ -1089,7 +1103,7 @@ async function executeRun(run, context) {
     writeFileSync(join(runDir, "prompt.txt"), prompt);
     maintenanceMs = performance.now() - maintenanceStarted;
     modelInvocations += 1;
-    agentResult = await runCodex({
+    agentResult = await (context.config.agent === "claude" ? runClaude : runCodex)({
       cacheMode: run.cacheMode,
       config: context.config,
       engine,
@@ -1549,6 +1563,79 @@ async function runCodex({ cacheMode, config, engine, prompt, runDir, worktree })
   return {
     duration_ms: outcome.durationMs,
     error: outcome.error ? errorMessage(outcome.error) : null,
+    exit_code: outcome.exitCode,
+    telemetry,
+    timed_out: outcome.timedOut,
+  };
+}
+
+/**
+ * The same turn with Claude Code. Its events are kept as they come in
+ * `claude.jsonl` and written, translated to the events of Codex, in
+ * `codex.jsonl`, which every reader of a run already knows.
+ */
+async function runClaude({ cacheMode, config, engine, prompt, runDir, worktree }) {
+  if (engine.kind !== "vanilla" && engine.kind !== "gcal") {
+    throw new Error(`the claude agent has no ${engine.kind} lane: only vanilla and gcal`);
+  }
+  const rawStream = createWriteStream(join(runDir, "claude.jsonl"), { encoding: "utf8" });
+  const jsonlStream = createWriteStream(join(runDir, "codex.jsonl"), { encoding: "utf8" });
+  const stderrStream = createWriteStream(join(runDir, "codex.stderr.log"), { encoding: "utf8" });
+  const schema = JSON.parse(
+    readFileSync(join(workspace, "tools", "agent-bench", "final-response.schema.json"), "utf8"),
+  );
+  const args = claudeArgs({ model: config.model, effort: config.reasoning, schema });
+
+  const telemetry = emptyTelemetry();
+  const translator = createClaudeTranslator();
+  const measured = spawnWithTimer(() =>
+    spawn(resolveExecutable(config.claude_command ?? "claude"), args, {
+      cwd: worktree,
+      env: claudeEnvironment(
+        processEnvironment(engine, {
+          ...(engine.agentEnvironment ?? {}),
+          AGENT_BENCH_CACHE_MODE: cacheMode,
+        }),
+      ),
+      shell: false,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    }),
+  );
+  const child = measured.child;
+  const completion = createAgentCompletionController({
+    child,
+    timeoutMs: config.timeout_ms,
+    elapsedMs: measured.elapsedMs,
+    terminate: killProcessTree,
+  });
+  child.stderr.pipe(stderrStream);
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  let lastAgentMessage = null;
+  lines.on("line", (raw) => {
+    rawStream.write(`${raw}\n`);
+    for (const event of translator.push(raw)) {
+      const line = JSON.stringify(event);
+      jsonlStream.write(`${line}\n`);
+      accumulateCodexLine(telemetry, line);
+      lastAgentMessage = agentMessageText(line) ?? lastAgentMessage;
+      if (isAgentProtocolCompletionLine(line)) completion.markProtocolCompleted();
+    }
+  });
+  child.stdin.end(prompt);
+
+  const outcome = await completion.outcome;
+  lines.close();
+  await Promise.all([
+    closeWritableStream(rawStream),
+    closeWritableStream(jsonlStream),
+    closeWritableStream(stderrStream),
+  ]);
+  if (lastAgentMessage !== null) writeFileSync(join(runDir, "final-message.txt"), lastAgentMessage);
+  const error = outcome.error ? errorMessage(outcome.error) : translator.state.error;
+  return {
+    duration_ms: outcome.durationMs,
+    error: error ?? null,
     exit_code: outcome.exitCode,
     telemetry,
     timed_out: outcome.timedOut,
