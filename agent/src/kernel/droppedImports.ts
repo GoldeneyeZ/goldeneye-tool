@@ -25,7 +25,7 @@ export interface DroppedImport {
   uses: Array<{ line: number; text: string }>;
 }
 
-function languageOf(filePath: string): Language | undefined {
+export function languageOf(filePath: string): Language | undefined {
   if (/\.pyi?$/i.test(filePath)) return "python";
   if (/\.(?:[cm]?[jt]s|[jt]sx)$/i.test(filePath)) return "script";
   if (/\.(?:java|kt|kts)$/i.test(filePath)) return "java";
@@ -37,7 +37,7 @@ function languageOf(filePath: string): Language | undefined {
  * The lines with comments removed and the text of string literals blanked, so
  * that a word in prose is not read as code. Positions of what remains are kept.
  */
-function codeOnly(lines: string[], language: Language): string[] {
+export function codeOnly(lines: string[], language: Language): string[] {
   const masked: string[] = [];
   // The closing mark of a comment or string left open by an earlier line.
   let open: string | undefined;

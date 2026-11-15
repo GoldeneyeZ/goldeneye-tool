@@ -1,5 +1,6 @@
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { codeOnly, languageOf } from "../kernel/droppedImports.js";
 import { BINARY_FILE, pathsPattern, separatePaths, undoubled, undoubledNote } from "./exploreCode.js";
 import type { CodeContext, ReadResult } from "./readCode.js";
 
@@ -11,6 +12,11 @@ export const REPLACE_MAX_LINES_SHOWN = 80;
 const REPLACE_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const REPLACE_LINE_MAX_CHARS = 200;
 const OUTSIDE_FILES_SHOWN = 40;
+const PROSE_PLACES_SHOWN = 12;
+/** A pattern that is one word, with or without `\b` around it. */
+const BARE_WORD = /^(?:\\b)?[A-Za-z_$][\w$]*(?:\\b)?$/;
+/** A line that names a module: there a word inside a string is code. */
+const IMPORT_LINE = /^\s*(?:import|from|export|use|pub use|mod|package|include)\b|\b(?:require|import)\s*\(/;
 
 export interface ReplaceRequest {
   pattern: string;
@@ -30,6 +36,8 @@ interface FileChange {
   count: number;
   /** Changed lines as they are after the replacement; empty when lines were added or removed. */
   lines: Array<{ line: number; text: string }>;
+  /** Changed lines that had the pattern only in a comment or in a string. */
+  prose: number[];
 }
 
 export async function replaceText(context: CodeContext, request: ReplaceRequest): Promise<ReadResult> {
@@ -208,7 +216,31 @@ async function replaceInFile(
           text === oldLines[index] ? [] : [{ line: index + 1, text: text.replace(/\r$/, "") }],
         )
       : [];
-  return { filePath, count, lines };
+  return { filePath, count, lines, prose: proseLines(filePath, oldLines, lines, expression, request) };
+}
+
+/**
+ * A word given as the whole pattern is replaced in comments and strings too.
+ * That is wanted for a rename and wrong for a word of prose, and only the
+ * reader can tell: name the lines where the word was not code.
+ */
+function proseLines(
+  filePath: string,
+  oldLines: string[],
+  changed: Array<{ line: number }>,
+  expression: RegExp,
+  request: ReplaceRequest,
+): number[] {
+  const language = languageOf(filePath);
+  if (request.literal || language === undefined || !BARE_WORD.test(request.pattern)) return [];
+  const code = codeOnly(
+    oldLines.map((text) => text.replace(/\r$/, "")),
+    language,
+  );
+  const once = new RegExp(expression.source, expression.flags.replace("g", ""));
+  return changed
+    .map(({ line }) => line)
+    .filter((line) => !once.test(code[line - 1] ?? "") && !IMPORT_LINE.test(oldLines[line - 1] ?? ""));
 }
 
 function render(changes: FileChange[], dryRun: boolean): string {
@@ -233,5 +265,14 @@ function render(changes: FileChange[], dryRun: boolean): string {
     }
   }
   if (hidden > 0) output.push(`# ... ${hidden} more changed lines not shown: git diff`);
+  const prose = changes.flatMap((change) => change.prose.map((line) => `${change.filePath}:${line}`));
+  if (prose.length > 0) {
+    const more = prose.length > PROSE_PLACES_SHOWN ? `, +${prose.length - PROSE_PLACES_SHOWN} more` : "";
+    output.push(
+      `# the pattern is a bare word: ${prose.length} of these lines had it only in a comment or a string (${prose
+        .slice(0, PROSE_PLACES_SHOWN)
+        .join(", ")}${more}); ${dryRun ? "match the call (name\\() to leave them" : "undo the ones that are prose"}`,
+    );
+  }
   return output.join("\n");
 }

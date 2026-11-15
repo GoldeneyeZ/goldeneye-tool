@@ -225,6 +225,12 @@ Behaviors worth knowing:
 - `grep` without `--limit` shows 30 matching symbols, or all of them when the
   backend returned every match (up to 90).
 - `callers` says when the text search read fewer places than matched.
+- `callers` prints a declaration, a call or a JSX element that goes on over the
+  next lines to its end (its arguments, its props), counts `<Name` as a use of
+  a component, and answers for all of two or three callables that share a name
+  (a wrapper and what it wraps) instead of asking which one.
+- `replace` given one bare word as pattern names the changed lines that had the
+  word only in a comment or a string, import lines excepted.
 - A lookup that finds nothing (`# not found`, `# ambiguous`, `# no text
   matches`) exits 0, so a chain written with `&&` goes on; `replace`, `check`
   and backend failures keep a failing exit status.
@@ -283,6 +289,9 @@ environment, or secret access. Run only code you trust.
 Reusable agent workflow assets live in `workflow/`:
 
 - `workflow/AGENTS.md`
-- `workflow/skills/goldeneye-code-agent-layer/SKILL.md`
+- `workflow/skills/goldeneye-code-agent-layer/SKILL.md`: what every task uses,
+  kept under 3.6 kB because it is sent with every model call
+- `workflow/skills/goldeneye-code-agent-layer/reference.md`: the workflow API,
+  project state and command details, read on need
 - `workflow/skills/goldeneye-code-agent-layer/agents/openai.yaml`
 - `workflow/skills/goldeneye-code-agent-layer/agents/claude.md`

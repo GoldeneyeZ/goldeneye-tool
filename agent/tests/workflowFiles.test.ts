@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
+  goldeneyeGcalReferenceMd,
   goldeneyeGcalSkillMd,
   workflowAgentsMd,
   workflowFiles,
@@ -21,21 +22,23 @@ describe("workflow files", () => {
     expect(goldeneyeGcalSkillMd).toContain("name: goldeneye-code-agent-layer");
     expect(goldeneyeGcalSkillMd).toContain("One `gcal` call should answer one question");
     expect(goldeneyeGcalSkillMd).toContain("Never search only to learn an");
+    expect(goldeneyeGcalSkillMd).toContain("Never ask the same question through both");
     expect(goldeneyeGcalSkillMd).toContain("Stop discovery once the task has enough evidence");
     expect(goldeneyeGcalSkillMd).toContain("Do not run `gcal status` or `gcal --help` unless blocked");
-    expect(goldeneyeGcalSkillMd).toContain("chain different");
+    expect(goldeneyeGcalSkillMd).toContain("chain commands in one shell call");
     expect(goldeneyeGcalSkillMd).toContain("gcal workflow --file <path>");
     expect(goldeneyeGcalSkillMd).toContain("gcal workflow --js <code>");
-    expect(goldeneyeGcalSkillMd).toContain("true async JavaScript body");
-    expect(goldeneyeGcalSkillMd).toContain("loop, branch");
-    expect(goldeneyeGcalSkillMd).toContain("`gcal.search`, `gcal.select`, `gcal.source`");
-    expect(goldeneyeGcalSkillMd).toContain("`gcal.trySource`");
-    expect(goldeneyeGcalSkillMd).toContain("Return a JSON-serializable value");
-    expect(goldeneyeGcalSkillMd).toContain("not a security sandbox");
+  });
+
+  it("stays short: it is sent with every model call", () => {
+    // 10,356 bytes before 2026-11-15; the rest moved to reference.md and to
+    // the output of the commands.
+    expect(Buffer.byteLength(goldeneyeGcalSkillMd)).toBeLessThan(3600);
+    expect(goldeneyeGcalSkillMd).toContain("`reference.md`");
   });
 
   it("documents every discovery command and locator form", () => {
-    for (const command of ["get", "search", "callers", "callees", "impls", "grep", "arch"]) {
+    for (const command of ["get", "search", "callers", "callees", "impls", "grep", "replace", "check", "arch"]) {
       expect(goldeneyeGcalSkillMd).toContain(`\`gcal ${command}`);
     }
     expect(goldeneyeGcalSkillMd).toContain("`Billing.java:42`");
@@ -43,19 +46,30 @@ describe("workflow files", () => {
     expect(goldeneyeGcalSkillMd).toContain("a member outline above 500 lines");
     expect(goldeneyeGcalSkillMd).toContain("-C 8");
     expect(goldeneyeGcalSkillMd).toContain("call graph plus text references");
+    expect(goldeneyeGcalSkillMd).toContain("after edits in more than one file");
   });
 
-  it("explains project selection, index freshness, and the daemon", () => {
-    expect(goldeneyeGcalSkillMd).toContain("Run `gcal init` once from the project root");
-    expect(goldeneyeGcalSkillMd).toContain("$HOME/.gcal/projects.json");
-    expect(goldeneyeGcalSkillMd).toContain("most specific registered ancestor");
-    expect(goldeneyeGcalSkillMd).toContain("an optional explicit override");
-    expect(goldeneyeGcalSkillMd).toContain("`GCAL_HOME`");
-    expect(goldeneyeGcalSkillMd).toContain("`gcal index` only indexes");
-    expect(goldeneyeGcalSkillMd).toContain("reads the working tree");
-    expect(goldeneyeGcalSkillMd).toContain("on-demand local GCAL daemon");
-    expect(goldeneyeGcalSkillMd).toContain("`GCAL_DAEMON_IDLE=10m`");
-    expect(goldeneyeGcalSkillMd).toContain("`GCAL_DAEMON=off`");
-    expect(goldeneyeGcalSkillMd).toContain("always bypasses the daemon");
+  it("keeps the workflow API in the reference", () => {
+    expect(goldeneyeGcalReferenceMd).toContain("true async JavaScript body");
+    expect(goldeneyeGcalReferenceMd).toContain("loop, branch");
+    expect(goldeneyeGcalReferenceMd).toContain("`gcal.search`, `gcal.select`, `gcal.source`");
+    expect(goldeneyeGcalReferenceMd).toContain("`gcal.trySource`");
+    expect(goldeneyeGcalReferenceMd).toContain("Return a JSON-serializable value");
+    expect(goldeneyeGcalReferenceMd).toContain("not a security sandbox");
+  });
+
+  it("explains project selection, index freshness, and the daemon in the reference", () => {
+    expect(goldeneyeGcalSkillMd).toContain("run `gcal init` once from the project");
+    expect(goldeneyeGcalReferenceMd).toContain("Run `gcal init` once from the project root");
+    expect(goldeneyeGcalReferenceMd).toContain("$HOME/.gcal/projects.json");
+    expect(goldeneyeGcalReferenceMd).toContain("most specific registered ancestor");
+    expect(goldeneyeGcalReferenceMd).toContain("an optional explicit override");
+    expect(goldeneyeGcalReferenceMd).toContain("`GCAL_HOME`");
+    expect(goldeneyeGcalReferenceMd).toContain("`gcal index` only indexes");
+    expect(goldeneyeGcalReferenceMd).toContain("reads the working tree");
+    expect(goldeneyeGcalReferenceMd).toContain("on-demand local GCAL daemon");
+    expect(goldeneyeGcalReferenceMd).toContain("`GCAL_DAEMON_IDLE=10m`");
+    expect(goldeneyeGcalReferenceMd).toContain("`GCAL_DAEMON=off`");
+    expect(goldeneyeGcalReferenceMd).toContain("always bypasses the daemon");
   });
 });

@@ -73,6 +73,37 @@ describe("replacing text", () => {
     expect(await read("assets/logo.png")).toBe("native.");
   });
 
+  it("names the lines where a bare word was only in a comment or a string", async () => {
+    const context = await createContext({
+      "src/store.py": [
+        "from lod.naming import scoped",
+        "# scoped names keep the seed",
+        "value = scoped(seed)",
+        'label = "scoped by seed"',
+        'both = scoped("scoped")',
+        "",
+      ].join("\n"),
+    });
+
+    const bare = await replaceText(context, { ...request, pattern: "\\bscoped\\b", replacement: "seeded", paths: ["src"] });
+    expect(bare.text).toBe(
+      [
+        "# replaced 6 occurrences in 1 file",
+        "src/store.py\t6",
+        "  1: from lod.naming import seeded",
+        "  2: # seeded names keep the seed",
+        "  3: value = seeded(seed)",
+        '  4: label = "seeded by seed"',
+        '  5: both = seeded("seeded")',
+        "# the pattern is a bare word: 2 of these lines had it only in a comment or a string (src/store.py:2, src/store.py:4); undo the ones that are prose",
+      ].join("\n"),
+    );
+
+    // A pattern that says where the word is code has nothing to report.
+    const call = await replaceText(context, { ...request, pattern: "\\bseeded\\(", replacement: "scoped(", paths: ["src"] });
+    expect(call.text).not.toContain("bare word");
+  });
+
   it("supports capture groups, literal text, the whole repository and a dry run", async () => {
     const context = await createContext({
       "a.py": "from lod.pairs import canonical\nvalue = canonical(row)\n",

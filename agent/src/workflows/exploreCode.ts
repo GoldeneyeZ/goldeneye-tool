@@ -51,6 +51,11 @@ const SEARCH_OVERFETCH_FACTOR = 3;
 const SEARCH_BACKEND_MAX = 200;
 const TEXT_LINES_SHOWN = 5;
 const CALL_LINES_EACH = 4;
+/** Lines printed after the first line of a call or a JSX element that goes on: its arguments, its props. */
+const CALL_SITE_MORE_LINES = 8;
+const CALL_SITE_MORE_TOTAL = 120;
+/** A name that few symbols share is answered for all of them: asking which one costs a whole call. */
+const SAME_NAME_ANSWERED = 3;
 // The backend ranks before it truncates; over-fetch so definitions and
 // production code can be ordered first locally.
 const TEXT_OVERFETCH_FACTOR = 3;
@@ -465,8 +470,9 @@ export async function references(
   request: ReferenceRequest,
 ): Promise<ReadResult> {
   let resolved = await moduleUsers(context, request, false);
+  const sameName: { nodes?: GraphNode[] } = {};
   if (resolved === undefined) {
-    resolved = await resolveTarget(context, request.target);
+    resolved = await resolveTarget(context, request.target, undefined, sameName);
     // `native.ts` reads as a member access first, and as a file when no symbol answers.
     if (!Array.isArray(resolved)) resolved = (await moduleUsers(context, request, true)) ?? resolved;
   }
@@ -497,10 +503,14 @@ export async function references(
     const name = resolved[0].name;
     // A callable is used where it is called; a type or a value wherever it is named.
     const isValue = VALUE_LABELS.has(resolved[0].label);
+    // A component is called where it is written as an element: `<Name`.
+    const isComponent = /\.[jt]sx$/i.test(resolved[0].filePath) && /^[A-Z]/.test(name);
     const pattern =
       isTypeNode(resolved[0]) || isValue
         ? `\\b${escapeForRegex(name)}\\b`
-        : `\\b${escapeForRegex(name)}\\s*\\(`;
+        : isComponent
+          ? `(?:\\b${escapeForRegex(name)}\\s*\\(|<${escapeForRegex(name)}\\b)`
+          : `\\b${escapeForRegex(name)}\\s*\\(`;
     // The bare name of a value is often an ordinary word in prose and
     // configuration; its uses are in code of its own language.
     const pathFilter = isValue ? sameLanguageFilter(resolved[0].filePath) : undefined;
@@ -636,10 +646,26 @@ export async function references(
   // A place that uses the symbol on a few lines shows each of them: an edit is
   // written from these lines, and one line of text for three would hide two.
   const printed: FileRow[] = [];
+  // A call written over several lines is shown to its end: the arguments and
+  // the props are what an edit of the call changes, and a row that stops at
+  // `<EditorPane` is followed by a read of the lines below it.
+  const listed = new Set(shown.flatMap((row) => row.lines.map((line) => `${row.filePath}:${line}`)));
+  let moreLeft = request.depth === 1 ? CALL_SITE_MORE_TOTAL : 0;
+  const rest = async (row: ReferenceRow, line: number): Promise<void> => {
+    if (moreLeft <= 0) return;
+    const fileLines = await context.reader.lines(row.filePath);
+    if (fileLines === undefined) return;
+    for (const next of restOfCallSite(fileLines, line, resolved[0].name)) {
+      if (listed.has(`${row.filePath}:${next}`)) continue;
+      moreLeft -= 1;
+      printed.push({ filePath: row.filePath, fields: [String(next), "", "", await lineText(context, row.filePath, next)] });
+    }
+  };
   for (const row of shown) {
     const kind = row.hop > 1 ? `hop ${row.hop}` : row.kind;
     if (row.lines.length < 2 || row.lines.length > CALL_LINES_EACH) {
       printed.push({ filePath: row.filePath, fields: [lineList(row.lines), row.name, kind, row.callSite] });
+      if (row.lines.length === 1) await rest(row, row.lines[0]);
       continue;
     }
     for (const [index, line] of row.lines.entries()) {
@@ -647,9 +673,17 @@ export async function references(
         filePath: row.filePath,
         fields: [String(line), row.name, index === 0 ? kind : "", await lineText(context, row.filePath, line)],
       });
+      await rest(row, line);
     }
   }
   const lines = [
+    ...(sameName.nodes === undefined
+      ? []
+      : [
+          `# ${resolved[0].name} names ${sameName.nodes.length} symbols (${sameName.nodes
+            .map((node) => `${node.filePath}:${node.startLine}`)
+            .join(", ")}); the callers of all of them follow, path:line names one`,
+        ]),
     `# callers of ${target}: ${ordered.length} (graph ${ordered.length - textOnly}, text-only ${textOnly})`,
     ...imported,
     ...groupByFile(printed),
@@ -1435,10 +1469,45 @@ function graphRow(context: CodeContext, edge: TraceEdge): ReferenceRow {
   };
 }
 
+/**
+ * The lines that finish a call or a JSX element opened on `line`: the
+ * arguments or the props below it. None when the line is complete, and none
+ * when the call does not close within a few lines: a callback body is not a
+ * call site.
+ */
+export function restOfCallSite(fileLines: string[], line: number, name: string): number[] {
+  const first = fileLines[line - 1] ?? "";
+  const escaped = escapeForRegex(name);
+  const at = first.search(new RegExp(`(?<![\\w$])${escaped}\\s*\\(|<${escaped}(?![\\w$])`));
+  if (at < 0) return [];
+  const element = first[at] === "<";
+  const more: number[] = [];
+  let depth = 0;
+  const last = Math.min(fileLines.length, line + CALL_SITE_MORE_LINES);
+  for (let number = line; number <= last; number += 1) {
+    const text = (number === line ? first.slice(at) : fileLines[number - 1]).replace(
+      /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g,
+      '""',
+    );
+    if (number > line) more.push(number);
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+      if ("([{".includes(character)) depth += 1;
+      else if (")]}".includes(character)) depth -= 1;
+      const closed = element
+        ? character === ">" && depth === 0 && text[index - 1] !== "="
+        : character === ")" && depth === 0;
+      if (closed) return more;
+    }
+  }
+  return [];
+}
+
 async function resolveTarget(
   context: CodeContext,
   target: string,
   meant?: (node: GraphNode) => boolean,
+  sameName?: { nodes?: GraphNode[] },
 ): Promise<GraphNode[] | ReadResult> {
   // `File.ext:42` is the symbol that contains that line.
   const place = parseLocator(target);
@@ -1460,6 +1529,23 @@ async function resolveTarget(
   if (resolution.kind === "ambiguous") {
     const only = meant === undefined ? [] : resolution.nodes.filter(meant);
     if (only.length === 1) return only;
+    const nodes = resolution.nodes;
+    if (
+      sameName !== undefined &&
+      nodes.length <= SAME_NAME_ANSWERED &&
+      // Callables only: a wrapper and what it wraps, a re-export. Constants of
+      // one name in three files are three things.
+      nodes.every(
+        (node) =>
+          node.name === nodes[0].name &&
+          node.label === nodes[0].label &&
+          !isTypeNode(node) &&
+          !VALUE_LABELS.has(node.label),
+      )
+    ) {
+      sameName.nodes = nodes;
+      return nodes;
+    }
     return {
       ok: false,
       text: [

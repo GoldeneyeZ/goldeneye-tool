@@ -16,6 +16,7 @@ import {
   implementations,
   pathsPattern,
   references,
+  restOfCallSite,
   sameLanguageFilter,
   searchCode,
   separatePaths,
@@ -1126,6 +1127,95 @@ describe("exploring code", () => {
     expect(await callersOf("native.ts.native")).toBe("# callers of native: 0 (graph 0, text-only 0)");
     expect(await callersOf(`${BILLING}:7`)).toBe("# callers of Billing.charge: 0 (graph 0, text-only 0)");
     expect(await callersOf(`${BILLING}:2`)).toBe(`# not found: no indexed symbol at ${BILLING}:2`);
+  });
+
+  it("answers for a component two files declare, with each element written to its end", async () => {
+    const component = (filePath: string, name: string, startLine: number, endLine: number): GraphNode => ({
+      qualifiedName: [PROJECT, ...filePath.replace(/\.tsx$/, "").split("/"), name].join("."),
+      name,
+      label: "Function",
+      filePath,
+      startLine,
+      endLine,
+    });
+    const stack = component("src/editor/EditorStack.tsx", "EditorStack", 1, 3);
+    const lazy = component("src/editor/EditorStackLazy.tsx", "EditorStack", 1, 3);
+    const surface = component("src/app/Surface.tsx", "Surface", 2, 12);
+    const patterns: string[] = [];
+    const context = await createContext({
+      extraNodes: [stack, lazy, surface],
+      textFor: (pattern) => {
+        patterns.push(pattern);
+        return pattern.includes("<EditorStack") ? [textHit(surface, [5])] : undefined;
+      },
+    });
+    const files: Record<string, string> = {
+      [stack.filePath]: "export function EditorStack({ tabs, onCloseTab }: Props) {\n  return null;\n}\n",
+      [lazy.filePath]: "export function EditorStack(props: Props) {\n  return <Inner {...props} />;\n}\n",
+      [surface.filePath]: [
+        'import { EditorStack } from "@/editor";',
+        "export function Surface({ tabs, close }: Props) {",
+        "  return (",
+        "    <div>",
+        "      <EditorStack",
+        "        tabs={tabs}",
+        "        onCloseTab={() => close(1)}",
+        "      />",
+        "    </div>",
+        "  );",
+        "}",
+        "",
+      ].join("\n"),
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(context.root, dirname(path)), { recursive: true });
+      await writeFile(join(context.root, path), text);
+    }
+
+    const result = await references(context, backend({}), {
+      target: "EditorStack",
+      depth: 1,
+      limit: 20,
+      includeText: true,
+    });
+    expect(patterns).toContain("(?:\\bEditorStack\\s*\\(|<EditorStack\\b)");
+    const lines = result.text.split("\n");
+    expect(lines[0]).toBe(
+      "# EditorStack names 2 symbols (src/editor/EditorStack.tsx:1, src/editor/EditorStackLazy.tsx:1); the callers of all of them follow, path:line names one",
+    );
+    expect(lines[1]).toBe("# callers of EditorStack: 1 (graph 0, text-only 1)");
+    expect(result.text).toContain(
+      [
+        "src/app/Surface.tsx",
+        "  5\tSurface\ttext\t      <EditorStack",
+        "  6\t\t\t        tabs={tabs}",
+        "  7\t\t\t        onCloseTab={() => close(1)}",
+        "  8\t\t\t      />",
+      ].join("\n"),
+    );
+  });
+
+  it("ends a call site where the call closes, and leaves a callback body out", () => {
+    const lines = [
+      "validate_weights(",
+      "    weights,",
+      '    symbols=["A)", "B"],',
+      ")",
+      "run(async () => {",
+      ...Array.from({ length: 12 }, () => "  step();"),
+      "});",
+      "const total = sum(a, b);",
+      "<Pane path={path} />",
+      "<Pane",
+      "  onClose={() => close()}",
+      ">",
+    ];
+    expect(restOfCallSite(lines, 1, "validate_weights")).toEqual([2, 3, 4]);
+    expect(restOfCallSite(lines, 5, "run")).toEqual([]);
+    expect(restOfCallSite(lines, 19, "sum")).toEqual([]);
+    expect(restOfCallSite(lines, 20, "Pane")).toEqual([]);
+    expect(restOfCallSite(lines, 21, "Pane")).toEqual([22, 23]);
+    expect(restOfCallSite(lines, 2, "validate_weights")).toEqual([]);
   });
 
   it("lists the text uses of a symbol the call graph does not hold", async () => {
